@@ -17,6 +17,10 @@ export default function CommissionRequestsView() {
   const myEmail = profile?.email || '';
 
   const [requests, setRequests] = useState<any[]>([]);
+  const [paymentRequestId, setPaymentRequestId] = useState<string | null>(null);
+  const [paymentFile, setPaymentFile] = useState<File | null>(null);
+  const [paymentNote, setPaymentNote] = useState('');
+  const [paymentBusy, setPaymentBusy] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
   const [providers, setProviders] = useState<{ email: string; name: string }[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
@@ -71,7 +75,8 @@ export default function CommissionRequestsView() {
     return map;
   }, [products]);
 
-  // Obtener solicitudes APROBADAS (ya pagadas)
+  // Solo PAGADO o pagos históricos APROBADO descuentan del saldo.
+  // Las aprobaciones nuevas se registran con PAGADO tras el comprobante.
   const approvedRequests = useMemo(() => {
     return requests.filter(r => 
       r.vendor_email?.toLowerCase() === myEmail.toLowerCase() && 
@@ -248,58 +253,36 @@ export default function CommissionRequestsView() {
     if (showForm && role === 'VENDEDOR') await loadBalanceOrders();
   };
 
-  const approve = async (id: string) => {
-    const note = prompt('Nota de aprobación (opcional):') || '';
-    
-    const { data: requestData, error: fetchError } = await supabase
-      .from('commission_requests')
-      .select('*')
-      .eq('id', id)
-      .single();
-    
-    if (fetchError || !requestData) {
-      toast.error('No se pudo obtener la solicitud');
-      return;
+  const approve = (id: string) => {
+    setPaymentRequestId(id);
+    setPaymentFile(null);
+    setPaymentNote('');
+  };
+
+  const confirmPayment = async () => {
+    if (!paymentRequestId || !paymentFile) { toast.error('Adjuntá el comprobante'); return; }
+    if (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(paymentFile.type) || paymentFile.size > 8 * 1024 * 1024) {
+      toast.error('Usá JPG, PNG, WEBP o PDF de hasta 8 MB'); return;
     }
-    
-    const metaJson = requestData.meta_json as any;
-    const orderIds = metaJson?.order_ids || [];
-    
-    const { error: updateError } = await supabase
-      .from('commission_requests')
-      .update({
-        status: 'APROBADO',
-        approved_at: new Date().toISOString(),
-        approved_by: myEmail,
-        approval_note: note,
-      })
-      .eq('id', id);
-    
-    if (updateError) {
-      toast.error(updateError.message);
-      return;
-    }
-    
-    if (orderIds.length > 0) {
-      const { error: ordersError } = await supabase
-        .from('orders')
-        .update({
-          commission_paid: true,
-          paid_at: new Date().toISOString(),
-        })
-        .in('id', orderIds);
-      
-      if (ordersError) {
-        toast.error(`Error al marcar órdenes: ${ordersError.message}`);
-      } else {
-        toast.success(`Solicitud aprobada y ${orderIds.length} comisión(es) marcada(s) como PAGADO`);
-      }
-    } else {
-      toast.success('Solicitud aprobada (sin órdenes asociadas)');
-    }
-    
-    await load();
-    if (showForm && role === 'VENDEDOR') await loadBalanceOrders();
+    setPaymentBusy(true);
+    const ext = paymentFile.type === 'application/pdf' ? 'pdf' : paymentFile.type === 'image/png' ? 'png' : paymentFile.type === 'image/webp' ? 'webp' : 'jpg';
+    const path = `commission/${paymentRequestId}/${crypto.randomUUID()}.${ext}`;
+    try {
+      const { error: uploadError } = await supabase.storage.from('financial-receipts').upload(path, paymentFile, { upsert: false, contentType: paymentFile.type });
+      if (uploadError) throw uploadError;
+      const { error } = await supabase.rpc('pay_commission_with_receipt', { p_request_id: paymentRequestId, p_receipt_path: path, p_note: paymentNote });
+      if (error) throw error;
+      toast.success('Comisión pagada con comprobante registrado');
+      setPaymentRequestId(null); setPaymentFile(null);
+      await load();
+    } catch (error: any) { toast.error(error?.message || 'No se pudo registrar el pago'); }
+    finally { setPaymentBusy(false); }
+  };
+
+  const viewReceipt = async (path: string) => {
+    const { data, error } = await supabase.storage.from('financial-receipts').createSignedUrl(path, 60);
+    if (error || !data?.signedUrl) { toast.error(error?.message || 'No se pudo abrir el comprobante'); return; }
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
   };
 
   const reject = async (id: string) => {
@@ -323,6 +306,20 @@ export default function CommissionRequestsView() {
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Solicitud de comisiones</h3>
+      {paymentRequestId && (role === 'ADMIN' || role === 'PROVEEDOR') && (
+        <div className="rounded-xl border border-border p-4 mb-4 space-y-3 bg-card">
+          <h4 className="font-bold">💳 Aprobar y registrar pago</h4>
+          <p className="text-sm">Solicitud: {paymentRequestId} — Gs {nf(Number(requests.find(r => r.id === paymentRequestId)?.amount_gs || 0))}</p>
+          <label className="text-sm block">Comprobante de transferencia (obligatorio)
+            <input className="app-input w-full mt-1" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={e => setPaymentFile(e.target.files?.[0] || null)} />
+          </label>
+          <textarea className="app-input w-full" placeholder="Nota (opcional)" value={paymentNote} onChange={e => setPaymentNote(e.target.value)} />
+          <div className="flex gap-2">
+            <button className="nav-btn active" disabled={!paymentFile || paymentBusy} onClick={confirmPayment}>{paymentBusy ? 'Guardando...' : '✅ Confirmar pago'}</button>
+            <button className="nav-btn" disabled={paymentBusy} onClick={() => setPaymentRequestId(null)}>Cancelar</button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
         <div className="kpi-card">
@@ -444,17 +441,18 @@ export default function CommissionRequestsView() {
                 <td className="text-xs whitespace-nowrap">{r.range_from} — {r.range_to}</td>
                 <td className="text-xs max-w-[200px] truncate">{r.note || r.approval_note || '—'}</td>
                 <td>
-                  <span className={`badge-status ${r.status === 'APROBADO' ? 'badge-entregado' : r.status === 'RECHAZADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>
+                  <span className={`badge-status ${(r.status === 'APROBADO' || r.status === 'PAGADO') ? 'badge-entregado' : r.status === 'RECHAZADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>
                     {r.status}
                   </span>
                 </td>
                 <td>
                   {r.status === 'PENDIENTE' && (role === 'ADMIN' || role === 'PROVEEDOR') && (
                     <div className="flex gap-1">
-                      <button className="nav-btn active text-xs !py-1 !px-2" onClick={() => approve(r.id)}>✅ Aprobar</button>
+                      <button className="nav-btn active text-xs !py-1 !px-2" onClick={() => approve(r.id)}>💳 Aprobar y pagar</button>
                       <button className="nav-btn text-xs !py-1 !px-2" onClick={() => reject(r.id)}>❌ Rechazar</button>
                     </div>
                   )}
+                  {r.receipt_path && <button className="nav-btn text-xs !py-1 !px-2" onClick={() => viewReceipt(r.receipt_path)}>📄 Ver comprobante</button>}
                   {r.status !== 'PENDIENTE' && (
                     <span className="text-[10px] text-muted-foreground">{r.approved_by || r.rejected_by || ''}</span>
                   )}
