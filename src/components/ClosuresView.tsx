@@ -1,3 +1,4 @@
+import ClosurePaymentsPanel from './ClosurePaymentsPanel';
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -2846,6 +2847,7 @@ export default function ClosuresView() {
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Cierres</h3>
+      {canViewRendicion && <ClosurePaymentsPanel role={myRole} email={myEmail} userId={profile?.user_id} />}
 
       {(isDelivery || isAdmin || isSupplier) && (
         <div className="flex flex-wrap gap-2 mb-4 border-b border-border pb-3">
