@@ -1,0 +1,16 @@
+{
+  "name": "Aplicación de ventas",
+  "short_name": "Ventas",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "/push-icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
