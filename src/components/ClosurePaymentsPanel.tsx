@@ -13,6 +13,8 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
   const [catalogError, setCatalogError] = useState('');
   const [history, setHistory] = useState<any[]>([]);
   const [orderList, setOrderList] = useState<any[]>([]);
+  const [deliveryFees, setDeliveryFees] = useState<any[]>([]);
+  const [feesLoadError, setFeesLoadError] = useState('');
   const [destination, setDestination] = useState('');
   const [checked, setChecked] = useState<string[]>([]);
   const [files, setFiles] = useState<Record<string, File | null>>({});
@@ -41,7 +43,15 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     // La cuenta que se edita la determina bankTarget, no necesariamente el usuario conectado.
     // No sobrescribimos el formulario durante recargas para evitar perder cambios sin guardar.
     if (isDelivery) {
-      const { data, error } = await supabase.from('orders').select('id,order_number,status,status2,total_gs,delivery_fee_gs,provider_emails_list,delivery_settled,assigned_delivery')
+      const feeResult = await (supabase as any).rpc('get_closure_delivery_fees');
+      if (feeResult.error) {
+        setFeesLoadError('No se pudieron consultar las tarifas: ' + feeResult.error.message);
+        setDeliveryFees([]);
+      } else {
+        setFeesLoadError('');
+        setDeliveryFees(feeResult.data || []);
+      }
+      const { data, error } = await supabase.from('orders').select('id,order_number,status,status2,total_gs,delivery_fee_gs,city,provider_emails_list,delivery_settled,assigned_delivery')
         .ilike('assigned_delivery', email).in('status',['ENTREGADO','ENCOMIENDA ENTREGADA']).eq('delivery_settled',false).limit(300);
       if (error) toast.error(error.message);
       setOrderList(data || []);
@@ -75,7 +85,17 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     return value.split(/[,;\s]+/).map(x => x.trim()).includes(String(destEmail).toLowerCase());
   }), [orderList, dest, destEmail]);
   const selected = eligible.filter(o=>checked.includes(o.id));
-  const total = selected.reduce((s,o)=>s+Math.max(0,Number(o.total_gs||0)-Number(o.delivery_fee_gs||0)),0);
+  const normalize = (value: unknown) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  const feeInfo = (o: any) => {
+    const frozen = Number(o.delivery_fee_gs || 0);
+    if (frozen > 0) return { fee: frozen, configured: true };
+    const matching = deliveryFees.find(f => normalize(f.delivery_email) === normalize(o.assigned_delivery) && normalize(f.city) === normalize(o.city));
+    return { fee: Number(matching?.fee_gs || 0), configured: Boolean(matching) };
+  };
+  const selectedMissingRate = selected.some(o => !feeInfo(o).configured);
+  const collected = selected.reduce((sum,o)=>sum+(o.status === 'ENTREGADO' ? Number(o.total_gs || 0) : 0),0);
+  const deliveryPay = selected.reduce((sum,o)=>sum+feeInfo(o).fee,0);
+  const total = collected - deliveryPay;
   const saveBank = async () => {
     const targets = role === 'ADMIN'
       ? [...new Set([...selectedProviderIds, ...(applyToOwnAccount && userId ? [userId] : [])])]
@@ -113,6 +133,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
   };
   const submit = async () => {
     if (!destination || !selected.length) {toast.error('Elegí destinatario y pedidos');return;}
+    if (feesLoadError || selectedMissingRate || total < 0) {toast.error('Revisá las tarifas del delivery y el saldo del cierre antes de continuar');return;}
     setBusy(true);
     try {
       const {data:id,error}=await supabase.rpc('submit_delivery_closure',{p_destination_user_id:destination,p_order_ids:selected.map(o=>o.id)});
@@ -184,10 +205,18 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
       {!catalogError && catalog.length === 0 && <p className="text-sm text-amber-700">No hay cuentas bancarias disponibles para este delivery. El administrador debe guardar la cuenta para uno o más proveedores en Cierres y verificar que el proveedor esté aprobado.</p>}
       {dest && <div className="bg-muted rounded-lg p-3 text-sm">Titular: <b>{dest.bank_holder}</b> · Banco: <b>{dest.bank_name}</b> · Cuenta: <b>{dest.bank_account}</b> · CI: {dest.bank_ci||'—'} · Alias: <b>{dest.bank_alias||'—'}</b>{dest.bank_alias && <button className="nav-btn ml-2" onClick={()=>{void navigator.clipboard.writeText(dest.bank_alias);toast.success('Alias copiado')}}>Copiar alias</button>}</div>}
       {dest && eligible.length === 0 && <p className="text-sm text-amber-700">No se encontraron pedidos entregados, sin rendir y asignados a este delivery para la cuenta seleccionada. Revisá la asignación del delivery y el destinatario de los pedidos.</p>}
-      <div className="max-h-56 overflow-auto space-y-1">{eligible.map(o=><label key={o.id} className="flex gap-2 items-center text-sm p-2 border-b border-border"><input type="checkbox" checked={checked.includes(o.id)} onChange={e=>setChecked(old=>e.target.checked?[...old,o.id]:old.filter(x=>x!==o.id))}/><span className="flex-1">#{o.order_number||o.id.slice(0,8)}</span><b>Gs {nf(Math.max(0,Number(o.total_gs||0)-Number(o.delivery_fee_gs||0)))}</b></label>)}</div>
-      <p className="font-bold">Seleccionados: {selected.length} — Total estimado: Gs {nf(total)}</p>
-      <p className="text-xs text-muted-foreground">El servidor validará y calculará nuevamente los importes antes de registrar. Los pedidos de encomienda requieren verificar las tarifas configuradas.</p>
-      <button className="nav-btn active" disabled={busy||!selected.length} onClick={submit}>Finalicé mi día — Crear cierre</button>
+      <div className="max-h-56 overflow-auto space-y-1">{eligible.map(o=><label key={o.id} className="flex gap-2 items-center text-sm p-2 border-b border-border"><input type="checkbox" checked={checked.includes(o.id)} onChange={e=>setChecked(old=>e.target.checked?[...old,o.id]:old.filter(x=>x!==o.id))}/><span className="flex-1">#{o.order_number||o.id.slice(0,8)}</span><b>Gs {nf((o.status === 'ENTREGADO' ? Number(o.total_gs || 0) : 0) - feeInfo(o).fee)}</b></label>)}</div>
+      <div className="bg-muted rounded-lg p-3 space-y-1 text-sm">
+        <p>Pedidos seleccionados: <b>{selected.length}</b></p>
+        <p>Total cobrado en pedidos normales: <b>Gs {nf(collected)}</b></p>
+        <p>Ganancia del delivery (incluye encomiendas): <b>− Gs {nf(deliveryPay)}</b></p>
+        <p className="text-lg font-extrabold">Monto NETO a transferir: Gs {nf(Math.max(0,total))}</p>
+      </div>
+      {feesLoadError && <p className="text-sm text-red-600">{feesLoadError}</p>}
+      {selectedMissingRate && <p className="text-sm text-red-600">Hay pedidos sin tarifa de delivery registrada para su ciudad. Configurá las tarifas antes del cierre.</p>}
+      {total < 0 && <p className="text-sm text-red-600">La ganancia del delivery supera el dinero cobrado. Este cierre no puede generar una transferencia negativa; debe resolverse el saldo con administración.</p>}
+      <p className="text-xs text-muted-foreground">El servidor verificará las tarifas y volverá a calcular el neto. Encomiendas entregadas: no se suma el precio del pedido; solo se descuenta su tarifa.</p>
+      <button className="nav-btn active" disabled={busy||!selected.length||Boolean(feesLoadError)||selectedMissingRate||total<0} onClick={submit}>Finalicé mi día — Crear cierre</button>
     </section>}
     <section id="closure-submissions" className="space-y-3"><h5 className="font-bold">📋 Cierres y comprobantes</h5>
       {history.length===0 && <p className="text-sm text-muted-foreground">Sin cierres registrados.</p>}
