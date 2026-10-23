@@ -17,7 +17,8 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
   const [busy, setBusy] = useState(false);
   const emptyBank = {bank_name:'',bank_account:'',bank_holder:'',bank_ci:'',bank_alias:''};
   const [bank, setBank] = useState(emptyBank);
-  const [bankTarget, setBankTarget] = useState(userId || '');
+  const [selectedProviderIds, setSelectedProviderIds] = useState<string[]>([]);
+  const [applyToOwnAccount, setApplyToOwnAccount] = useState(false);
   const [providers, setProviders] = useState<{user_id:string; name:string|null; email:string|null}[]>([]);
   const canOwnBank = role === 'ADMIN' || role === 'PROVEEDOR';
   const isDelivery = role === 'DELIVERY';
@@ -39,7 +40,6 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     }
   };
   useEffect(()=>{ if (email) void reload(); },[email,role,userId]);
-  useEffect(()=>{ setBankTarget(userId || ''); },[userId]);
   useEffect(()=>{
     if(role !== 'ADMIN') return;
     (async()=>{
@@ -53,9 +53,10 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     })();
   },[role]);
   useEffect(()=>{
-    const saved=banks.find(b=>b.owner_user_id===bankTarget);
-    setBank(saved?{bank_name:saved.bank_name||'',bank_account:saved.bank_account||'',bank_holder:saved.bank_holder||'',bank_ci:saved.bank_ci||'',bank_alias:saved.bank_alias||''}:emptyBank);
-  },[bankTarget,banks]);
+    if (role !== 'PROVEEDOR' || !userId) return;
+    const saved = banks.find(b=>b.owner_user_id===userId);
+    setBank(saved ? {bank_name:saved.bank_name||'',bank_account:saved.bank_account||'',bank_holder:saved.bank_holder||'',bank_ci:saved.bank_ci||'',bank_alias:saved.bank_alias||''} : {bank_name:'',bank_account:'',bank_holder:'',bank_ci:'',bank_alias:''});
+  },[role,userId,banks]);
   const dest = banks.find(b=>b.owner_user_id===destination);
   const destEmail = profiles.find(p=>p.user_id===destination)?.email || '';
   const eligible = useMemo(()=>orderList.filter(o=>{
@@ -79,11 +80,31 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
   const selected = eligible.filter(o=>checked.includes(o.id));
   const total = selected.reduce((s,o)=>s+Math.max(0,Number(o.total_gs||0)-Number(o.delivery_fee_gs||0)),0);
   const saveBank = async () => {
-    if (!bankTarget || !bank.bank_name.trim() || !bank.bank_account.trim() || !bank.bank_holder.trim()) { toast.error('Seleccioná destinatario y completá banco, cuenta y titular'); return; }
-    if (role !== 'ADMIN' && bankTarget !== userId) { toast.error('No podés editar otra cuenta'); return; }
+    const targets = role === 'ADMIN'
+      ? [...new Set([...selectedProviderIds, ...(applyToOwnAccount && userId ? [userId] : [])])]
+      : userId ? [userId] : [];
+    if (!targets.length || !bank.bank_name.trim() || !bank.bank_account.trim() || !bank.bank_holder.trim()) {
+      toast.error('Seleccioná al menos un destinatario y completá banco, cuenta y titular'); return;
+    }
+    if (role !== 'ADMIN' && (targets.length !== 1 || targets[0] !== userId)) {
+      toast.error('Solo podés editar tu propia cuenta'); return;
+    }
+    if (role === 'ADMIN' && targets.some(id => id !== userId && !providers.some(p => p.user_id === id))) {
+      toast.error('Uno de los proveedores seleccionados no está autorizado'); return;
+    }
+    if (role === 'ADMIN' && !confirm(`¿Guardar estos mismos datos bancarios para ${targets.length} destinatario(s)? Esto reemplazará los datos previos de los seleccionados.`)) return;
     setBusy(true);
-    const { error } = await supabase.from('closure_bank_destinations').upsert({owner_user_id:bankTarget,...bank,updated_at:new Date().toISOString()});
-    setBusy(false); if (error) toast.error(error.message); else { toast.success('Cuenta bancaria guardada'); reload(); }
+    try {
+      const now = new Date().toISOString();
+      // Se guardan los mismos datos para cada destinatario seleccionado.
+      // No se alteran las cuentas de los proveedores no seleccionados.
+      const rows = targets.map(owner_user_id => ({ owner_user_id, ...bank, updated_at: now }));
+      const { error } = await supabase.from('closure_bank_destinations').upsert(rows, { onConflict: 'owner_user_id' });
+      if (error) throw error;
+      toast.success(`Datos bancarios guardados para ${targets.length} destinatario(s)`);
+      await reload();
+    } catch (e: any) { toast.error(e.message || 'No se pudieron guardar los datos bancarios'); }
+    finally { setBusy(false); }
   };
   const upload = async (folder: string, id: string, file: File) => {
     if (!validFile(file)) throw new Error('Archivo inválido: JPG, PNG, WEBP o PDF hasta 8 MB');
@@ -131,14 +152,30 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     <div className="flex justify-between items-center"><h4 className="font-extrabold">🏦 Rendiciones con comprobantes</h4><button className="nav-btn" onClick={reload}>Actualizar</button></div>
     {canOwnBank && <section className="border border-border rounded-xl p-3 space-y-2">
       <h5 className="font-bold">{role==='ADMIN'?'Configurar cuentas bancarias para cierres':'Mis datos bancarios para recibir cierres'}</h5>
-      {role==='ADMIN' && <div className="space-y-1"><label className="block text-sm font-semibold" htmlFor="bank-target">¿A quién se asignan estos datos bancarios?</label><select id="bank-target" className="app-input w-full" value={bankTarget} onChange={e=>setBankTarget(e.target.value)}><option value={userId||''}>Mi cuenta (administrador)</option>{providers.filter(p=>p.user_id!==userId).map(p=><option key={p.user_id} value={p.user_id}>{p.name||p.email||'Proveedor'} — {p.email}</option>)}</select><p className="text-xs text-muted-foreground">Seleccioná el proveedor antes de guardar; sus datos serán visibles para el delivery al elegir ese destinatario.</p></div>}
+      {role==='ADMIN' && <div className="space-y-2">
+        <p className="block text-sm font-semibold">Seleccioná todos los proveedores que utilizarán esta cuenta bancaria</p>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="nav-btn" onClick={()=>setSelectedProviderIds(providers.map(p=>p.user_id))}>Seleccionar todos ({providers.length})</button>
+          <button type="button" className="nav-btn" onClick={()=>setSelectedProviderIds([])}>Limpiar selección</button>
+        </div>
+        <div className="max-h-52 overflow-y-auto border border-border rounded-lg p-2 space-y-2">
+          {providers.length===0 && <p className="text-xs text-muted-foreground">No se encontraron proveedores aprobados.</p>}
+          {providers.map(p=><label key={p.user_id} className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={selectedProviderIds.includes(p.user_id)} onChange={e=>setSelectedProviderIds(old=>e.target.checked?[...old,p.user_id]:old.filter(id=>id!==p.user_id))}/>
+            <span>{p.name||p.email||'Proveedor'} {p.email ? `— ${p.email}` : ''}</span>
+          </label>)}
+        </div>
+        <label className="flex gap-2 items-center text-sm"><input type="checkbox" checked={applyToOwnAccount} onChange={e=>setApplyToOwnAccount(e.target.checked)}/> Incluir también mi cuenta de administrador</label>
+        <p className="text-xs text-muted-foreground">Seleccionados: {selectedProviderIds.length + (applyToOwnAccount ? 1 : 0)}. Se copiarán los mismos datos a cada proveedor marcado. Los proveedores no seleccionados conservan su cuenta actual.</p>
+        <p className="text-xs text-amber-700">Si un proveedor ya tiene datos bancarios guardados, al confirmar serán reemplazados por estos datos.</p>
+      </div>}
       <div className="grid md:grid-cols-2 gap-2">
         <input className="app-input" placeholder="Banco" value={bank.bank_name} onChange={e=>setBank({...bank,bank_name:e.target.value})}/>
         <input className="app-input" placeholder="Número de cuenta" value={bank.bank_account} onChange={e=>setBank({...bank,bank_account:e.target.value})}/>
         <input className="app-input" placeholder="Titular" value={bank.bank_holder} onChange={e=>setBank({...bank,bank_holder:e.target.value})}/>
         <input className="app-input" placeholder="CI del titular (opcional)" value={bank.bank_ci} onChange={e=>setBank({...bank,bank_ci:e.target.value})}/>
         <input className="app-input" placeholder="Alias bancario (opcional)" value={bank.bank_alias} onChange={e=>setBank({...bank,bank_alias:e.target.value})}/>
-      </div><button className="nav-btn active" disabled={busy} onClick={saveBank}>{role==='ADMIN'?'Guardar cuenta asignada':'Guardar mis datos bancarios'}</button>
+      </div><button className="nav-btn active" disabled={busy} onClick={saveBank}>{role==='ADMIN'?`Guardar para ${selectedProviderIds.length + (applyToOwnAccount ? 1 : 0)} destinatario(s)`:'Guardar mis datos bancarios'}</button>
     </section>}
     {isDelivery && <section className="border border-border rounded-xl p-3 space-y-3">
       <h5 className="font-bold">🚚 Finalicé mi día — Hacer cierre</h5>
