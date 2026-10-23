@@ -68,7 +68,7 @@ CREATE POLICY financial_receipt_insert ON storage.objects FOR INSERT TO authenti
    AND (public.has_role(auth.uid(),'ADMIN') OR (public.has_role(auth.uid(),'PROVEEDOR') AND lower(c.provider_email) = lower((SELECT email FROM public.profiles WHERE user_id=auth.uid()))))
  )) OR (split_part(name,'/',1)='closure' AND EXISTS(
    SELECT 1 FROM public.delivery_closure_submissions s WHERE s.id::text=split_part(name,'/',2) AND s.delivery_user_id=auth.uid()
- ))))
+ )))
 );
 DROP POLICY IF EXISTS financial_receipt_select ON storage.objects;
 CREATE POLICY financial_receipt_select ON storage.objects FOR SELECT TO authenticated USING (
