@@ -9,6 +9,8 @@ type Props = { role: string; email: string; userId?: string };
 export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
   const [banks, setBanks] = useState<any[]>([]);
   const [profiles, setProfiles] = useState<any[]>([]);
+  const [catalog, setCatalog] = useState<any[]>([]);
+  const [catalogError, setCatalogError] = useState('');
   const [history, setHistory] = useState<any[]>([]);
   const [orderList, setOrderList] = useState<any[]>([]);
   const [destination, setDestination] = useState('');
@@ -30,6 +32,12 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     ]);
     if (b.error || h.error) { toast.error(b.error?.message || h.error?.message || 'Ejecutá primero el SQL adjunto'); return; }
     setBanks(b.data || []); setProfiles(p.data || []); setHistory(h.data || []);
+    if (isDelivery) {
+      const { data: options, error: optionError } = await (supabase as any).rpc('list_delivery_bank_destinations');
+      setCatalog(options || []);
+      setCatalogError(optionError ? 'No se pudieron consultar las cuentas bancarias: ' + optionError.message : '');
+      if (optionError) toast.error('No se pudieron cargar las cuentas de destino. Ejecutá el SQL de esta actualización.');
+    }
     // La cuenta que se edita la determina bankTarget, no necesariamente el usuario conectado.
     // No sobrescribimos el formulario durante recargas para evitar perder cambios sin guardar.
     if (isDelivery) {
@@ -57,26 +65,15 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     const saved = banks.find(b=>b.owner_user_id===userId);
     setBank(saved ? {bank_name:saved.bank_name||'',bank_account:saved.bank_account||'',bank_holder:saved.bank_holder||'',bank_ci:saved.bank_ci||'',bank_alias:saved.bank_alias||''} : {bank_name:'',bank_account:'',bank_holder:'',bank_ci:'',bank_alias:''});
   },[role,userId,banks]);
-  const dest = banks.find(b=>b.owner_user_id===destination);
-  const destEmail = profiles.find(p=>p.user_id===destination)?.email || '';
-  const eligible = useMemo(()=>orderList.filter(o=>{
-    const owner = profiles.find(p=>p.user_id===destination);
-    if (!owner) return false;
-    if (owner.email.toLowerCase()===email.toLowerCase()) return false;
-    const normalized = String(o.provider_emails_list || '').toLowerCase();
-    // Un ADMIN puede centralizar el cobro; proveedor solo recibe pedidos propios.
-    return profiles.some(p=>p.user_id===destination && banks.some(b=>b.owner_user_id===destination)) &&
-      (owner.user_id===destination && (owner.email.toLowerCase()===destEmail.toLowerCase())) &&
-      (normalized.includes(destEmail.toLowerCase()) || bankRoles[owner.user_id]==='ADMIN');
-  }),[orderList,profiles,banks,destination,destEmail]);
-  const [bankRoles,setBankRoles] = useState<Record<string,string>>({});
-  useEffect(()=>{
-    const ids=banks.map(b=>b.owner_user_id);
-    if (!ids.length) return;
-    supabase.from('user_roles').select('user_id,role').in('user_id',ids).eq('approved',true).then(({data})=>{
-      setBankRoles(Object.fromEntries((data||[]).map(x=>[x.user_id,x.role])));
-    });
-  },[banks]);
+  const dest = catalog.find(b=>b.owner_user_id===destination);
+  const destEmail = dest?.owner_email || ''; 
+  const eligible = useMemo(() => orderList.filter(o => {
+    if (!dest || !destEmail) return false;
+    if (dest.owner_role === 'ADMIN') return true;
+    // Para un proveedor, mostrar solamente pedidos donde aparece su email.
+    const value = String(o.provider_emails_list || '').toLowerCase();
+    return value.split(/[,;\s]+/).map(x => x.trim()).includes(String(destEmail).toLowerCase());
+  }), [orderList, dest, destEmail]);
   const selected = eligible.filter(o=>checked.includes(o.id));
   const total = selected.reduce((s,o)=>s+Math.max(0,Number(o.total_gs||0)-Number(o.delivery_fee_gs||0)),0);
   const saveBank = async () => {
@@ -181,9 +178,12 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
       <h5 className="font-bold">🚚 Finalicé mi día — Hacer cierre</h5>
       <p className="text-xs text-muted-foreground">Seleccioná a quién rendir. Solo aparecerán pedidos entregados y sin rendir correspondientes a ese destinatario.</p>
       <select className="app-input w-full" value={destination} onChange={e=>{setDestination(e.target.value);setChecked([])}}>
-        <option value="">Seleccionar cuenta de destino</option>{banks.filter(b=>profiles.some(p=>p.user_id===b.owner_user_id && p.email.toLowerCase()!==email.toLowerCase())).map(b=><option key={b.owner_user_id} value={b.owner_user_id}>{profiles.find(p=>p.user_id===b.owner_user_id)?.name || profiles.find(p=>p.user_id===b.owner_user_id)?.email} — {b.bank_name}</option>)}
+        <option value="">Seleccionar cuenta de destino</option>{catalog.map(b=><option key={b.owner_user_id} value={b.owner_user_id}>{b.owner_name || b.owner_email || 'Destinatario'} ({b.owner_role === 'ADMIN' ? 'Administrador' : 'Proveedor'}) — {b.bank_name}</option>)}
       </select>
+      {catalogError && <p className="text-sm text-red-600" role="alert">{catalogError}</p>}
+      {!catalogError && catalog.length === 0 && <p className="text-sm text-amber-700">No hay cuentas bancarias disponibles para este delivery. El administrador debe guardar la cuenta para uno o más proveedores en Cierres y verificar que el proveedor esté aprobado.</p>}
       {dest && <div className="bg-muted rounded-lg p-3 text-sm">Titular: <b>{dest.bank_holder}</b> · Banco: <b>{dest.bank_name}</b> · Cuenta: <b>{dest.bank_account}</b> · CI: {dest.bank_ci||'—'} · Alias: <b>{dest.bank_alias||'—'}</b>{dest.bank_alias && <button className="nav-btn ml-2" onClick={()=>{void navigator.clipboard.writeText(dest.bank_alias);toast.success('Alias copiado')}}>Copiar alias</button>}</div>}
+      {dest && eligible.length === 0 && <p className="text-sm text-amber-700">No se encontraron pedidos entregados, sin rendir y asignados a este delivery para la cuenta seleccionada. Revisá la asignación del delivery y el destinatario de los pedidos.</p>}
       <div className="max-h-56 overflow-auto space-y-1">{eligible.map(o=><label key={o.id} className="flex gap-2 items-center text-sm p-2 border-b border-border"><input type="checkbox" checked={checked.includes(o.id)} onChange={e=>setChecked(old=>e.target.checked?[...old,o.id]:old.filter(x=>x!==o.id))}/><span className="flex-1">#{o.order_number||o.id.slice(0,8)}</span><b>Gs {nf(Math.max(0,Number(o.total_gs||0)-Number(o.delivery_fee_gs||0)))}</b></label>)}</div>
       <p className="font-bold">Seleccionados: {selected.length} — Total estimado: Gs {nf(total)}</p>
       <p className="text-xs text-muted-foreground">El servidor validará y calculará nuevamente los importes antes de registrar. Los pedidos de encomienda requieren verificar las tarifas configuradas.</p>
