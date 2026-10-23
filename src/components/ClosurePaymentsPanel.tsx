@@ -17,6 +17,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
   const [feesLoadError, setFeesLoadError] = useState('');
   const [destination, setDestination] = useState('');
   const [checked, setChecked] = useState<string[]>([]);
+  const [newReceipt, setNewReceipt] = useState<File | null>(null);
   const [files, setFiles] = useState<Record<string, File | null>>({});
   const [busy, setBusy] = useState(false);
   const emptyBank = {bank_name:'',bank_account:'',bank_holder:'',bank_ci:'',bank_alias:''};
@@ -132,16 +133,33 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     return path;
   };
   const submit = async () => {
-    if (!destination || !selected.length) {toast.error('Elegí destinatario y pedidos');return;}
-    if (feesLoadError || selectedMissingRate || total < 0) {toast.error('Revisá las tarifas del delivery y el saldo del cierre antes de continuar');return;}
+    if (!destination || !selected.length) { toast.error('Elegí destinatario y pedidos'); return; }
+    if (!newReceipt || !validFile(newReceipt)) { toast.error('Debés adjuntar un comprobante JPG, PNG, WEBP o PDF de hasta 8 MB'); return; }
+    if (feesLoadError || selectedMissingRate || total < 0) { toast.error('Revisá las tarifas del delivery y el saldo del cierre antes de continuar'); return; }
+    if (!userId) { toast.error('No se identificó la cuenta del delivery'); return; }
+    if (!confirm(`¿Confirmás que transferiste Gs ${nf(total)} al destinatario seleccionado y querés enviar el cierre con este comprobante?`)) return;
     setBusy(true);
+    let stagedPath = '';
     try {
-      const {data:id,error}=await supabase.rpc('submit_delivery_closure',{p_destination_user_id:destination,p_order_ids:selected.map(o=>o.id)});
-      if(error) throw error;
-      toast.success('Cierre creado. Adjuntá el comprobante abajo para enviarlo a revisión.');
-      setChecked([]);await reload();
-      document.getElementById('closure-submissions')?.scrollIntoView({behavior:'smooth'});
-    } catch(e:any){toast.error(e.message || 'No se creó el cierre');}finally{setBusy(false);}
+      const ext = newReceipt.type === 'application/pdf' ? 'pdf' : newReceipt.type.split('/')[1];
+      stagedPath = `closure-pending/${userId}/${crypto.randomUUID()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from('financial-receipts').upload(stagedPath, newReceipt, { contentType: newReceipt.type, upsert: false });
+      if (uploadError) throw uploadError;
+      const { error } = await (supabase as any).rpc('submit_delivery_closure_with_receipt', {
+        p_destination_user_id: destination,
+        p_order_ids: selected.map(o => o.id),
+        p_receipt_path: stagedPath,
+      });
+      if (error) throw error;
+      toast.success('Cierre enviado con comprobante. Queda pendiente de aprobación.');
+      setChecked([]); setNewReceipt(null);
+      await reload();
+      document.getElementById('closure-submissions')?.scrollIntoView({ behavior: 'smooth' });
+    } catch (e: any) {
+      toast.error(e.message || 'No se pudo enviar el cierre. Revisá el comprobante y volvé a intentar.');
+      // Un archivo subido sin cierre queda aislado; no se vincula a ninguna rendición.
+      // Si se repite la operación se usa una ruta nueva para evitar sobrescrituras.
+    } finally { setBusy(false); }
   };
   const attach = async (id:string) => {
     const file=files[id];if(!file){toast.error('Elegí un comprobante');return;}
@@ -198,7 +216,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     {isDelivery && <section className="border border-border rounded-xl p-3 space-y-3">
       <h5 className="font-bold">🚚 Finalicé mi día — Hacer cierre</h5>
       <p className="text-xs text-muted-foreground">Seleccioná a quién rendir. Solo aparecerán pedidos entregados y sin rendir correspondientes a ese destinatario.</p>
-      <select className="app-input w-full" value={destination} onChange={e=>{setDestination(e.target.value);setChecked([])}}>
+      <select className="app-input w-full" value={destination} onChange={e=>{setDestination(e.target.value);setChecked([]);setNewReceipt(null)}}>
         <option value="">Seleccionar cuenta de destino</option>{catalog.map(b=><option key={b.owner_user_id} value={b.owner_user_id}>{b.owner_name || b.owner_email || 'Destinatario'} ({b.owner_role === 'ADMIN' ? 'Administrador' : 'Proveedor'}) — {b.bank_name}</option>)}
       </select>
       {catalogError && <p className="text-sm text-red-600" role="alert">{catalogError}</p>}
@@ -216,7 +234,16 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
       {selectedMissingRate && <p className="text-sm text-red-600">Hay pedidos sin tarifa de delivery registrada para su ciudad. Configurá las tarifas antes del cierre.</p>}
       {total < 0 && <p className="text-sm text-red-600">La ganancia del delivery supera el dinero cobrado. Este cierre no puede generar una transferencia negativa; debe resolverse el saldo con administración.</p>}
       <p className="text-xs text-muted-foreground">El servidor verificará las tarifas y volverá a calcular el neto. Encomiendas entregadas: no se suma el precio del pedido; solo se descuenta su tarifa.</p>
-      <button className="nav-btn active" disabled={busy||!selected.length||Boolean(feesLoadError)||selectedMissingRate||total<0} onClick={submit}>Finalicé mi día — Crear cierre</button>
+      <div className="rounded-lg border border-border p-3 space-y-2">
+        <label htmlFor="closure-new-receipt" className="block text-sm font-bold">📎 Comprobante de transferencia (obligatorio)</label>
+        <input id="closure-new-receipt" className="block w-full text-sm" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={e=>{
+          const f=e.target.files?.[0]||null;
+          if(f && !validFile(f)){toast.error('Solo JPG, PNG, WEBP o PDF hasta 8 MB');setNewReceipt(null);e.target.value='';return;}
+          setNewReceipt(f);
+        }}/>
+        <p className="text-xs text-muted-foreground">{newReceipt ? `Archivo listo: ${newReceipt.name}` : 'Seleccioná los pedidos, transferí el monto neto y adjuntá tu comprobante antes de finalizar.'}</p>
+      </div>
+      <button className="nav-btn active" disabled={busy||!selected.length||!newReceipt||Boolean(feesLoadError)||selectedMissingRate||total<0} onClick={submit}>{busy?'Enviando cierre...':'✅ Finalicé mi día — Enviar cierre con comprobante'}</button>
     </section>}
     <section id="closure-submissions" className="space-y-3"><h5 className="font-bold">📋 Cierres y comprobantes</h5>
       {history.length===0 && <p className="text-sm text-muted-foreground">Sin cierres registrados.</p>}
