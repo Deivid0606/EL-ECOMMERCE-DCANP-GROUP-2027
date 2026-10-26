@@ -19,7 +19,7 @@ const getStatusStyles = (status: string) => {
   }
 };
 
-type Props = { role: string; email: string; userId?: string };
+type Props = { role: string; email: string; userId?: string; view?: 'pagos' | 'historial' | 'config' };
 
 type ReceiptPreview = {
   url: string;
@@ -27,7 +27,7 @@ type ReceiptPreview = {
   isPdf: boolean;
 };
 
-export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
+export default function ClosurePaymentsPanel({ role, email, userId, view = 'pagos' }: Props) {
   const [banks, setBanks] = useState<any[]>([]);
   const [catalog, setCatalog] = useState<any[]>([]);
   const [catalogError, setCatalogError] = useState('');
@@ -516,7 +516,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
         </div>
       </div>
 
-      {canOwnBank && (
+      {canOwnBank && view === 'config' && (
         <section className="rounded-2xl border border-border bg-card/60 p-4 space-y-4 shadow-sm">
           <div className="flex items-center gap-3 pb-2 border-b border-border">
             <div className="h-10 w-10 rounded-xl bg-blue-500/15 flex items-center justify-center text-lg">🏦</div>
@@ -588,7 +588,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
         </section>
       )}
 
-      {isDelivery && (
+      {isDelivery && view === 'pagos' && (
         <section className="rounded-2xl border border-border bg-card/70 p-4 space-y-4 shadow-sm">
           <div className="flex items-center gap-3 pb-2 border-b border-border">
             <div className="h-10 w-10 rounded-xl bg-emerald-500/15 flex items-center justify-center text-lg">🚚</div>
@@ -743,7 +743,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
         </section>
       )}
 
-      {(isDelivery || role === 'ADMIN') && (
+      {(isDelivery || role === 'ADMIN') && view === 'pagos' && (
         <section className="rounded-2xl border border-border bg-card/60 p-4 space-y-3 shadow-sm">
           <div className="flex items-center gap-3 pb-2 border-b border-border">
             <div className="h-10 w-10 rounded-xl bg-violet-500/15 flex items-center justify-center text-lg">🛟</div>
@@ -772,7 +772,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
         </section>
       )}
 
-      {role === 'ADMIN' && (
+      {role === 'ADMIN' && view === 'pagos' && (
         <section className="rounded-2xl border border-border bg-card/60 p-4 space-y-3 shadow-sm">
           <div className="flex items-center gap-3 pb-2 border-b border-border">
             <div className="h-10 w-10 rounded-xl bg-orange-500/15 flex items-center justify-center text-lg">🔎</div>
@@ -796,7 +796,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
         </section>
       )}
 
-      <section id="closure-submissions" className="rounded-2xl border border-border bg-card/60 p-4 space-y-4 shadow-sm">
+      {view === 'historial' && <section id="closure-submissions" className="rounded-2xl border border-border bg-card/60 p-4 space-y-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3 pb-2 border-b border-border">
           <div>
             <h5 className="font-black text-base">📋 Cierres y comprobantes</h5>
@@ -903,7 +903,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
             </div>
           ))}
         </div>
-      </section>
+      </section>}
 
       {preview && (
         <div className="closure-preview-overlay fixed inset-0 z-[100] bg-black/80 p-4 flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante">
