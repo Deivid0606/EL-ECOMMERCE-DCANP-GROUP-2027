@@ -18,7 +18,6 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
   const [deliveryFees, setDeliveryFees] = useState<any[]>([]);
   const [feesLoadError, setFeesLoadError] = useState('');
   const [destination, setDestination] = useState('');
-  const [checked, setChecked] = useState<string[]>([]);
   const [newReceipt, setNewReceipt] = useState<File | null>(null);
   const [files, setFiles] = useState<Record<string, File | null>>({});
   const [busy, setBusy] = useState(false);
@@ -65,9 +64,19 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
         setDeliveryFees(feeResult.data || []);
       }
       const { data, error } = await supabase.from('orders').select('id,order_number,status,status2,total_gs,delivery_fee_gs,city,provider_emails_list,delivery_settled,assigned_delivery')
-        .ilike('assigned_delivery', email).in('status',['ENTREGADO','ENCOMIENDA ENTREGADA']).eq('delivery_settled',false).limit(300);
-      if (error) toast.error(error.message);
-      setOrderList(data || []);
+        .ilike('assigned_delivery', email).in('status',['ENTREGADO','ENCOMIENDA ENTREGADA']) .eq('delivery_settled',false).range(0,499);
+      if (error) { toast.error(error.message); setOrderList([]); return; }
+      const all = [...(data || [])];
+      let offset = 500;
+      while (all.length === offset && offset < 5000) {
+        const page = await supabase.from('orders').select('id,order_number,status,status2,total_gs,delivery_fee_gs,city,provider_emails_list,delivery_settled,assigned_delivery')
+          .ilike('assigned_delivery', email).in('status',['ENTREGADO','ENCOMIENDA ENTREGADA']).eq('delivery_settled',false).range(offset, offset+499);
+        if (page.error) { toast.error('No se pudieron cargar todos los pedidos: '+page.error.message); setOrderList([]); return; }
+        all.push(...(page.data || []));
+        if ((page.data || []).length < 500) break;
+        offset += 500;
+      }
+      setOrderList(all);
     }
   };
   useEffect(()=>{ if (email) void reload(); },[email,role,userId]);
@@ -97,7 +106,8 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     const value = String(o.provider_emails_list || '').toLowerCase();
     return value.split(/[,;\s]+/).map(x => x.trim()).includes(String(destEmail).toLowerCase());
   }), [orderList, dest, destEmail]);
-  const selected = eligible.filter(o=>checked.includes(o.id));
+  // Regla obligatoria: se incluyen TODOS los pedidos elegibles del destinatario.
+  const selected = eligible;
   const normalize = (value: unknown) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
   const feeInfo = (o: any) => {
     const frozen = Number(o.delivery_fee_gs || 0);
@@ -105,6 +115,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     const matching = deliveryFees.find(f => normalize(f.delivery_email) === normalize(o.assigned_delivery) && normalize(f.city) === normalize(o.city));
     return { fee: Number(matching?.fee_gs || 0), configured: Boolean(matching) };
   };
+  const orderLimitReached = orderList.length >= 5000;
   const selectedMissingRate = selected.some(o => !feeInfo(o).configured);
   const collected = selected.reduce((sum,o)=>sum+(o.status === 'ENTREGADO' ? Number(o.total_gs || 0) : 0),0);
   const deliveryPay = selected.reduce((sum,o)=>sum+feeInfo(o).fee,0);
@@ -164,7 +175,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
       if (error) throw error;
       await supabase.from('delivery_closure_recovery' as any).update({status:'COMPLETADO',last_error:null}).eq('id',draft.id);
       toast.success('Cierre registrado correctamente. Pendiente de aprobación.');
-      setChecked([]); setNewReceipt(null); await reload();
+      setNewReceipt(null); await reload();
     } catch(e:any) {
       await supabase.from('delivery_closure_recovery' as any).update({last_error:e.message||'Error desconocido'}).eq('id',draft.id);
       toast.error('Cierre NO registrado: '+(e.message||'Error desconocido'));
@@ -172,9 +183,9 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     } finally {setBusy(false);}
   };
   const submit = async () => {
-    if (!destination || !selected.length) { toast.error('Elegí destinatario y pedidos'); return; }
+    if (!destination || !selected.length) { toast.error('Seleccioná un proveedor que tenga pedidos entregados pendientes de rendición'); return; }
     if (!newReceipt || !validFile(newReceipt)) { toast.error('Adjuntá un comprobante válido de hasta 8 MB'); return; }
-    if (feesLoadError || selectedMissingRate || total < 0) { toast.error('Revisá las tarifas y el saldo del cierre'); return; }
+    if (feesLoadError || selectedMissingRate || total < 0 || orderLimitReached) { toast.error('Revisá las tarifas y el saldo del cierre'); return; }
     if (!userId) { toast.error('No se identificó tu usuario'); return; }
     if (!confirm(`¿Confirmás que transferiste Gs ${nf(total)} al destinatario seleccionado?`)) return;
     setBusy(true);
@@ -201,7 +212,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
       }
       await supabase.from('delivery_closure_recovery' as any).update({status:'COMPLETADO',last_error:null}).eq('id',(draft as any).id);
       toast.success('Cierre registrado con comprobante, pendiente de aprobación.');
-      setChecked([]);setNewReceipt(null);await reload();
+      setNewReceipt(null);await reload();
     } catch(e:any) {
       toast.error('No se registró el cierre: '+(e.message||'Error desconocido')+'. Revisá Recuperación de cierres antes de volver a subir el archivo.');
       await reload();
@@ -261,21 +272,22 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     </section>}
     {isDelivery && <section className="border border-border rounded-xl p-3 space-y-3">
       <h5 className="font-bold">🚚 Finalicé mi día — Hacer cierre</h5>
-      <p className="text-xs text-muted-foreground">Seleccioná a quién rendir. Solo aparecerán pedidos entregados y sin rendir correspondientes a ese destinatario.</p>
-      <select className="app-input w-full" value={destination} onChange={e=>{setDestination(e.target.value);setChecked([]);setNewReceipt(null)}}>
+      <p className="text-xs text-muted-foreground">Seleccioná el proveedor o destinatario. Todos sus pedidos entregados y pendientes de rendición se incluyen obligatoriamente; no se permiten cierres parciales.</p>
+      <select className="app-input w-full" value={destination} onChange={e=>{setDestination(e.target.value);setNewReceipt(null)}}>
         <option value="">Seleccionar cuenta de destino</option>{catalog.map(b=><option key={b.owner_user_id} value={b.owner_user_id}>{b.owner_name || b.owner_email || 'Destinatario'} ({b.owner_role === 'ADMIN' ? 'Administrador' : 'Proveedor'}) — {b.bank_name}</option>)}
       </select>
       {catalogError && <p className="text-sm text-red-600" role="alert">{catalogError}</p>}
       {!catalogError && catalog.length === 0 && <p className="text-sm text-amber-700">No hay cuentas bancarias disponibles para este delivery. El administrador debe guardar la cuenta para uno o más proveedores en Cierres y verificar que el proveedor esté aprobado.</p>}
       {dest && <div className="bg-muted rounded-lg p-3 text-sm">Titular: <b>{dest.bank_holder}</b> · Banco: <b>{dest.bank_name}</b> · Cuenta: <b>{dest.bank_account}</b> · CI: {dest.bank_ci||'—'} · Alias: <b>{dest.bank_alias||'—'}</b>{dest.bank_alias && <button className="nav-btn ml-2" onClick={()=>{void navigator.clipboard.writeText(dest.bank_alias);toast.success('Alias copiado')}}>Copiar alias</button>}</div>}
       {dest && eligible.length === 0 && <p className="text-sm text-amber-700">No se encontraron pedidos entregados, sin rendir y asignados a este delivery para la cuenta seleccionada. Revisá la asignación del delivery y el destinatario de los pedidos.</p>}
-      <div className="max-h-56 overflow-auto space-y-1">{eligible.map(o=><label key={o.id} className="flex gap-2 items-center text-sm p-2 border-b border-border"><input type="checkbox" checked={checked.includes(o.id)} onChange={e=>setChecked(old=>e.target.checked?[...old,o.id]:old.filter(x=>x!==o.id))}/><span className="flex-1">#{o.order_number||o.id.slice(0,8)}</span><b>Gs {nf((o.status === 'ENTREGADO' ? Number(o.total_gs || 0) : 0) - feeInfo(o).fee)}</b></label>)}</div>
+      <div className="max-h-56 overflow-auto space-y-1">{eligible.map(o=><label key={o.id} className="flex gap-2 items-center text-sm p-2 border-b border-border"><input type="checkbox" checked disabled aria-label="Pedido incluido obligatoriamente"/><span className="flex-1">#{o.order_number||o.id.slice(0,8)}</span><b>Gs {nf((o.status === 'ENTREGADO' ? Number(o.total_gs || 0) : 0) - feeInfo(o).fee)}</b></label>)}</div>
       <div className="bg-muted rounded-lg p-3 space-y-1 text-sm">
-        <p>Pedidos seleccionados: <b>{selected.length}</b></p>
+        <p>Pedidos incluidos obligatoriamente: <b>{selected.length} de {eligible.length}</b></p>
         <p>Total cobrado en pedidos normales: <b>Gs {nf(collected)}</b></p>
         <p>Ganancia del delivery (incluye encomiendas): <b>− Gs {nf(deliveryPay)}</b></p>
         <p className="text-lg font-extrabold">Monto NETO a transferir: Gs {nf(Math.max(0,total))}</p>
       </div>
+      {orderLimitReached && <p className="text-sm text-red-600">Hay demasiados pedidos para procesar de una vez. Contactá al administrador: no se permitirá rendir solo una parte.</p>}
       {feesLoadError && <p className="text-sm text-red-600">{feesLoadError}</p>}
       {selectedMissingRate && <p className="text-sm text-red-600">Hay pedidos sin tarifa de delivery registrada para su ciudad. Configurá las tarifas antes del cierre.</p>}
       {total < 0 && <p className="text-sm text-red-600">La ganancia del delivery supera el dinero cobrado. Este cierre no puede generar una transferencia negativa; debe resolverse el saldo con administración.</p>}
@@ -287,9 +299,9 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
           if(f && !validFile(f)){toast.error('Solo JPG, PNG, WEBP o PDF hasta 8 MB');setNewReceipt(null);e.target.value='';return;}
           setNewReceipt(f);
         }}/>
-        <p className="text-xs text-muted-foreground">{newReceipt ? `Archivo listo: ${newReceipt.name}` : 'Seleccioná los pedidos, transferí el monto neto y adjuntá tu comprobante antes de finalizar.'}</p>
+        <p className="text-xs text-muted-foreground">{newReceipt ? `Archivo listo: ${newReceipt.name}` : 'Todos los pedidos del proveedor están incluidos. Transferí el monto neto y adjuntá el comprobante antes de finalizar.'}</p>
       </div>
-      <button className="nav-btn active" disabled={busy||!selected.length||!newReceipt||Boolean(feesLoadError)||selectedMissingRate||total<0} onClick={submit}>{busy?'Enviando cierre...':'✅ Finalicé mi día — Enviar cierre con comprobante'}</button>
+      <button className="nav-btn active" disabled={busy||!selected.length||!newReceipt||Boolean(feesLoadError)||selectedMissingRate||total<0||orderLimitReached} onClick={submit}>{busy?'Enviando cierre...':'✅ Finalicé mi día — Enviar cierre con comprobante'}</button>
     </section>}
     {(isDelivery || role==='ADMIN') && <section className="border border-border rounded-xl p-3 space-y-2">
       <h5 className="font-bold">🛟 Recuperación de cierres incompletos</h5>
