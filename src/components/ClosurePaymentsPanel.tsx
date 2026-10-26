@@ -12,6 +12,8 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
   const [catalog, setCatalog] = useState<any[]>([]);
   const [catalogError, setCatalogError] = useState('');
   const [history, setHistory] = useState<any[]>([]);
+  const [recovery, setRecovery] = useState<any[]>([]);
+  const [orphans, setOrphans] = useState<any[]>([]);
   const [orderList, setOrderList] = useState<any[]>([]);
   const [deliveryFees, setDeliveryFees] = useState<any[]>([]);
   const [feesLoadError, setFeesLoadError] = useState('');
@@ -35,6 +37,16 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     ]);
     if (b.error || h.error) { toast.error(b.error?.message || h.error?.message || 'Ejecutá primero el SQL adjunto'); return; }
     setBanks(b.data || []); setProfiles(p.data || []); setHistory(h.data || []);
+    if (isDelivery || role === 'ADMIN') {
+      const drafts = await supabase.from('delivery_closure_recovery' as any).select('*').order('created_at', { ascending: false }).limit(100);
+      if (drafts.error) toast.error('No se pudo consultar recuperación de cierres: ' + drafts.error.message);
+      else setRecovery(drafts.data || []);
+    }
+    if (role === 'ADMIN') {
+      const missing = await (supabase as any).rpc('list_unlinked_closure_receipts');
+      if (missing.error) toast.error('No se pudieron consultar comprobantes sin cierre: ' + missing.error.message);
+      else setOrphans(missing.data || []);
+    }
     if (isDelivery) {
       const { data: options, error: optionError } = await (supabase as any).rpc('list_delivery_bank_destinations');
       setCatalog(options || []);
@@ -132,34 +144,68 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     if(error) throw error;
     return path;
   };
-  const submit = async () => {
-    if (!destination || !selected.length) { toast.error('Elegí destinatario y pedidos'); return; }
-    if (!newReceipt || !validFile(newReceipt)) { toast.error('Debés adjuntar un comprobante JPG, PNG, WEBP o PDF de hasta 8 MB'); return; }
-    if (feesLoadError || selectedMissingRate || total < 0) { toast.error('Revisá las tarifas del delivery y el saldo del cierre antes de continuar'); return; }
-    if (!userId) { toast.error('No se identificó la cuenta del delivery'); return; }
-    if (!confirm(`¿Confirmás que transferiste Gs ${nf(total)} al destinatario seleccionado y querés enviar el cierre con este comprobante?`)) return;
+  const finishRecovery = async (draft: any) => {
     setBusy(true);
-    let stagedPath = '';
     try {
-      const ext = newReceipt.type === 'application/pdf' ? 'pdf' : newReceipt.type.split('/')[1];
-      stagedPath = `closure-pending/${userId}/${crypto.randomUUID()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from('financial-receipts').upload(stagedPath, newReceipt, { contentType: newReceipt.type, upsert: false });
-      if (uploadError) throw uploadError;
+      const { data: found, error: findError } = await supabase.from('delivery_closure_submissions').select('id').eq('receipt_path', draft.receipt_path).limit(1);
+      if (findError) throw findError;
+      if (found?.length) {
+        await supabase.from('delivery_closure_recovery' as any).update({status:'COMPLETADO',last_error:null}).eq('id',draft.id);
+        toast.success('Este comprobante ya pertenece a un cierre; no se duplicó.');
+        await reload(); return;
+      }
+      const { data: fileData, error: fileError } = await supabase.storage.from('financial-receipts').info(draft.receipt_path);
+      if (fileError || !fileData) throw new Error('El archivo todavía no está cargado. Volvé a seleccionarlo y realizá un nuevo envío.');
       const { error } = await (supabase as any).rpc('submit_delivery_closure_with_receipt', {
-        p_destination_user_id: destination,
-        p_order_ids: selected.map(o => o.id),
-        p_receipt_path: stagedPath,
+        p_destination_user_id:draft.destination_user_id,
+        p_order_ids:draft.order_ids,
+        p_receipt_path:draft.receipt_path
       });
       if (error) throw error;
-      toast.success('Cierre enviado con comprobante. Queda pendiente de aprobación.');
-      setChecked([]); setNewReceipt(null);
+      await supabase.from('delivery_closure_recovery' as any).update({status:'COMPLETADO',last_error:null}).eq('id',draft.id);
+      toast.success('Cierre registrado correctamente. Pendiente de aprobación.');
+      setChecked([]); setNewReceipt(null); await reload();
+    } catch(e:any) {
+      await supabase.from('delivery_closure_recovery' as any).update({last_error:e.message||'Error desconocido'}).eq('id',draft.id);
+      toast.error('Cierre NO registrado: '+(e.message||'Error desconocido'));
       await reload();
-      document.getElementById('closure-submissions')?.scrollIntoView({ behavior: 'smooth' });
-    } catch (e: any) {
-      toast.error(e.message || 'No se pudo enviar el cierre. Revisá el comprobante y volvé a intentar.');
-      // Un archivo subido sin cierre queda aislado; no se vincula a ninguna rendición.
-      // Si se repite la operación se usa una ruta nueva para evitar sobrescrituras.
-    } finally { setBusy(false); }
+    } finally {setBusy(false);}
+  };
+  const submit = async () => {
+    if (!destination || !selected.length) { toast.error('Elegí destinatario y pedidos'); return; }
+    if (!newReceipt || !validFile(newReceipt)) { toast.error('Adjuntá un comprobante válido de hasta 8 MB'); return; }
+    if (feesLoadError || selectedMissingRate || total < 0) { toast.error('Revisá las tarifas y el saldo del cierre'); return; }
+    if (!userId) { toast.error('No se identificó tu usuario'); return; }
+    if (!confirm(`¿Confirmás que transferiste Gs ${nf(total)} al destinatario seleccionado?`)) return;
+    setBusy(true);
+    try {
+      const ext = newReceipt.type === 'application/pdf' ? 'pdf' : newReceipt.type.split('/')[1];
+      const path = `closure-pending/${userId}/${crypto.randomUUID()}.${ext}`;
+      const {data: draft,error: draftError} = await supabase.from('delivery_closure_recovery' as any).insert({
+        delivery_user_id:userId, destination_user_id:destination,
+        order_ids:selected.map(o=>o.id),receipt_path:path,status:'PREPARADO'
+      }).select('*').single();
+      if (draftError) throw draftError;
+      const {error: uploadError} = await supabase.storage.from('financial-receipts').upload(path,newReceipt,{contentType:newReceipt.type,upsert:false});
+      if(uploadError) {
+        await supabase.from('delivery_closure_recovery' as any).update({last_error:'Falló carga: '+uploadError.message}).eq('id',(draft as any).id);
+        throw uploadError;
+      }
+      await supabase.from('delivery_closure_recovery' as any).update({status:'ARCHIVO_CARGADO'}).eq('id',(draft as any).id);
+      const {error} = await (supabase as any).rpc('submit_delivery_closure_with_receipt', {
+        p_destination_user_id:destination,p_order_ids:selected.map(o=>o.id),p_receipt_path:path
+      });
+      if(error) {
+        await supabase.from('delivery_closure_recovery' as any).update({last_error:error.message}).eq('id',(draft as any).id);
+        throw error;
+      }
+      await supabase.from('delivery_closure_recovery' as any).update({status:'COMPLETADO',last_error:null}).eq('id',(draft as any).id);
+      toast.success('Cierre registrado con comprobante, pendiente de aprobación.');
+      setChecked([]);setNewReceipt(null);await reload();
+    } catch(e:any) {
+      toast.error('No se registró el cierre: '+(e.message||'Error desconocido')+'. Revisá Recuperación de cierres antes de volver a subir el archivo.');
+      await reload();
+    } finally {setBusy(false);}
   };
   const attach = async (id:string) => {
     const file=files[id];if(!file){toast.error('Elegí un comprobante');return;}
@@ -244,6 +290,28 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
         <p className="text-xs text-muted-foreground">{newReceipt ? `Archivo listo: ${newReceipt.name}` : 'Seleccioná los pedidos, transferí el monto neto y adjuntá tu comprobante antes de finalizar.'}</p>
       </div>
       <button className="nav-btn active" disabled={busy||!selected.length||!newReceipt||Boolean(feesLoadError)||selectedMissingRate||total<0} onClick={submit}>{busy?'Enviando cierre...':'✅ Finalicé mi día — Enviar cierre con comprobante'}</button>
+    </section>}
+    {(isDelivery || role==='ADMIN') && <section className="border border-border rounded-xl p-3 space-y-2">
+      <h5 className="font-bold">🛟 Recuperación de cierres incompletos</h5>
+      <p className="text-xs text-muted-foreground">Estos registros no son pagos aprobados ni pedidos rendidos. El reintento vuelve a validar pedidos y monto en Supabase.</p>
+      {recovery.filter(d=>d.status!=='COMPLETADO').length===0 && <p className="text-sm">Sin intentos incompletos registrados desde esta actualización.</p>}
+      {recovery.filter(d=>d.status!=='COMPLETADO').map(d=><div key={d.id} className="border border-border p-2 rounded-lg text-sm space-y-1">
+        <p><b>{new Date(d.created_at).toLocaleString('es-PY')}</b> · {d.status}</p>
+        <p>Pedidos declarados: {d.order_ids?.length||0} · Destinatario: {d.destination_user_id}</p>
+        {d.last_error && <p className="text-red-600 break-words">Error: {d.last_error}</p>}
+        {d.delivery_user_id === userId && <button type="button" className="nav-btn active" disabled={busy||d.status==='PREPARADO'} onClick={()=>finishRecovery(d)}>Reintentar registro con el mismo comprobante</button>}
+        {d.status==='PREPARADO' && <p className="text-amber-700">La subida no se confirmó. Verificá el archivo antes de intentar otra transferencia.</p>}
+      </div>)}
+    </section>}
+    {role==='ADMIN' && <section className="border border-border rounded-xl p-3 space-y-2">
+      <h5 className="font-bold">🔎 Comprobantes sin cierre asociado — conciliación</h5>
+      <p className="text-xs text-amber-700">Estos archivos no acreditan que el dinero haya llegado. Verificá manualmente transferencia, monto, destinatario y pedidos antes de cualquier ajuste.</p>
+      {orphans.length===0 && <p className="text-sm">No se encontraron archivos sueltos.</p>}
+      {orphans.map(o=><div key={o.receipt_path} className="border-b border-border p-2 text-sm space-y-1">
+        <p>{o.delivery_email||o.delivery_user_id||'Sin identificar'} · {new Date(o.uploaded_at).toLocaleString('es-PY')}</p>
+        <p className="text-xs break-all">{o.receipt_path}</p>
+        <button type="button" className="nav-btn" onClick={()=>seeReceipt(o.receipt_path)}>Ver archivo</button>
+      </div>)}
     </section>}
     <section id="closure-submissions" className="space-y-3"><h5 className="font-bold">📋 Cierres y comprobantes</h5>
       {history.length===0 && <p className="text-sm text-muted-foreground">Sin cierres registrados.</p>}
