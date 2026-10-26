@@ -617,6 +617,7 @@ export default function ClosuresView() {
   const [selectedGuideIds, setSelectedGuideIds] = useState<Set<string>>(new Set());
   const [updatingContactedIds, setUpdatingContactedIds] = useState<Set<string>>(new Set());
   const [activeSection, setActiveSection] = useState<'orders' | 'team' | 'teamClosures'>('orders');
+  const [closureTab, setClosureTab] = useState<'resumen' | 'pedidos' | 'repetidos' | 'pagos' | 'historial' | 'config'>('resumen');
   const [bulkStatus, setBulkStatus] = useState<string>('EN RUTA');
   const [bulkRetiroStatus, setBulkRetiroStatus] = useState<string>('REALIZADO');
   const [bulkTeamUserId, setBulkTeamUserId] = useState<string>('');
@@ -2896,10 +2897,33 @@ export default function ClosuresView() {
 
   return (
     <div className="app-card">
-      <h3 className="text-lg font-extrabold mb-3">Cierres</h3>
-      {canViewRendicion && <ClosurePaymentsPanel role={myRole} email={myEmail} userId={profile?.user_id} />}
+      <header className="closure-tabs-head">
+        <div className="closure-premium-eyebrow">CENTRO DE OPERACIONES</div>
+        <h3 className="text-2xl font-black">CIERRES <span className="text-muted-foreground text-base font-medium">/ Panel de control</span></h3>
+        <p className="text-sm text-muted-foreground">Cada módulo está separado. Elegí qué querés revisar sin llenar toda la pantalla.</p>
+      </header>
+      <nav className="closure-tab-nav" aria-label="Módulos de cierres">
+        {([
+          ['resumen', '📊', 'Resumen'],
+          ['pedidos', '📦', 'Pedidos'],
+          ['repetidos', '🔁', 'Repetidos'],
+          ['pagos', '💳', 'Pagos de cierre'],
+          ['historial', '🧾', 'Historial'],
+          ['config', '⚙️', 'Configuración'],
+        ] as const).filter(([id]) => id !== 'config' || isAdmin || isSupplier).filter(([id]) => (id !== 'pagos' && id !== 'historial') || canViewRendicion).map(([id, icon, label]) => (
+          <button key={id} type="button" className={`closure-tab-btn ${closureTab === id ? 'selected' : ''}`}
+            onClick={() => { setClosureTab(id); if (id === 'repetidos') setOnlyPossibleDuplicates(true); else setOnlyPossibleDuplicates(false); if (activeSection !== 'orders') setActiveSection('orders'); }}
+            aria-current={closureTab === id ? 'page' : undefined}>
+            <span aria-hidden="true">{icon}</span><span>{label}</span>
+            {id === 'repetidos' && possibleDuplicates.count > 0 && <span className="closure-tab-count">{possibleDuplicates.count}</span>}
+          </button>
+        ))}
+      </nav>
+      {canViewRendicion && (closureTab === 'pagos' || closureTab === 'historial' || closureTab === 'config') && (
+        <ClosurePaymentsPanel role={myRole} email={myEmail} userId={profile?.user_id} view={closureTab} />
+      )}
 
-      {(isDelivery || isAdmin || isSupplier) && (
+      {(closureTab === 'pedidos') && (isDelivery || isAdmin || isSupplier) && (
         <div className="flex flex-wrap gap-2 mb-4 border-b border-border pb-3">
           <button
             type="button"
@@ -3184,7 +3208,7 @@ export default function ClosuresView() {
         </div>
       )}
 
-      <div className={activeSection === 'orders' || activeSection === 'teamClosures' ? '' : 'hidden'}>
+      <div className={(closureTab === 'resumen' || closureTab === 'pedidos' || closureTab === 'repetidos') && (activeSection === 'orders' || activeSection === 'teamClosures') ? '' : 'hidden'}>
 
       {activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin) && (
         <div className="mb-3 app-card !p-3 border border-violet-500/30 bg-violet-500/5">
@@ -3236,6 +3260,9 @@ export default function ClosuresView() {
         </div>
       )}
 
+      <details className="closure-accordion" open>
+        <summary>🔎 Filtros de consulta <span className="closure-accordion-hint">Fechas · Delivery · Proveedor · Estado · Rendición</span></summary>
+        <div className="closure-accordion-inner">
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input
@@ -3568,8 +3595,11 @@ export default function ClosuresView() {
         
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
+        </div>
+      </details>
 
 
+      <div className={closureTab === 'resumen' ? '' : 'hidden'}>
       <div className="closure-section-heading"><span className="closure-section-number">02</span><div><h3>Resumen del período</h3><p>Indicadores, estados y posibles pedidos repetidos</p></div></div>
       <section className="closure-premium-overview" aria-label="Resumen ejecutivo de cierres">
         <div className="closure-premium-header">
@@ -3585,7 +3615,7 @@ export default function ClosuresView() {
           <div className="closure-premium-metric metric-complete"><div className="metric-label">✅ RENDIDOS</div><strong>{kpis.rendidos}</strong><span>Gs {nf(kpis.montoRendido)}</span></div>
           <div className="closure-premium-metric metric-pending"><div className="metric-label">⏳ SIN RENDIR</div><strong>{kpis.noRendidos}</strong><span>Gs {nf(kpis.montoPendiente)}</span></div>
           <div className="closure-premium-metric metric-net"><div className="metric-label">💰 NETO DEL PERÍODO</div><strong>Gs {nf(kpis.montoRendido + kpis.montoPendiente)}</strong><span>Entregados · neto estimado</span></div>
-          <button type="button" className={`closure-premium-metric metric-duplicates text-left ${onlyPossibleDuplicates ? 'metric-selected' : ''}`} onClick={() => { setSelectedGuideIds(new Set()); setOnlyPossibleDuplicates(v => !v); }} aria-pressed={onlyPossibleDuplicates}>
+          <button type="button" className={`closure-premium-metric metric-duplicates text-left ${onlyPossibleDuplicates ? 'metric-selected' : ''}`} onClick={() => { setSelectedGuideIds(new Set()); setOnlyPossibleDuplicates(true); setClosureTab('repetidos'); }} aria-pressed={onlyPossibleDuplicates}>
             <span className="metric-label">🔁 POSIBLES REPETIDOS</span>
             <strong>{possibleDuplicates.count}</strong>
             <span>{possibleDuplicates.groupsCount} grupos · teléfono, ciudad y fecha</span>
@@ -3600,7 +3630,8 @@ export default function ClosuresView() {
           <div className="closure-premium-legend"><span>🟢 {kpis.rendidos} rendidos</span><span>🟠 {kpis.noRendidos} pendientes</span></div>
         </div>
       </section>
-
+      </div>
+      <div className={closureTab === 'pedidos' ? '' : 'hidden'}>
       {canViewRendicion && delivered.length > 0 && (
         <div className="app-card !p-4 mb-4 border-l-4 border-l-[hsl(var(--primary))]">
           <h4 className="font-extrabold mb-3">📋 Control de Rendición</h4>
@@ -4025,6 +4056,12 @@ export default function ClosuresView() {
         )}
       </div>
 
+      </div>
+      <div className={closureTab === 'pedidos' || closureTab === 'repetidos' ? '' : 'hidden'}>
+      {closureTab === 'repetidos' && (
+        <div className="closure-tab-intro"><strong>🔁 Posibles pedidos repetidos</strong><p>Coincidencias por teléfono, ciudad y día de creación: {possibleDuplicates.count} pedidos en {possibleDuplicates.groupsCount} grupos. Son alertas para revisar, no duplicados confirmados.</p></div>
+      )}
+      <div className="mb-4"><input className="app-input w-full" placeholder="🔎 Buscar pedido, cliente, teléfono o ciudad" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
       <div className="closure-section-heading"><span className="closure-section-number">03</span><div><h3>Listado de pedidos</h3><p>Revisá los detalles, los estados y las rendiciones</p></div></div>
       {onlyPossibleDuplicates && <div className="closure-duplicate-notice">🔁 Mostrando solamente coincidencias por teléfono, ciudad y día de creación. Revisá manualmente: no son duplicados confirmados. <button type="button" className="nav-btn" onClick={() => { setSelectedGuideIds(new Set()); setOnlyPossibleDuplicates(false); }}>Quitar filtro</button></div>}
       <div className="closure-premium-table overflow-auto">
@@ -4369,6 +4406,7 @@ export default function ClosuresView() {
         </table>
       </div>
 
+      </div>
       </div>
 
       {/* Modal para solicitar comentario y captura */}
