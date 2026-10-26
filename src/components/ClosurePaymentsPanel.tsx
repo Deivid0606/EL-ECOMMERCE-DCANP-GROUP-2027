@@ -48,7 +48,7 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     }
     if (isDelivery) {
       const { data: options, error: optionError } = await (supabase as any).rpc('list_delivery_bank_destinations');
-      setCatalog(options || []);
+      setCatalog((options || []).filter((b: any) => b.owner_role === 'PROVEEDOR'));
       setCatalogError(optionError ? 'No se pudieron consultar las cuentas bancarias: ' + optionError.message : '');
       if (optionError) toast.error('No se pudieron cargar las cuentas de destino. Ejecutá el SQL de esta actualización.');
     }
@@ -63,13 +63,13 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
         setFeesLoadError('');
         setDeliveryFees(feeResult.data || []);
       }
-      const { data, error } = await supabase.from('orders').select('id,order_number,status,status2,total_gs,delivery_fee_gs,city,provider_emails_list,delivery_settled,assigned_delivery')
+      const { data, error } = await supabase.from('orders').select('id,order_number,status,status2,total_gs,delivery_fee_gs,city,provider_emails_list,provider_email,supplier_email,delivery_settled,assigned_delivery')
         .ilike('assigned_delivery', email).in('status',['ENTREGADO','ENCOMIENDA ENTREGADA']) .eq('delivery_settled',false).range(0,499);
       if (error) { toast.error(error.message); setOrderList([]); return; }
       const all = [...(data || [])];
       let offset = 500;
       while (all.length === offset && offset < 5000) {
-        const page = await supabase.from('orders').select('id,order_number,status,status2,total_gs,delivery_fee_gs,city,provider_emails_list,delivery_settled,assigned_delivery')
+        const page = await supabase.from('orders').select('id,order_number,status,status2,total_gs,delivery_fee_gs,city,provider_emails_list,provider_email,supplier_email,delivery_settled,assigned_delivery')
           .ilike('assigned_delivery', email).in('status',['ENTREGADO','ENCOMIENDA ENTREGADA']).eq('delivery_settled',false).range(offset, offset+499);
         if (page.error) { toast.error('No se pudieron cargar todos los pedidos: '+page.error.message); setOrderList([]); return; }
         all.push(...(page.data || []));
@@ -97,14 +97,19 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     const saved = banks.find(b=>b.owner_user_id===userId);
     setBank(saved ? {bank_name:saved.bank_name||'',bank_account:saved.bank_account||'',bank_holder:saved.bank_holder||'',bank_ci:saved.bank_ci||'',bank_alias:saved.bank_alias||''} : {bank_name:'',bank_account:'',bank_holder:'',bank_ci:'',bank_alias:''});
   },[role,userId,banks]);
-  const dest = catalog.find(b=>b.owner_user_id===destination);
+  const dest = catalog.find(b=>b.owner_user_id===destination && b.owner_role === 'PROVEEDOR');
   const destEmail = dest?.owner_email || ''; 
   const eligible = useMemo(() => orderList.filter(o => {
     if (!dest || !destEmail) return false;
-    if (dest.owner_role === 'ADMIN') return true;
-    // Para un proveedor, mostrar solamente pedidos donde aparece su email.
-    const value = String(o.provider_emails_list || '').toLowerCase();
-    return value.split(/[,;\s]+/).map(x => x.trim()).includes(String(destEmail).toLowerCase());
+    // El proveedor determina los pedidos, no el titular de la cuenta bancaria.
+    // La misma cuenta puede estar asignada a varios proveedores sin mezclarlos.
+    const normalizedEmail = String(destEmail).trim().toLowerCase();
+    const addresses = [
+      ...String(o.provider_emails_list || '').toLowerCase().split(/[,;\s]+/),
+      String(o.provider_email || '').toLowerCase(),
+      String(o.supplier_email || '').toLowerCase(),
+    ].map(x => x.trim()).filter(Boolean);
+    return addresses.includes(normalizedEmail);
   }), [orderList, dest, destEmail]);
   // Regla obligatoria: se incluyen TODOS los pedidos elegibles del destinatario.
   const selected = eligible;
@@ -272,15 +277,15 @@ export default function ClosurePaymentsPanel({ role, email, userId }: Props) {
     </section>}
     {isDelivery && <section className="border border-border rounded-xl p-3 space-y-3">
       <h5 className="font-bold">🚚 Finalicé mi día — Hacer cierre</h5>
-      <p className="text-xs text-muted-foreground">Seleccioná el proveedor o destinatario. Todos sus pedidos entregados y pendientes de rendición se incluyen obligatoriamente; no se permiten cierres parciales.</p>
+      <p className="text-xs text-muted-foreground">Seleccioná un proveedor. Verás su cuenta asignada y ÚNICAMENTE los pedidos entregados sin rendir de ese proveedor. Se incluyen todos obligatoriamente.</p>
       <select className="app-input w-full" value={destination} onChange={e=>{setDestination(e.target.value);setNewReceipt(null)}}>
-        <option value="">Seleccionar cuenta de destino</option>{catalog.map(b=><option key={b.owner_user_id} value={b.owner_user_id}>{b.owner_name || b.owner_email || 'Destinatario'} ({b.owner_role === 'ADMIN' ? 'Administrador' : 'Proveedor'}) — {b.bank_name}</option>)}
+        <option value="">Seleccionar proveedor</option>{catalog.map(b=><option key={b.owner_user_id} value={b.owner_user_id}>{b.owner_name || b.owner_email || 'Destinatario'} (Proveedor) — {b.bank_name}</option>)}
       </select>
       {catalogError && <p className="text-sm text-red-600" role="alert">{catalogError}</p>}
-      {!catalogError && catalog.length === 0 && <p className="text-sm text-amber-700">No hay cuentas bancarias disponibles para este delivery. El administrador debe guardar la cuenta para uno o más proveedores en Cierres y verificar que el proveedor esté aprobado.</p>}
+      {!catalogError && catalog.length === 0 && <p className="text-sm text-amber-700">No hay proveedores con cuenta bancaria disponible. El administrador debe asignar datos bancarios a cada proveedor desde Cierres.</p>}
       {dest && <div className="bg-muted rounded-lg p-3 text-sm">Titular: <b>{dest.bank_holder}</b> · Banco: <b>{dest.bank_name}</b> · Cuenta: <b>{dest.bank_account}</b> · CI: {dest.bank_ci||'—'} · Alias: <b>{dest.bank_alias||'—'}</b>{dest.bank_alias && <button className="nav-btn ml-2" onClick={()=>{void navigator.clipboard.writeText(dest.bank_alias);toast.success('Alias copiado')}}>Copiar alias</button>}</div>}
       {dest && eligible.length === 0 && <p className="text-sm text-amber-700">No se encontraron pedidos entregados, sin rendir y asignados a este delivery para la cuenta seleccionada. Revisá la asignación del delivery y el destinatario de los pedidos.</p>}
-      <div className="max-h-56 overflow-auto space-y-1">{eligible.map(o=><label key={o.id} className="flex gap-2 items-center text-sm p-2 border-b border-border"><input type="checkbox" checked disabled aria-label="Pedido incluido obligatoriamente"/><span className="flex-1">#{o.order_number||o.id.slice(0,8)}</span><b>Gs {nf((o.status === 'ENTREGADO' ? Number(o.total_gs || 0) : 0) - feeInfo(o).fee)}</b></label>)}</div>
+      <div className="max-h-56 overflow-auto space-y-1">{eligible.map(o=><label key={o.id} className="flex gap-2 items-center text-sm p-2 border-b border-border"><input type="checkbox" checked disabled aria-label="Pedido incluido obligatoriamente"/><span className="min-w-0 flex-1 break-all">#{o.order_number||o.id.slice(0,8)}</span><b className="shrink-0 text-right whitespace-nowrap">Gs {nf((o.status === 'ENTREGADO' ? Number(o.total_gs || 0) : 0) - feeInfo(o).fee)}</b></label>)}</div>
       <div className="bg-muted rounded-lg p-3 space-y-1 text-sm">
         <p>Pedidos incluidos obligatoriamente: <b>{selected.length} de {eligible.length}</b></p>
         <p>Total cobrado en pedidos normales: <b>Gs {nf(collected)}</b></p>
