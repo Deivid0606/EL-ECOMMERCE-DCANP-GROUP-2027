@@ -1776,6 +1776,35 @@ export default function ClosuresView() {
     });
   }, [orders, searchTerm, settlementFilter]);
 
+  // Detección informativa, sin modificar estados ni importes de pedidos.
+  // Se consideran posibles repetidos cuando comparten teléfono, ciudad y fecha de creación.
+  // Sin teléfono o fecha no se clasifica un pedido como repetido.
+  const possibleDuplicates = useMemo(() => {
+    const groups = new Map<string, any[]>();
+    for (const order of orders) {
+      const phone = String(order.customer_phone || order.phone || '').replace(/\D/g, '');
+      const city = String(order.city || '').trim().toLowerCase();
+      const day = String(order.created_at || '').slice(0, 10);
+      if (phone.length < 8 || !city || !day) continue;
+      const key = `${phone}|${city}|${day}`;
+      groups.set(key, [...(groups.get(key) || []), order]);
+    }
+    const ids = new Set<string>();
+    let groupsCount = 0;
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      groupsCount++;
+      group.forEach(order => ids.add(order.id));
+    }
+    return { ids, groupsCount, count: ids.size };
+  }, [orders]);
+
+  const [onlyPossibleDuplicates, setOnlyPossibleDuplicates] = useState(false);
+  const displayedOrders = useMemo(
+    () => onlyPossibleDuplicates ? filteredOrders.filter(o => possibleDuplicates.ids.has(o.id)) : filteredOrders,
+    [filteredOrders, possibleDuplicates, onlyPossibleDuplicates],
+  );
+
   const normalizeFeeKey = (value: string) =>
     String(value || '')
       .normalize('NFD')
@@ -2407,8 +2436,8 @@ export default function ClosuresView() {
   const canUseGuides = isDelivery || isAdmin || isSupplier;
 
   const selectedGuideOrders = useMemo(
-    () => filteredOrders.filter(order => selectedGuideIds.has(order.id)),
-    [filteredOrders, selectedGuideIds]
+    () => displayedOrders.filter(order => selectedGuideIds.has(order.id)),
+    [displayedOrders, selectedGuideIds]
   );
 
   const toggleGuideSelection = (orderId: string) => {
@@ -2420,7 +2449,7 @@ export default function ClosuresView() {
   };
 
   const toggleAllGuideSelections = () => {
-    const visibleIds = filteredOrders.map(order => order.id);
+    const visibleIds = displayedOrders.map(order => order.id);
     const allVisibleSelected =
       visibleIds.length > 0 && visibleIds.every(id => selectedGuideIds.has(id));
 
@@ -2439,8 +2468,8 @@ export default function ClosuresView() {
 
 
   const selectedOrders = useMemo(
-    () => filteredOrders.filter(order => selectedGuideIds.has(order.id)),
-    [filteredOrders, selectedGuideIds],
+    () => displayedOrders.filter(order => selectedGuideIds.has(order.id)),
+    [displayedOrders, selectedGuideIds],
   );
 
   const selectedDeliveredOrders = useMemo(
@@ -3540,16 +3569,8 @@ export default function ClosuresView() {
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
-      {(selectedDeliveryList.length > 0 || isDelivery || isSupplier || isVendedor) && (
-        <div className="grid-kpi mb-4">
-          <div className="kpi-card">
-            <div className="text-xs text-muted-foreground mb-1">📦 Pedidos</div>
-            <div className="text-[22px] font-extrabold">{filteredOrders.length}</div>
-            <div className="text-xs text-muted-foreground">en el período</div>
-          </div>
-        </div>
-      )}
 
+      <div className="closure-section-heading"><span className="closure-section-number">02</span><div><h3>Resumen del período</h3><p>Indicadores, estados y posibles pedidos repetidos</p></div></div>
       <section className="closure-premium-overview" aria-label="Resumen ejecutivo de cierres">
         <div className="closure-premium-header">
           <div>
@@ -3557,13 +3578,19 @@ export default function ClosuresView() {
             <h3>Control de cierres <span>en tiempo real</span></h3>
             <p>Visualizá el estado de los pedidos filtrados y priorizá las rendiciones pendientes.</p>
           </div>
-          <div className="closure-premium-indicator"><span className="closure-live-dot" /> Vista actualizada al aplicar filtros</div>
+          <div className="closure-premium-indicator"><span className="closure-live-dot" /> Resumen de pedidos cargados</div>
         </div>
         <div className="closure-premium-kpis">
           <div className="closure-premium-metric metric-orders"><div className="metric-label">📦 PEDIDOS EN VISTA</div><strong>{filteredOrders.length}</strong><span>Según los filtros activos</span></div>
           <div className="closure-premium-metric metric-complete"><div className="metric-label">✅ RENDIDOS</div><strong>{kpis.rendidos}</strong><span>Gs {nf(kpis.montoRendido)}</span></div>
           <div className="closure-premium-metric metric-pending"><div className="metric-label">⏳ SIN RENDIR</div><strong>{kpis.noRendidos}</strong><span>Gs {nf(kpis.montoPendiente)}</span></div>
           <div className="closure-premium-metric metric-net"><div className="metric-label">💰 NETO DEL PERÍODO</div><strong>Gs {nf(kpis.montoRendido + kpis.montoPendiente)}</strong><span>Entregados · neto estimado</span></div>
+          <button type="button" className={`closure-premium-metric metric-duplicates text-left ${onlyPossibleDuplicates ? 'metric-selected' : ''}`} onClick={() => { setSelectedGuideIds(new Set()); setOnlyPossibleDuplicates(v => !v); }} aria-pressed={onlyPossibleDuplicates}>
+            <span className="metric-label">🔁 POSIBLES REPETIDOS</span>
+            <strong>{possibleDuplicates.count}</strong>
+            <span>{possibleDuplicates.groupsCount} grupos · teléfono, ciudad y fecha</span>
+            <span className="metric-link">{onlyPossibleDuplicates ? 'Mostrar todos los pedidos' : 'Ver posibles repetidos'}</span>
+          </button>
         </div>
         <div className="closure-premium-graph">
           <div className="closure-premium-graph-head"><span>Progreso de rendiciones</span><b>{delivered.length ? Math.round(kpis.rendidos / delivered.length * 100) : 0}% rendidos</b></div>
@@ -3815,9 +3842,9 @@ export default function ClosuresView() {
               type="button"
               className="nav-btn"
               onClick={toggleAllGuideSelections}
-              disabled={filteredOrders.length === 0}
+              disabled={displayedOrders.length === 0}
             >
-              {filteredOrders.length > 0 && filteredOrders.every(order => selectedGuideIds.has(order.id))
+              {displayedOrders.length > 0 && displayedOrders.every(order => selectedGuideIds.has(order.id))
                 ? '☐ Deseleccionar visibles'
                 : '☑ Seleccionar visibles'}
             </button>
@@ -3993,11 +4020,13 @@ export default function ClosuresView() {
         </div>
         {searchTerm && (
           <p className="text-xs text-muted-foreground mt-1">
-            Mostrando {filteredOrders.length} de {orders.length} pedidos cargados
+            Mostrando {displayedOrders.length} de {orders.length} pedidos cargados
           </p>
         )}
       </div>
 
+      <div className="closure-section-heading"><span className="closure-section-number">03</span><div><h3>Listado de pedidos</h3><p>Revisá los detalles, los estados y las rendiciones</p></div></div>
+      {onlyPossibleDuplicates && <div className="closure-duplicate-notice">🔁 Mostrando solamente coincidencias por teléfono, ciudad y día de creación. Revisá manualmente: no son duplicados confirmados. <button type="button" className="nav-btn" onClick={() => { setSelectedGuideIds(new Set()); setOnlyPossibleDuplicates(false); }}>Quitar filtro</button></div>}
       <div className="closure-premium-table overflow-auto">
         <table className="app-table min-w-[1800px]">
           <thead>
@@ -4028,7 +4057,7 @@ export default function ClosuresView() {
             </tr>
           </thead>
           <tbody>
-            {filteredOrders.map(o => {
+            {displayedOrders.map(o => {
               const fee = getDeliveryFeeForOrder(o);
               const net = Number(o.total_gs || 0) - fee;
               const isSettled = o.delivery_settled;
@@ -4329,7 +4358,7 @@ export default function ClosuresView() {
                 </tr>
               );
             })}
-            {filteredOrders.length === 0 && (
+            {displayedOrders.length === 0 && (
               <tr>
                 <td colSpan={(canManageRendicion ? 16 : 15) + (canUseGuides ? 2 : 0)} className="text-center text-muted-foreground py-8">
                   {searchTerm ? 'No se encontraron resultados para tu búsqueda' : 'Sin resultados en este período'}
