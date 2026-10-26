@@ -1,3 +1,4 @@
+import './closures-premium.css';
 import ClosurePaymentsPanel from './ClosurePaymentsPanel';
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
@@ -599,6 +600,7 @@ export default function ClosuresView() {
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set());
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
+  const [settlementFilter, setSettlementFilter] = useState<'all' | 'settled' | 'pending'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
@@ -1750,10 +1752,20 @@ export default function ClosuresView() {
   ]);
 
   const filteredOrders = useMemo(() => {
-    if (!searchTerm.trim()) return orders;
-    
+    let base = orders;
+
+    if (settlementFilter !== 'all') {
+      base = base.filter(order => {
+        const isDelivered = order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA';
+        if (!isDelivered) return false;
+        return settlementFilter === 'settled' ? Boolean(order.delivery_settled) : !Boolean(order.delivery_settled);
+      });
+    }
+
+    if (!searchTerm.trim()) return base;
+
     const term = searchTerm.toLowerCase().trim();
-    return orders.filter(order => {
+    return base.filter(order => {
       return (
         (order.customer_name && order.customer_name.toLowerCase().includes(term)) ||
         (order.customer_phone && order.customer_phone.toLowerCase().includes(term)) ||
@@ -1762,7 +1774,7 @@ export default function ClosuresView() {
         (order.city && order.city.toLowerCase().includes(term))
       );
     });
-  }, [orders, searchTerm]);
+  }, [orders, searchTerm, settlementFilter]);
 
   const normalizeFeeKey = (value: string) =>
     String(value || '')
@@ -1883,6 +1895,15 @@ export default function ClosuresView() {
           order.status === 'ENCOMIENDA ENTREGADA',
       ),
     [filteredOrders],
+  );
+
+  const settlementFilterCounts = useMemo(
+    () => ({
+      all: orders.length,
+      settled: orders.filter(order => (order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA') && order.delivery_settled).length,
+      pending: orders.filter(order => (order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA') && !order.delivery_settled).length,
+    }),
+    [orders],
   );
 
   const rendidos = useMemo(
@@ -3484,6 +3505,31 @@ export default function ClosuresView() {
           )}
         </div>
         
+        <div className="closure-premium-filter flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card/50 p-2">
+          <span className="px-2 text-xs font-bold text-muted-foreground">Rendición:</span>
+          <button
+            type="button"
+            className={`nav-btn !py-1 ${settlementFilter === 'all' ? 'active' : ''}`}
+            onClick={() => setSettlementFilter('all')}
+          >
+            Todos ({settlementFilterCounts.all})
+          </button>
+          <button
+            type="button"
+            className={`nav-btn !py-1 ${settlementFilter === 'pending' ? 'active' : ''}`}
+            onClick={() => setSettlementFilter('pending')}
+          >
+            No rendidos ({settlementFilterCounts.pending})
+          </button>
+          <button
+            type="button"
+            className={`nav-btn !py-1 ${settlementFilter === 'settled' ? 'active' : ''}`}
+            onClick={() => setSettlementFilter('settled')}
+          >
+            Rendidos ({settlementFilterCounts.settled})
+          </button>
+        </div>
+
         {!isVendedor && !isSupplier && (
           <select className="app-input !w-auto" value={filterDateBy} onChange={e => setFilterDateBy(e.target.value as any)}>
             <option value="assigned_at">📅 Filtrar por fecha de asignación</option>
@@ -3503,6 +3549,30 @@ export default function ClosuresView() {
           </div>
         </div>
       )}
+
+      <section className="closure-premium-overview" aria-label="Resumen ejecutivo de cierres">
+        <div className="closure-premium-header">
+          <div>
+            <div className="closure-premium-eyebrow">CENTRO DE OPERACIONES</div>
+            <h3>Control de cierres <span>en tiempo real</span></h3>
+            <p>Visualizá el estado de los pedidos filtrados y priorizá las rendiciones pendientes.</p>
+          </div>
+          <div className="closure-premium-indicator"><span className="closure-live-dot" /> Vista actualizada al aplicar filtros</div>
+        </div>
+        <div className="closure-premium-kpis">
+          <div className="closure-premium-metric metric-orders"><div className="metric-label">📦 PEDIDOS EN VISTA</div><strong>{filteredOrders.length}</strong><span>Según los filtros activos</span></div>
+          <div className="closure-premium-metric metric-complete"><div className="metric-label">✅ RENDIDOS</div><strong>{kpis.rendidos}</strong><span>Gs {nf(kpis.montoRendido)}</span></div>
+          <div className="closure-premium-metric metric-pending"><div className="metric-label">⏳ SIN RENDIR</div><strong>{kpis.noRendidos}</strong><span>Gs {nf(kpis.montoPendiente)}</span></div>
+          <div className="closure-premium-metric metric-net"><div className="metric-label">💰 NETO DEL PERÍODO</div><strong>Gs {nf(kpis.montoRendido + kpis.montoPendiente)}</strong><span>Entregados · neto estimado</span></div>
+        </div>
+        <div className="closure-premium-graph">
+          <div className="closure-premium-graph-head"><span>Progreso de rendiciones</span><b>{delivered.length ? Math.round(kpis.rendidos / delivered.length * 100) : 0}% rendidos</b></div>
+          <div className="closure-premium-track" role="progressbar" aria-valuenow={kpis.rendidos} aria-valuemin={0} aria-valuemax={delivered.length || 1} aria-label="Porcentaje de entregas rendidas">
+            <span style={{width: `${delivered.length ? Math.round(kpis.rendidos / delivered.length * 100) : 0}%`}} />
+          </div>
+          <div className="closure-premium-legend"><span>🟢 {kpis.rendidos} rendidos</span><span>🟠 {kpis.noRendidos} pendientes</span></div>
+        </div>
+      </section>
 
       {canViewRendicion && delivered.length > 0 && (
         <div className="app-card !p-4 mb-4 border-l-4 border-l-[hsl(var(--primary))]">
@@ -3928,7 +3998,7 @@ export default function ClosuresView() {
         )}
       </div>
 
-      <div className="overflow-auto">
+      <div className="closure-premium-table overflow-auto">
         <table className="app-table min-w-[1800px]">
           <thead>
             <tr>
