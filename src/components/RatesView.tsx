@@ -77,7 +77,12 @@ export default function RatesView() {
   const [fees, setFees] = useState<any[]>([]);
   const [prices, setPrices] = useState<any[]>([]);
   const [drEmail, setDrEmail] = useState('');
-  const [drCity, setDrCity] = useState('');
+  const [drCities, setDrCities] = useState<string[]>([]);
+  const [deliverySearch, setDeliverySearch] = useState('');
+  const [citySearch, setCitySearch] = useState('');
+  const [showDeliveryPicker, setShowDeliveryPicker] = useState(false);
+  const [showCityPicker, setShowCityPicker] = useState(false);
+  const [savingRate, setSavingRate] = useState(false);
   const [drRate, setDrRate] = useState('');
   const [cpCity, setCpCity] = useState('');
   const [cpDepartamento, setCpDepartamento] = useState('');
@@ -156,44 +161,83 @@ export default function RatesView() {
       )
     : fees;
 
+  const filteredRateUsers = rateUsers.filter(user => {
+    const q = deliverySearch.trim().toLocaleLowerCase('es');
+    return !q || [user.name, user.email, user.role].some(
+      value => String(value || '').toLocaleLowerCase('es').includes(q),
+    );
+  });
+
+  const availableCities = Array.from(new Set(
+    prices.map(item => String(item.city || '').trim()).filter(Boolean),
+  )).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  const filteredCities = availableCities.filter(city =>
+    city.toLocaleLowerCase('es').includes(citySearch.trim().toLocaleLowerCase('es')),
+  );
+
   const saveRate = async () => {
-    if (!drEmail || !drCity || !drRate) {
-      toast.error('Completá todos los campos');
+    if (savingRate) return;
+    if (!drEmail || drCities.length === 0 || !drRate.trim()) {
+      toast.error('Seleccioná un titular, una o más ciudades y una tarifa');
       return;
     }
-
+    const rate = Number(drRate);
+    if (!Number.isFinite(rate) || rate < 0 || !Number.isInteger(rate)) {
+      toast.error('La tarifa debe ser un número entero de guaraníes, igual o mayor a cero');
+      return;
+    }
     const selectedUser = rateUsers.find(
-      user =>
-        String(user.email || '').toLowerCase() === drEmail.toLowerCase(),
+      user => String(user.email || '').toLowerCase() === drEmail.toLowerCase(),
     );
-
     if (!selectedUser) {
       toast.error('El usuario seleccionado no está disponible para cargar tarifa');
       return;
     }
-
     if (
-      role === 'PROVEEDOR' &&
-      selectedUser.role === 'PROVEEDOR' &&
+      role === 'PROVEEDOR' && selectedUser.role === 'PROVEEDOR' &&
       drEmail.toLowerCase() !== myEmail.toLowerCase()
     ) {
       toast.error('Un PROVEEDOR solo puede modificar su propia tarifa');
       return;
     }
-
-    const existing = fees.find(
-      f =>
-        f.delivery_email?.toLowerCase() === drEmail.toLowerCase() &&
-        f.city?.toLowerCase() === drCity.toLowerCase(),
-    );
-    if (existing) {
-      await supabase.from('delivery_fees').update({ fee_gs: Number(drRate) }).eq('id', existing.id);
-    } else {
-      await supabase.from('delivery_fees').insert({ delivery_email: drEmail, city: drCity, fee_gs: Number(drRate) });
+    if (drCities.some(city => !availableCities.includes(city))) {
+      toast.error('Una ciudad ya no está disponible. Actualizá el listado.');
+      return;
     }
-    toast.success('Tarifa guardada');
-    setDrEmail(''); setDrCity(''); setDrRate('');
-    load();
+    const existingRates = drCities.filter(city => fees.some(
+      f => String(f.delivery_email || '').toLowerCase() === drEmail.toLowerCase() &&
+        String(f.city || '').toLowerCase() === city.toLowerCase(),
+    ));
+    if (existingRates.length > 0 && !window.confirm(
+      `Ya existen tarifas para ${existingRates.length} ciudad(es). ¿Querés actualizarlas a Gs ${nf(rate)}?`,
+    )) return;
+
+    setSavingRate(true);
+    let saved = 0;
+    const failures: string[] = [];
+    try {
+      // Mantener la misma lógica INSERT/UPDATE previa para respetar las RLS actuales.
+      for (const city of drCities) {
+        const existing = fees.find(f =>
+          String(f.delivery_email || '').toLowerCase() === drEmail.toLowerCase() &&
+          String(f.city || '').toLowerCase() === city.toLowerCase(),
+        );
+        const { error } = existing
+          ? await supabase.from('delivery_fees').update({ fee_gs: rate }).eq('id', existing.id)
+          : await supabase.from('delivery_fees').insert({ delivery_email: drEmail, city, fee_gs: rate });
+        if (error) failures.push(`${city}: ${error.message}`);
+        else saved++;
+      }
+      if (saved) toast.success(`Tarifa guardada en ${saved} ciudad(es)`);
+      if (failures.length) toast.error(`No se guardaron ${failures.length} ciudad(es): ${failures.slice(0, 2).join(' · ')}`);
+      if (!failures.length) {
+        setDrCities([]);
+        setDrRate('');
+      }
+      load();
+    } finally {
+      setSavingRate(false);
+    }
   };
 
   const deleteRate = async (id: string) => {
@@ -301,39 +345,59 @@ export default function RatesView() {
           <h4 className="font-bold mb-3">
             {role === 'PROVEEDOR' ? 'Configurar tarifa propia o de delivery' : 'Agregar/Actualizar tarifa de Delivery o Proveedor'}
           </h4>
-          <div className="flex flex-wrap gap-2">
-            <div className="flex-1 min-w-[200px]">
-              <label className="app-label">Titular de la tarifa</label>
-              <select 
-                className="app-input" 
-                value={drEmail} 
-                onChange={e => setDrEmail(e.target.value)}
-              >
-                <option value="">Seleccionar usuario…</option>
-                {rateUsers.map(user => (
-                  <option key={`${user.role}-${user.email}`} value={user.email}>
-                    {user.role === 'PROVEEDOR' ? '🏢 PROVEEDOR — ' : '🚚 DELIVERY — '}
-                    {user.name || user.email}
-                    {String(user.email || '').toLowerCase() === myEmail.toLowerCase()
-                      ? ' (Vos)'
-                      : ''}
-                  </option>
-                ))}
-              </select>
+          <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1.1fr_180px_auto] gap-4 items-start">
+            <div className="relative min-w-0">
+              <label className="app-label">🔎 Titular de la tarifa</label>
+              <button type="button" className="app-input w-full flex items-center justify-between gap-2 text-left" onClick={() => { setShowDeliveryPicker(!showDeliveryPicker); setShowCityPicker(false); }}>
+                <span className="truncate">{drEmail ? (() => {
+                  const u = rateUsers.find(u => u.email === drEmail);
+                  return u ? `${u.role === 'PROVEEDOR' ? '🏢' : '🚚'} ${u.name || u.email}` : drEmail;
+                })() : '🔎 Buscar y seleccionar delivery…'}</span><span>⌄</span>
+              </button>
+              {showDeliveryPicker && <div className="absolute z-50 top-full left-0 right-0 mt-2 rounded-xl border border-border bg-card shadow-2xl p-2 min-w-[260px]">
+                <input className="app-input w-full text-sm" autoFocus placeholder="🔎 Nombre o correo del delivery…" value={deliverySearch} onChange={e => setDeliverySearch(e.target.value)} />
+                <div className="max-h-64 overflow-y-auto mt-2 space-y-1">
+                  {filteredRateUsers.map(user => <button type="button" key={`${user.role}-${user.email}`} className={`w-full text-left rounded-lg p-2 text-sm hover:bg-secondary ${drEmail === user.email ? 'bg-primary/10 font-bold' : ''}`} onClick={() => { setDrEmail(user.email); setShowDeliveryPicker(false); setDeliverySearch(''); }}>
+                    <span className="block font-semibold">{user.role === 'PROVEEDOR' ? '🏢 PROVEEDOR' : '🚚 DELIVERY'} — {user.name || user.email}</span>
+                    <span className="block text-xs text-muted-foreground break-all">{user.email}</span>
+                  </button>)}
+                  {filteredRateUsers.length === 0 && <p className="p-3 text-sm text-muted-foreground">Sin resultados para tu búsqueda</p>}
+                </div>
+              </div>}
             </div>
-            <div className="flex-1 min-w-[160px]">
-              <label className="app-label">Ciudad</label>
-              <select className="app-input" value={drCity} onChange={e => setDrCity(e.target.value)}>
-                <option value="">Seleccionar ciudad…</option>
-                {prices.map(c => <option key={c.id} value={c.city}>{c.city}</option>)}
-              </select>
+            <div className="relative min-w-0">
+              <label className="app-label">📍 Ciudades (selección múltiple)</label>
+              <button type="button" className="app-input w-full flex items-center justify-between gap-2 text-left" onClick={() => { setShowCityPicker(!showCityPicker); setShowDeliveryPicker(false); }}>
+                <span className="truncate">{drCities.length ? `${drCities.length} ciudad(es) seleccionada(s)` : 'Seleccionar una o varias ciudades…'}</span><span>⌄</span>
+              </button>
+              {showCityPicker && <div className="absolute z-50 top-full left-0 right-0 mt-2 rounded-xl border border-border bg-card shadow-2xl p-3 min-w-[260px]">
+                <input className="app-input w-full text-sm" autoFocus placeholder="🔎 Buscar ciudad…" value={citySearch} onChange={e => setCitySearch(e.target.value)} />
+                <div className="flex flex-wrap items-center gap-2 mt-2 mb-2">
+                  <button type="button" className="nav-btn !text-xs !px-2 !py-1" onClick={() => setDrCities(old => Array.from(new Set([...old, ...filteredCities])))}>Marcar visibles</button>
+                  <button type="button" className="nav-btn !text-xs !px-2 !py-1" onClick={() => setDrCities(old => old.filter(city => !filteredCities.includes(city)))}>Quitar visibles</button>
+                  <button type="button" className="nav-btn !text-xs !px-2 !py-1" onClick={() => setShowCityPicker(false)}>Listo ✓</button>
+                </div>
+                <div className="max-h-60 overflow-y-auto space-y-1">
+                  {filteredCities.map(city => <label key={city} className="flex items-center gap-2 rounded-lg p-2 text-sm cursor-pointer hover:bg-secondary">
+                    <input type="checkbox" checked={drCities.includes(city)} onChange={e => setDrCities(old => e.target.checked ? [...old, city] : old.filter(c => c !== city))}/>
+                    <span className="break-words">{city}</span>
+                  </label>)}
+                  {filteredCities.length === 0 && <p className="text-sm text-muted-foreground p-2">Sin ciudades para mostrar</p>}
+                </div>
+              </div>}
+              {drCities.length > 0 && <div className="mt-2 flex gap-1.5 flex-wrap">
+                {drCities.map(city => <button title={`Quitar ${city}`} type="button" key={city} onClick={() => setDrCities(old => old.filter(c => c !== city))} className="text-xs rounded-full px-2.5 py-1 bg-primary/10 border border-primary/20">{city} ×</button>)}
+              </div>}
             </div>
-            <div className="flex-1 min-w-[140px]">
-              <label className="app-label">Tarifa (Gs)</label>
-              <input className="app-input" type="number" placeholder="Tarifa" value={drRate} onChange={e => setDrRate(e.target.value)} />
+            <div className="min-w-0">
+              <label className="app-label">💵 Tarifa para todas (Gs)</label>
+              <input className="app-input w-full" min="0" step="1" type="number" placeholder="Ej: 25000" value={drRate} onChange={e => setDrRate(e.target.value)} />
+              <p className="text-xs text-muted-foreground mt-1">Mismo importe en las ciudades marcadas</p>
             </div>
-            <div className="flex items-end">
-              <button className="nav-btn active" onClick={saveRate}>Guardar</button>
+            <div className="lg:pt-6">
+              <button className="nav-btn active w-full" disabled={savingRate || drCities.length === 0 || !drEmail} onClick={saveRate}>
+                {savingRate ? 'Guardando…' : `Guardar ${drCities.length || ''} tarifa(s)`}
+              </button>
             </div>
           </div>
         </div>
