@@ -80,8 +80,8 @@ export default function RatesView() {
   const [drCities, setDrCities] = useState<string[]>([]);
   const [deliverySearch, setDeliverySearch] = useState('');
   const [citySearch, setCitySearch] = useState('');
-  const [showDeliveryPicker, setShowDeliveryPicker] = useState(false);
-  const [showCityPicker, setShowCityPicker] = useState(false);
+  const [showDeliveryPicker, setShowDeliveryPicker] = useState(true);
+  const [showCityPicker, setShowCityPicker] = useState(true);
   const [savingRate, setSavingRate] = useState(false);
   const [drRate, setDrRate] = useState('');
   const [cpCity, setCpCity] = useState('');
@@ -341,67 +341,89 @@ export default function RatesView() {
       </p>
 
       {canManage && (
-        <div className="app-card !p-4 mb-4">
-          <h4 className="font-bold mb-3">
-            {role === 'PROVEEDOR' ? 'Configurar tarifa propia o de delivery' : 'Agregar/Actualizar tarifa de Delivery o Proveedor'}
-          </h4>
-          <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1.1fr_180px_auto] gap-4 items-start">
-            <div className="relative min-w-0">
-              <label className="app-label">🔎 Titular de la tarifa</label>
-              <button type="button" className="app-input w-full flex items-center justify-between gap-2 text-left" onClick={() => { setShowDeliveryPicker(!showDeliveryPicker); setShowCityPicker(false); }}>
-                <span className="truncate">{drEmail ? (() => {
-                  const u = rateUsers.find(u => u.email === drEmail);
-                  return u ? `${u.role === 'PROVEEDOR' ? '🏢' : '🚚'} ${u.name || u.email}` : drEmail;
-                })() : '🔎 Buscar y seleccionar delivery…'}</span><span>⌄</span>
-              </button>
-              {showDeliveryPicker && <div className="absolute z-50 top-full left-0 right-0 mt-2 rounded-xl border border-border bg-card shadow-2xl p-2 min-w-[260px]">
-                <input className="app-input w-full text-sm" autoFocus placeholder="🔎 Nombre o correo del delivery…" value={deliverySearch} onChange={e => setDeliverySearch(e.target.value)} />
-                <div className="max-h-64 overflow-y-auto mt-2 space-y-1">
-                  {filteredRateUsers.map(user => <button type="button" key={`${user.role}-${user.email}`} className={`w-full text-left rounded-lg p-2 text-sm hover:bg-secondary ${drEmail === user.email ? 'bg-primary/10 font-bold' : ''}`} onClick={() => { setDrEmail(user.email); setShowDeliveryPicker(false); setDeliverySearch(''); }}>
-                    <span className="block font-semibold">{user.role === 'PROVEEDOR' ? '🏢 PROVEEDOR' : '🚚 DELIVERY'} — {user.name || user.email}</span>
+        <section className="relative mb-8 w-full min-w-0 space-y-6 rounded-2xl border border-border bg-card p-4 sm:p-6" style={{ height: 'auto', maxHeight: 'none', overflow: 'visible', display: 'block' }}>
+          <div className="border-b border-border pb-4">
+            <h4 className="text-base sm:text-lg font-extrabold">
+              {role === 'PROVEEDOR' ? 'Configurar tarifa propia o de delivery' : 'Agregar o actualizar tarifa de delivery o proveedor'}
+            </h4>
+            <p className="text-xs text-muted-foreground mt-1">Primero elegí el titular, después las ciudades y finalmente el importe.</p>
+          </div>
+
+          <div className="min-w-0 rounded-xl border border-border bg-background/40 p-3 sm:p-4 space-y-3" style={{ height: 'auto', overflow: 'visible' }}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="app-label !m-0">1. 🔎 Buscar delivery o proveedor</label>
+              {drEmail && <span className="text-xs font-semibold text-emerald-400 break-all">Elegido: {drEmail}</span>}
+            </div>
+            <input
+              className="app-input w-full"
+              placeholder="🔎 Escribí el nombre o correo del delivery..."
+              value={deliverySearch}
+              onChange={e => setDeliverySearch(e.target.value)}
+            />
+            <div className="w-full max-h-60 overflow-y-auto rounded-xl border border-border bg-card p-2 space-y-1" style={{ display: 'block' }}>
+              {filteredRateUsers.map(user => (
+                <button
+                  type="button"
+                  key={`${user.role}-${user.email}`}
+                  className={`w-full flex items-center justify-between gap-2 rounded-lg p-3 text-left text-sm hover:bg-secondary ${drEmail === user.email ? 'bg-primary/15 border border-primary/40' : 'border border-transparent'}`}
+                  onClick={() => { setDrEmail(user.email); setDeliverySearch(''); }}
+                >
+                  <span className="min-w-0">
+                    <strong className="block break-words">{user.role === 'PROVEEDOR' ? '🏢 PROVEEDOR' : '🚚 DELIVERY'} — {user.name || user.email}</strong>
                     <span className="block text-xs text-muted-foreground break-all">{user.email}</span>
-                  </button>)}
-                  {filteredRateUsers.length === 0 && <p className="p-3 text-sm text-muted-foreground">Sin resultados para tu búsqueda</p>}
-                </div>
-              </div>}
-            </div>
-            <div className="relative min-w-0">
-              <label className="app-label">📍 Ciudades (selección múltiple)</label>
-              <button type="button" className="app-input w-full flex items-center justify-between gap-2 text-left" onClick={() => { setShowCityPicker(!showCityPicker); setShowDeliveryPicker(false); }}>
-                <span className="truncate">{drCities.length ? `${drCities.length} ciudad(es) seleccionada(s)` : 'Seleccionar una o varias ciudades…'}</span><span>⌄</span>
-              </button>
-              {showCityPicker && <div className="absolute z-50 top-full left-0 right-0 mt-2 rounded-xl border border-border bg-card shadow-2xl p-3 min-w-[260px]">
-                <input className="app-input w-full text-sm" autoFocus placeholder="🔎 Buscar ciudad…" value={citySearch} onChange={e => setCitySearch(e.target.value)} />
-                <div className="flex flex-wrap items-center gap-2 mt-2 mb-2">
-                  <button type="button" className="nav-btn !text-xs !px-2 !py-1" onClick={() => setDrCities(old => Array.from(new Set([...old, ...filteredCities])))}>Marcar visibles</button>
-                  <button type="button" className="nav-btn !text-xs !px-2 !py-1" onClick={() => setDrCities(old => old.filter(city => !filteredCities.includes(city)))}>Quitar visibles</button>
-                  <button type="button" className="nav-btn !text-xs !px-2 !py-1" onClick={() => setShowCityPicker(false)}>Listo ✓</button>
-                </div>
-                <div className="max-h-60 overflow-y-auto space-y-1">
-                  {filteredCities.map(city => <label key={city} className="flex items-center gap-2 rounded-lg p-2 text-sm cursor-pointer hover:bg-secondary">
-                    <input type="checkbox" checked={drCities.includes(city)} onChange={e => setDrCities(old => e.target.checked ? [...old, city] : old.filter(c => c !== city))}/>
-                    <span className="break-words">{city}</span>
-                  </label>)}
-                  {filteredCities.length === 0 && <p className="text-sm text-muted-foreground p-2">Sin ciudades para mostrar</p>}
-                </div>
-              </div>}
-              {drCities.length > 0 && <div className="mt-2 flex gap-1.5 flex-wrap">
-                {drCities.map(city => <button title={`Quitar ${city}`} type="button" key={city} onClick={() => setDrCities(old => old.filter(c => c !== city))} className="text-xs rounded-full px-2.5 py-1 bg-primary/10 border border-primary/20">{city} ×</button>)}
-              </div>}
-            </div>
-            <div className="min-w-0">
-              <label className="app-label">💵 Tarifa para todas (Gs)</label>
-              <input className="app-input w-full" min="0" step="1" type="number" placeholder="Ej: 25000" value={drRate} onChange={e => setDrRate(e.target.value)} />
-              <p className="text-xs text-muted-foreground mt-1">Mismo importe en las ciudades marcadas</p>
-            </div>
-            <div className="lg:pt-6">
-              <button className="nav-btn active w-full" disabled={savingRate || drCities.length === 0 || !drEmail} onClick={saveRate}>
-                {savingRate ? 'Guardando…' : `Guardar ${drCities.length || ''} tarifa(s)`}
-              </button>
+                  </span>
+                  {drEmail === user.email && <span className="shrink-0 font-bold text-emerald-400">✓</span>}
+                </button>
+              ))}
+              {filteredRateUsers.length === 0 && <p className="p-3 text-sm text-muted-foreground">No hay resultados. Probá buscar por nombre o correo.</p>}
             </div>
           </div>
-        </div>
+
+          <div className="min-w-0 rounded-xl border border-border bg-background/40 p-3 sm:p-4 space-y-3" style={{ height: 'auto', overflow: 'visible' }}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="app-label !m-0">2. 📍 Seleccionar ciudades</label>
+              <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold">{drCities.length} elegidas</span>
+            </div>
+            <input
+              className="app-input w-full"
+              placeholder="🔎 Buscar una ciudad..."
+              value={citySearch}
+              onChange={e => setCitySearch(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="nav-btn !text-xs" onClick={() => setDrCities(old => Array.from(new Set([...old, ...filteredCities])))}>✓ Marcar visibles</button>
+              <button type="button" className="nav-btn !text-xs" onClick={() => setDrCities(old => old.filter(city => !filteredCities.includes(city)))}>Quitar visibles</button>
+              <button type="button" className="nav-btn !text-xs" onClick={() => setDrCities([])}>Limpiar todas</button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 w-full max-h-72 overflow-y-auto rounded-xl border border-border bg-card p-3" style={{ alignContent: 'start' }}>
+              {filteredCities.map(city => (
+                <label key={city} className="min-w-0 flex items-center gap-2 rounded-lg border border-border/40 px-3 py-2 text-sm cursor-pointer hover:bg-secondary">
+                  <input type="checkbox" className="shrink-0" checked={drCities.includes(city)} onChange={e => setDrCities(old => e.target.checked ? [...old, city] : old.filter(c => c !== city))} />
+                  <span className="break-words">{city}</span>
+                </label>
+              ))}
+              {filteredCities.length === 0 && <p className="p-2 text-sm text-muted-foreground">No se encontraron ciudades con ese filtro.</p>}
+            </div>
+            {drCities.length > 0 && <div className="flex flex-wrap gap-2">
+              {drCities.map(city => <button key={city} type="button" title={`Quitar ${city}`} onClick={() => setDrCities(old => old.filter(c => c !== city))} className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs break-words">{city} ×</button>)}
+            </div>}
+          </div>
+
+          <div className="rounded-xl border border-border bg-background/40 p-3 sm:p-4 space-y-3" style={{ height: 'auto' }}>
+            <label className="app-label !m-0">3. 💵 Tarifa para todas las ciudades seleccionadas (Gs)</label>
+            <input className="app-input w-full" min="0" step="1" type="number" placeholder="Ejemplo: 25000" value={drRate} onChange={e => setDrRate(e.target.value)} />
+            <p className="text-xs text-muted-foreground">Se aplicará el mismo importe a las {drCities.length} ciudades marcadas.</p>
+            <button type="button" className="nav-btn active w-full sm:w-auto" disabled={savingRate || drCities.length === 0 || !drEmail} onClick={saveRate}>
+              {savingRate ? 'Guardando…' : `💾 Guardar ${drCities.length} tarifa(s)`}
+            </button>
+          </div>
+        </section>
       )}
+
+      <div className="border-t border-border pt-5 mb-3">
+        <h4 className="font-extrabold text-base">📋 Tarifas registradas</h4>
+        <p className="text-xs text-muted-foreground">Listado de tarifas ya guardadas, separado del formulario de configuración.</p>
+      </div>
 
       <table className="app-table">
         <thead>
