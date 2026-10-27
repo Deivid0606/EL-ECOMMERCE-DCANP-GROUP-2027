@@ -38,6 +38,8 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
   const [deliveryFees, setDeliveryFees] = useState<any[]>([]);
   const [feesLoadError, setFeesLoadError] = useState('');
   const [destination, setDestination] = useState('');
+  const [selectedDestinations, setSelectedDestinations] = useState<string[]>([]);
+  const [providerSearch, setProviderSearch] = useState('');
   const [newReceipt, setNewReceipt] = useState<File | null>(null);
   const [files, setFiles] = useState<Record<string, File | null>>({});
   const [busy, setBusy] = useState(false);
@@ -354,7 +356,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
   };
 
   const submit = async () => {
-    if (!destination || !selected.length) {
+    if (!destination || !selectedDestinations.includes(destination) || !selected.length) {
       toast.error('Seleccioná un proveedor que tenga pedidos entregados pendientes de rendición');
       return;
     }
@@ -412,6 +414,9 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
       await supabase.from('delivery_closure_recovery' as any).update({ status: 'COMPLETADO', last_error: null }).eq('id', (draft as any).id);
       toast.success('Cierre registrado con comprobante, pendiente de aprobación.');
       setNewReceipt(null);
+      const remaining = selectedDestinations.filter(id => id !== destination);
+      setSelectedDestinations(remaining);
+      setDestination(remaining[0] || '');
       await reload();
       document.getElementById('closure-submissions')?.scrollIntoView({ behavior: 'smooth' });
     } catch (e: any) {
@@ -603,15 +608,68 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
           <div className="grid lg:grid-cols-[1.3fr_1fr] gap-4">
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-bold">1. Seleccionar proveedor</label>
-                <select className="app-input w-full" value={destination} onChange={e => { setDestination(e.target.value); setNewReceipt(null); }}>
-                  <option value="">Seleccionar proveedor</option>
-                  {catalog.map(b => (
-                    <option key={b.owner_user_id} value={b.owner_user_id}>
-                      {b.owner_name || b.owner_email || 'Proveedor'} — {b.bank_name}
-                    </option>
-                  ))}
-                </select>
+                <label className="text-sm font-bold">1. Seleccionar uno o varios proveedores</label>
+                <p className="text-xs text-muted-foreground">Marcá los proveedores a rendir. Después abrí uno por vez para revisar sus pedidos y adjuntar el comprobante de esa transferencia.</p>
+                <div className="rounded-2xl border border-border bg-background/30 p-3 space-y-3">
+                  <input
+                    className="app-input w-full"
+                    aria-label="Buscar proveedor por nombre o correo"
+                    placeholder="🔎 Buscar proveedor por nombre o correo..."
+                    value={providerSearch}
+                    onChange={e => setProviderSearch(e.target.value)}
+                  />
+                  <div className="flex flex-wrap justify-between gap-2 text-xs">
+                    <span className="font-bold">{selectedDestinations.length} proveedor(es) marcado(s)</span>
+                    <button type="button" className="nav-btn !py-1" onClick={() => { setSelectedDestinations([]); setDestination(''); setNewReceipt(null); }}>Limpiar selección</button>
+                  </div>
+                  <div className="max-h-56 overflow-auto space-y-2">
+                    {catalog.filter(b => `${b.owner_name || ''} ${b.owner_email || ''} ${b.bank_name || ''}`.toLowerCase().includes(providerSearch.toLowerCase())).map(b => {
+                      const id = String(b.owner_user_id);
+                      const marked = selectedDestinations.includes(id);
+                      return (
+                        <label key={id} className="flex items-start gap-3 rounded-xl border border-border bg-card/60 p-3 cursor-pointer">
+                          <input
+                            className="mt-1"
+                            type="checkbox"
+                            checked={marked}
+                            onChange={e => {
+                              const next = e.target.checked ? [...selectedDestinations, id] : selectedDestinations.filter(value => value !== id);
+                              setSelectedDestinations(next);
+                              if (e.target.checked && !destination) { setDestination(id); setNewReceipt(null); }
+                              if (!e.target.checked && destination === id) { setDestination(next[0] || ''); setNewReceipt(null); }
+                            }}
+                          />
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-sm font-bold break-words">{b.owner_name || b.owner_email || 'Proveedor'}</span>
+                            <span className="block text-xs text-muted-foreground break-all">{b.owner_email || ''} · {b.bank_name || ''}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                    {catalog.length > 0 && !catalog.some(b => `${b.owner_name || ''} ${b.owner_email || ''} ${b.bank_name || ''}`.toLowerCase().includes(providerSearch.toLowerCase())) && <p className="text-xs text-muted-foreground">No se encontraron proveedores con esa búsqueda.</p>}
+                  </div>
+                </div>
+                {selectedDestinations.length > 0 && (
+                  <div className="space-y-2 rounded-2xl border border-cyan-500/25 bg-cyan-500/5 p-3">
+                    <div className="font-black text-sm">Proveedor que vas a rendir ahora</div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {catalog.filter(b => selectedDestinations.includes(String(b.owner_user_id))).map(b => {
+                        const id = String(b.owner_user_id);
+                        const active = destination === id;
+                        return <button
+                          key={id}
+                          type="button"
+                          onClick={() => { if (!active) { setDestination(id); setNewReceipt(null); } }}
+                          className={`rounded-xl border p-3 text-left text-sm transition-colors ${active ? 'border-cyan-400 bg-cyan-500/20 font-black' : 'border-border bg-card/50 hover:bg-muted/60'}`}
+                        >
+                          <span className="block break-words">{active ? '● ' : '○ '}{b.owner_name || b.owner_email}</span>
+                          <span className="block text-xs text-muted-foreground mt-1">{b.bank_name} · {active ? 'Cierre actual' : 'Abrir cierre'}</span>
+                        </button>;
+                      })}
+                    </div>
+                    <p className="text-xs text-amber-300">Cada proveedor genera un cierre independiente. Se requiere el comprobante de la transferencia correspondiente. No combines cuentas distintas en un único comprobante.</p>
+                  </div>
+                )}
                 {catalogError && <p className="text-sm text-red-600" role="alert">{catalogError}</p>}
                 {!catalogError && catalog.length === 0 && (
                   <p className="text-sm text-amber-700">
