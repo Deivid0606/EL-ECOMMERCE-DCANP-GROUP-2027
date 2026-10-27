@@ -87,6 +87,12 @@ export default function WithGuidesView() {
   const [guideText, setGuideText] = useState('');
   const [guideId, setGuideId] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deliveryOptions, setDeliveryOptions] = useState<{user_id:string;email:string;name:string}[]>([]);
+  const [deliveryQuery, setDeliveryQuery] = useState('');
+  const [targetDelivery, setTargetDelivery] = useState('');
+  const [assigningBulk, setAssigningBulk] = useState(false);
+  const canAssignFromGuides = role === 'ADMIN' || role === 'PROVEEDOR';
+
   const [loading, setLoading] = useState(false);
   const [guidesTodayCount, setGuidesTodayCount] = useState(0);
   const [deliveredTodayCount, setDeliveredTodayCount] = useState(0);
@@ -161,6 +167,65 @@ export default function WithGuidesView() {
       }
     }
   }, [showGuideModal, currentOrder, qrLoaded]);
+
+  useEffect(() => {
+    if (!canAssignFromGuides) return;
+    let canceled = false;
+    const getDeliveryOptions = async () => {
+      const {data:roleRows,error:roleError} = await supabase.from('user_roles')
+        .select('user_id').eq('role','DELIVERY').eq('approved',true);
+      if (roleError) { toast.error('No se pudieron cargar deliveries: '+roleError.message); return; }
+      const ids = [...new Set((roleRows||[]).map((r:any)=>r.user_id))];
+      if (!ids.length) { if(!canceled)setDeliveryOptions([]); return; }
+      const {data,error} = await supabase.from('profiles').select('user_id,email,name').in('user_id',ids);
+      if (error) { toast.error('No se pudieron cargar perfiles de deliveries: '+error.message); return; }
+      if(!canceled)setDeliveryOptions((data||[]).filter((d:any)=>d.email));
+    };
+    void getDeliveryOptions();
+    return ()=>{canceled=true};
+  },[role]);
+
+  const assignSelectedToDelivery = async () => {
+    if(!canAssignFromGuides) return;
+    const chosen = deliveryOptions.find(d=>d.email===targetDelivery);
+    if(!chosen){toast.error('Elegí un delivery de la lista');return;}
+    const selected = visibleOrders.filter(o=>selectedIds.has(o.id));
+    if(!selected.length){toast.error('Seleccioná pedidos visibles primero');return;}
+    const providerEmail=myEmail.trim().toLowerCase();
+    const unauthorized = role==='PROVEEDOR' && selected.some(o=>{
+      const emails=[
+        ...String(o.provider_emails_list||'').toLowerCase().split(/[,;\\s]+/),
+        String(o.provider_email||'').toLowerCase(),
+        String(o.supplier_email||'').toLowerCase(),
+      ];
+      return !emails.includes(providerEmail);
+    });
+    if(unauthorized){toast.error('Solo podés asignar pedidos de tu proveedor');return;}
+    const assigned = selected.filter(o=>String(o.assigned_delivery||'').trim());
+    if(assigned.length){toast.error(`${assigned.length} pedidos ya tienen delivery. Quitalos de la selección antes de asignar.`);return;}
+    if(!confirm(`¿Asignar ${selected.length} pedidos sin delivery a ${chosen.name||chosen.email}? Esta acción es opcional y no genera guías.`))return;
+    setAssigningBulk(true);
+    try{
+      let success=0;
+      const errors:string[]=[];
+      for(const o of selected){
+        const {data,error}=await supabase.from('orders')
+          .update({assigned_delivery:chosen.email,assigned_at:new Date().toISOString()})
+          .eq('id',o.id)
+          .is('assigned_delivery',null)
+          .select('id');
+        if(error)errors.push(`#${o.order_number||o.id}: ${error.message}`);
+        else if(!data?.length) errors.push(`#${o.order_number||o.id}: ya asignado, sin permiso o cambió`);
+        else success++;
+      }
+      if(success){
+        toast.success(`${success} pedido(s) asignados a ${chosen.name||chosen.email}`);
+        setSelectedIds(new Set());
+        await load();
+      }
+      if(errors.length)toast.error(`${errors.length} pedidos no asignados. ${errors[0]}`);
+    } finally {setAssigningBulk(false);}
+  };
 
   const load = async () => {
     setLoading(true);
@@ -1471,6 +1536,35 @@ export default function WithGuidesView() {
           {loading ? 'Cargando...' : 'Filtrar'}
         </button>
       </div>
+
+      {canAssignFromGuides && (
+        <section className="mb-4 rounded-3xl border border-cyan-500/30 bg-[#101827] p-4 md:p-5 space-y-4 shadow-xl">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 pb-3">
+            <div>
+              <h4 className="text-lg font-black text-white">🚚 Asignación masiva de delivery <span className="text-xs text-cyan-300">(opcional)</span></h4>
+              <p className="text-xs text-slate-400">Solo ADMIN y PROVEEDOR · No modifica estados de guía ni pedidos ya asignados</p>
+            </div>
+            <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-sm font-black text-cyan-200">{selectedIds.size} seleccionado(s)</span>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-3 items-end">
+            <div className="space-y-2 min-w-0">
+              <label className="block text-sm font-bold text-slate-200">🔎 Buscar y seleccionar delivery</label>
+              <input className={pillInputCls+" w-full"} placeholder="Buscar por nombre o correo..." value={deliveryQuery} onChange={e=>setDeliveryQuery(e.target.value)}/>
+              <select className={pillInputCls+" w-full"} value={targetDelivery} onChange={e=>setTargetDelivery(e.target.value)}>
+                <option value="">— Elegir delivery —</option>
+                {deliveryOptions.filter(d=>(d.name+" "+d.email).toLowerCase().includes(deliveryQuery.toLowerCase())).map(d=>
+                  <option key={d.user_id} value={d.email}>{d.name||'DELIVERY'} — {d.email}</option>
+                )}
+              </select>
+              {deliveryOptions.length===0 && <p className="text-xs text-amber-300">No hay deliveries aprobados visibles. Revisá permisos o usuarios.</p>}
+            </div>
+            <button type="button" className={proBtnCls+" bg-gradient-to-r from-cyan-600 to-blue-600 disabled:opacity-50"} disabled={assigningBulk||selectedIds.size===0||!targetDelivery} onClick={assignSelectedToDelivery}>
+              {assigningBulk?'Asignando...':`Asignar ${selectedIds.size} pedidos`}
+            </button>
+          </div>
+          <p className="text-xs text-slate-400">Primero seleccioná los pedidos de la tabla o usá «Seleccionar todos filtrados». Los que ya tienen delivery asignado se bloquean para evitar reemplazos accidentales.</p>
+        </section>
+      )}
 
       {/* Acciones masivas */}
       {selectedIds.size > 0 && (
