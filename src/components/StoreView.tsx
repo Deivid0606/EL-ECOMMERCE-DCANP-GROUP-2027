@@ -48,8 +48,11 @@ const cityKey = (value: unknown) => {
 };
 const departmentKey = (value: unknown) => {
   const department = normalize(value);
-  return department === "asuncion" ? "capital" : department;
+  return ["asuncion", "distrito capital"].includes(department) ? "capital" : department;
 };
+// Asunción es una sola ciudad en todo el país: se acepta aunque en precios
+// figure con otro departamento (p. ej. "Central" en lugar de "Capital").
+const CITY_WITHOUT_DEPARTMENT_CHECK = new Set(["asuncion"]);
 
 export default function StoreView({
   onLoadOrder,
@@ -130,6 +133,7 @@ export default function StoreView({
       if (!referenceReady || !cityKey(city) || !departmentKey(department)) return "unknown";
       const matchingCities = cities.filter((entry) => cityKey(entry.city) === cityKey(city));
       if (!matchingCities.length) return "uncovered";
+      if (CITY_WITHOUT_DEPARTMENT_CHECK.has(cityKey(city))) return "covered";
       return matchingCities.some(
         (entry) => departmentKey(entry.departamento) === departmentKey(department)
       )
