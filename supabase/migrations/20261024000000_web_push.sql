@@ -1,3 +1,4 @@
+-- REEMPLAZADA por 20261030000000_notification_preferences.sql (esta versión nunca se aplicó).
 -- Push: ejecutar DESPUÉS de hacer respaldo. Seguridad por auth.uid().
 CREATE TABLE IF NOT EXISTS public.push_subscriptions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

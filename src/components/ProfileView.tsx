@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import PushSettings from '@/components/PushSettings';
 
 export default function ProfileView() {
   const { user, profile, refreshProfile } = useAuth();
@@ -112,6 +113,8 @@ export default function ProfileView() {
         </button>
         <span className="chip text-[10px]">Solo actualiza tus datos</span>
       </div>
+
+      <PushSettings />
     </div>
   );
 }
