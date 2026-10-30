@@ -355,3 +355,48 @@ BEGIN
 END; $$;
 REVOKE ALL ON FUNCTION public.push_test() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.push_test() TO authenticated;
+
+-- Admin: estados de pedidos de todos los vendedores (opción "Pedidos de todos los vendedores").
+-- (Aplicado en producción como migración push_admin_all_orders.)
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS all_orders boolean NOT NULL DEFAULT false;
+
+CREATE OR REPLACE FUNCTION public.push_order_status_trigger() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE uid uuid; pr public.notification_preferences; status_text text := upper(trim(coalesce(NEW.status, ''))); seller text;
+BEGIN
+  BEGIN
+    IF status_text <> '' AND (TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status) THEN
+      -- Partes del pedido: vendedor, proveedor y delivery.
+      FOR uid IN
+        SELECT DISTINCT u FROM (
+          SELECT public.push_users(NEW.created_by) u
+          UNION SELECT public.push_users(NEW.provider_email)
+          UNION SELECT public.push_users(NEW.assigned_delivery)
+        ) x WHERE u IS NOT NULL
+      LOOP
+        IF status_text = ANY ((public.notif_prefs(uid)).order_statuses) THEN
+          PERFORM public.push_add(uid, 'order:' || NEW.id || ':' || status_text,
+            '📦 ' || status_text || ' · Pedido ' || coalesce(NEW.order_number::text, ''),
+            left(coalesce(NEW.customer_name, 'Cliente') || ' · ' || coalesce(NEW.city, '') || ' · ' || public.push_gs(NEW.total_gs), 300),
+            '/?go=orders');
+        END IF;
+      END LOOP;
+
+      -- Admins que eligieron ver los pedidos de todos los vendedores.
+      FOR uid IN SELECT public.push_role_users('ADMIN') LOOP
+        pr := public.notif_prefs(uid);
+        IF pr.all_orders AND status_text = ANY (pr.order_statuses) THEN
+          IF seller IS NULL THEN
+            seller := coalesce((SELECT name FROM public.profiles WHERE lower(email) = lower(NEW.created_by) LIMIT 1), NEW.created_by, 'Sin vendedor');
+          END IF;
+          PERFORM public.push_add(uid, 'order:' || NEW.id || ':' || status_text,
+            '📦 ' || status_text || ' · Pedido ' || coalesce(NEW.order_number::text, ''),
+            left(coalesce(NEW.customer_name, 'Cliente') || ' · ' || coalesce(NEW.city, '') || ' · ' || public.push_gs(NEW.total_gs) || ' · Vendedor: ' || seller, 300),
+            '/?go=orders');
+        END IF;
+      END LOOP;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'push_order_status_trigger: %', SQLERRM;
+  END;
+  RETURN NEW;
+END; $$;

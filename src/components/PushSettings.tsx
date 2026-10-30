@@ -13,6 +13,7 @@ type Prefs = {
   stock_threshold: number;
   new_products: boolean;
   commissions: boolean;
+  all_orders: boolean;
 };
 
 const DEFAULT_PREFS: Prefs = {
@@ -24,6 +25,7 @@ const DEFAULT_PREFS: Prefs = {
   stock_threshold: 5,
   new_products: true,
   commissions: true,
+  all_orders: false,
 };
 
 // Estados reales de la tabla orders.
@@ -240,7 +242,7 @@ export default function PushSettings() {
             <div>
               <div className="text-xs uppercase tracking-wider font-black text-primary">🚚 Estados de pedidos</div>
               <div className="text-xs text-muted-foreground mt-1">
-                Te avisamos cuando {isProvider ? 'un pedido de tus productos' : isDelivery ? 'un pedido asignado a vos' : 'uno de tus pedidos'} pase a:
+                Te avisamos cuando {isAdmin && prefs.all_orders ? 'cualquier pedido' : isProvider ? 'un pedido de tus productos' : isDelivery ? 'un pedido asignado a vos' : 'uno de tus pedidos'} pase a:
               </div>
             </div>
             <div className="flex gap-1 shrink-0">
@@ -252,6 +254,16 @@ export default function PushSettings() {
               </button>
             </div>
           </div>
+          {isAdmin && (
+            <div className="mt-2 border-b border-border">
+              <Toggle
+                label="Pedidos de todos los vendedores"
+                hint="Como admin, recibí estos estados en cualquier pedido, no sólo en los tuyos."
+                checked={prefs.all_orders}
+                onChange={v => set('all_orders', v)}
+              />
+            </div>
+          )}
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
             {ORDER_STATUSES.map(([status, icon]) => {
               const on = statusSet.has(status);
