@@ -1,16 +1,16 @@
 {
-  "name": "Aplicación de ventas",
-  "short_name": "Ventas",
+  "name": "DCANP Group",
+  "short_name": "DCANP",
+  "description": "Plataforma de gestión DCANP Group",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#111827",
+  "background_color": "#12121c",
+  "theme_color": "#12121c",
   "icons": [
-    {
-      "src": "/push-icon.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

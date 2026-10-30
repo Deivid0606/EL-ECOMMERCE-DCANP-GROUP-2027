@@ -5,7 +5,7 @@ self.addEventListener('push', event => {
   const path = typeof payload.url === 'string' && payload.url.startsWith('/') && !payload.url.startsWith('//') ? payload.url : '/';
   event.waitUntil(self.registration.showNotification(title, {
     body: String(payload.body || 'Tenés una novedad.'),
-    icon: '/favicon.ico', badge: '/favicon.ico',
+    icon: '/icon-192.png', badge: '/badge-96.png',
     tag: String(payload.tag || 'app-alert'),
     data: { url: path }
   }));
