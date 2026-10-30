@@ -64,6 +64,8 @@ function isCreateOrderLink() {
   );
 }
 
+const NOTIFICATION_VIEWS = ['chat', 'store', 'orders', 'products', 'profile'];
+
 function isSpecialOrderLink() {
   return isBotSkyImportLink() || isCreateOrderLink();
 }
@@ -105,6 +107,16 @@ export default function Index() {
     }
 
     if (currentView === 'auth') {
+      // Enlace desde una notificación push (?go=chat, ?go=store, ...).
+      const go = new URLSearchParams(window.location.search).get('go');
+      if (go && NOTIFICATION_VIEWS.includes(go)) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('go');
+        window.history.replaceState(null, '', url.toString());
+        setCurrentView(go as ViewName);
+        return;
+      }
+
       const defaultView =
         profile.role === 'DESPACHANTE' ||
         profile.role === 'DELIVERY'

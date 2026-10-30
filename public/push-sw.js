@@ -2,17 +2,17 @@ self.addEventListener('push', event => {
   let payload = {};
   try { payload = event.data ? event.data.json() : {}; } catch (_) {}
   const title = String(payload.title || 'Notificación');
-  const path = typeof payload.url === 'string' && payload.url.startsWith('/#/') ? payload.url : '/#/';
+  const path = typeof payload.url === 'string' && payload.url.startsWith('/') && !payload.url.startsWith('//') ? payload.url : '/';
   event.waitUntil(self.registration.showNotification(title, {
     body: String(payload.body || 'Tenés una novedad.'),
-    icon: '/push-icon.png', badge: '/push-icon.png',
+    icon: '/favicon.ico', badge: '/favicon.ico',
     tag: String(payload.tag || 'app-alert'),
     data: { url: path }
   }));
 });
 self.addEventListener('notificationclick', event => {
   event.notification.close();
-  const url = new URL(event.notification.data?.url || '/#/', self.location.origin).href;
+  const url = new URL(event.notification.data?.url || '/', self.location.origin).href;
   event.waitUntil((async () => {
     const clientsList = await clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of clientsList) {
