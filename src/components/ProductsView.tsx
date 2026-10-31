@@ -1133,98 +1133,20 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     setLoading(false);
   }, [role, myEmail]);
 
-  // Realtime listener para stock de delivery - CORREGIDO para usar estado_1 y pack_qty
+  // El stock de los pedidos lo descuenta la base de datos (order_stock_ledger);
+  // acá sólo se refresca la vista cuando cambia el stock de un delivery.
   useEffect(() => {
     if (!role || !myEmail) return;
-    
+
     const channel = supabase
       .channel("delivery-stock-updates")
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, async (payload) => {
-        const oldOrder = payload.old;
-        const newOrder = payload.new;
-        
-        // Usar estado_1 en lugar de status
-        const wasDelivered = isDeliveredStatus(oldOrder?.estado_1);
-        const isNowDelivered = isDeliveredStatus(newOrder?.estado_1);
-        
-        console.log('🔔 Cambio detectado:', { 
-          oldEstado: oldOrder?.estado_1, 
-          newEstado: newOrder?.estado_1,
-          wasDelivered, 
-          isNowDelivered,
-          delivery_email: newOrder?.delivery_email,
-          sku: newOrder?.sku
-        });
-        
-        if (!wasDelivered && isNowDelivered && newOrder.delivery_email && newOrder.sku) {
-          console.log('✅ Pedido entregado detectado!');
-          
-          const orderSku = newOrder.sku;
-          const product = products.find((p) => p.sku === orderSku);
-          
-          if (product) {
-            // Usar pack_qty en lugar de quantity
-            const quantity = newOrder.pack_qty || 1;
-            
-            console.log(`📦 Producto: ${product.title}, Cantidad: ${quantity}`);
-            
-            // 1. Obtener stock actual del delivery
-            const { data: currentStock } = await supabase
-              .from("delivery_stock")
-              .select("quantity")
-              .eq("delivery_email", newOrder.delivery_email)
-              .eq("product_id", product.id)
-              .single();
-            
-            if (currentStock) {
-              const newQuantity = Math.max(0, currentStock.quantity - quantity);
-              
-              // 2. Actualizar stock del delivery
-              await supabase
-                .from("delivery_stock")
-                .update({ quantity: newQuantity, updated_at: new Date().toISOString() })
-                .eq("delivery_email", newOrder.delivery_email)
-                .eq("product_id", product.id);
-              
-              // 3. Actualizar stock del producto
-              await supabase
-                .from("products")
-                .update({
-                  stock: Math.max(0, (product.stock || 0) - quantity),
-                  real_stock: Math.max(0, (product.real_stock || 0) - quantity),
-                  updated_at: new Date().toISOString()
-                })
-                .eq("id", product.id);
-              
-              // 4. Registrar movimiento
-              await supabase.from("delivery_stock_movements").insert({
-                delivery_email: newOrder.delivery_email,
-                product_id: product.id,
-                quantity_change: -quantity,
-                reason: "📦 " + newOrder.estado_1,
-                order_id: newOrder.id,
-                created_at: new Date().toISOString()
-              });
-              
-              console.log(`✅ Stock actualizado: ${currentStock.quantity} -> ${newQuantity}`);
-              
-              // 5. Recargar datos
-              await loadDeliveryStocks();
-              await load();
-              
-              toast.success(`Stock actualizado: -${quantity} unidad(es) de ${product.title}`);
-            } else {
-              console.log('⚠️ No hay stock asignado para este delivery/producto');
-            }
-          } else {
-            console.log('❌ Producto no encontrado para SKU:', orderSku);
-          }
-        }
+      .on("postgres_changes", { event: "*", schema: "public", table: "delivery_stock" }, () => {
+        void loadDeliveryStocks();
       })
       .subscribe();
-    
+
     return () => { supabase.removeChannel(channel); };
-  }, [role, myEmail, products, loadDeliveryStocks, load]);
+  }, [role, myEmail, loadDeliveryStocks]);
 
   useEffect(() => {
     load();
