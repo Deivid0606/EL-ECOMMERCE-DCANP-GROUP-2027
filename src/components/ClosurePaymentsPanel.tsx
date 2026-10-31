@@ -21,6 +21,29 @@ const getStatusStyles = (status: string) => {
 
 type Props = { role: string; email: string; userId?: string; view?: 'pagos' | 'historial' | 'config' };
 
+// Fecha de Paraguay (YYYY-MM-DD).
+const pyDay = (value: string | Date = new Date()) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Asuncion' }).format(new Date(value));
+
+// Igual que next_business_day() en la base: lunes a jueves → día siguiente;
+// viernes, sábado y domingo → lunes.
+const nextBusinessDay = (day: string) => {
+  const d = new Date(`${day}T12:00:00Z`);
+  const dow = d.getUTCDay(); // 0 domingo … 6 sábado
+  d.setUTCDate(d.getUTCDate() + (dow === 5 ? 3 : dow === 6 ? 2 : 1));
+  return d.toISOString().slice(0, 10);
+};
+
+const dayLabel = (day: string) =>
+  new Intl.DateTimeFormat('es-PY', { weekday: 'long', day: '2-digit', month: '2-digit', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
+
+const isUnreported = (status: string | null | undefined) => ['', 'PENDIENTE', 'EN RUTA'].includes(String(status || '').trim().toUpperCase());
+const staysOnDay = (status: string | null | undefined) =>
+  ['ENTREGADO', 'ENCOMIENDA ENTREGADA', 'DEVUELTO A DEPÓSITO'].includes(String(status || '').trim().toUpperCase());
+
+type DayOrder = { id: string; order_number: string | null; status: string | null; day_seq: number | null; customer_name: string | null; city: string | null; assigned_at: string };
+type DayClosure = { day: string; next_day: string; orders_total: number; delivered: number; moved: number; finalized_at: string };
+
 type ReceiptPreview = {
   url: string;
   path: string;
@@ -52,6 +75,12 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
   const [selectedProviderIds, setSelectedProviderIds] = useState<string[]>([]);
   const [applyToOwnAccount, setApplyToOwnAccount] = useState(false);
   const [providers, setProviders] = useState<{ user_id: string; name: string | null; email: string | null }[]>([]);
+
+  // Finalicé mi día
+  const today = pyDay();
+  const [dayOrders, setDayOrders] = useState<DayOrder[]>([]);
+  const [dayClosure, setDayClosure] = useState<DayClosure | null>(null);
+  const [finalizing, setFinalizing] = useState(false);
 
   const canOwnBank = role === 'ADMIN' || role === 'PROVEEDOR';
   const isDelivery = role === 'DELIVERY';
@@ -88,6 +117,8 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
     }
 
     if (isDelivery) {
+      await loadDay();
+
       const { data: options, error: optionError } = await (supabase as any).rpc('list_delivery_bank_destinations');
       setCatalog((options || []).filter((b: any) => b.owner_role === 'PROVEEDOR'));
       setCatalogError(optionError ? 'No se pudieron consultar las cuentas bancarias: ' + optionError.message : '');
@@ -145,6 +176,64 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
       setOrderList(all);
     }
   };
+
+  const loadDay = async () => {
+    // Pedidos asignados hoy (hora de Paraguay) y si el día ya se finalizó.
+    const since = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
+    const [ordersRes, closureRes] = await Promise.all([
+      supabase
+        .from('orders')
+        .select('id,order_number,status,day_seq,customer_name,city,assigned_at')
+        .ilike('assigned_delivery', email)
+        .gte('assigned_at', since)
+        .order('day_seq', { ascending: true }),
+      supabase
+        .from('delivery_day_closures' as any)
+        .select('day,next_day,orders_total,delivered,moved,finalized_at')
+        .eq('delivery_email', email.toLowerCase())
+        .eq('day', today)
+        .maybeSingle(),
+    ]);
+    if (!ordersRes.error) setDayOrders(((ordersRes.data || []) as unknown as DayOrder[]).filter(o => pyDay(o.assigned_at) === today));
+    if (!closureRes.error) setDayClosure((closureRes.data as unknown as DayClosure) || null);
+  };
+
+  const finalizeDay = async () => {
+    const unreported = dayOrders.filter(o => isUnreported(o.status));
+    if (unreported.length) {
+      toast.error(`Te faltan reportar ${unreported.length} pedido(s): ${unreported.map(o => `#${o.day_seq || ''} ${o.order_number || ''}`).join(', ')}`);
+      return;
+    }
+    const moving = dayOrders.filter(o => !staysOnDay(o.status));
+    const next = nextBusinessDay(today);
+    if (
+      !confirm(
+        `¿Finalizar tu día ${dayLabel(today)}?\n\n` +
+          `${dayOrders.length - moving.length} pedido(s) quedan en hoy (entregados / devueltos).\n` +
+          `${moving.length} pedido(s) pasan al ${dayLabel(next)}.\n\nNo se puede deshacer.`,
+      )
+    )
+      return;
+
+    setFinalizing(true);
+    const { data, error } = await (supabase as any).rpc('finalize_delivery_day', { p_day: today });
+    setFinalizing(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    const result = (data || {}) as { ok?: boolean; error?: string; moved?: number; next_day?: string; pending?: { order_number: string }[] };
+    if (!result.ok) {
+      toast.error(`${result.error || 'No se pudo finalizar el día'}${result.pending?.length ? `: ${result.pending.map(p => p.order_number).join(', ')}` : ''}`);
+      await loadDay();
+      return;
+    }
+    toast.success(`✅ Día finalizado. ${result.moved || 0} pedido(s) pasaron al ${dayLabel(result.next_day || next)}.`);
+    await loadDay();
+  };
+
+  // Obligatorio: con pedidos asignados hoy, primero se finaliza el día.
+  const dayPending = isDelivery && dayOrders.length > 0 && !dayClosure;
 
   useEffect(() => {
     if (email) void reload();
@@ -356,6 +445,10 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
   };
 
   const submit = async () => {
+    if (dayPending) {
+      toast.error('Primero tocá "Finalicé mi día" para cerrar los pedidos de hoy.');
+      return;
+    }
     if (!destination || !selectedDestinations.includes(destination) || !selected.length) {
       toast.error('Seleccioná un proveedor que tenga pedidos entregados pendientes de rendición');
       return;
@@ -594,11 +687,58 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
       )}
 
       {isDelivery && view === 'pagos' && (
+        <section className={`rounded-2xl border p-4 space-y-3 shadow-sm ${dayClosure ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-amber-500/30 bg-amber-500/5'}`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-amber-500/15 flex items-center justify-center text-lg">📅</div>
+              <div>
+                <h5 className="font-black text-base">Finalicé mi día · {dayLabel(today)}</h5>
+                <p className="text-xs text-muted-foreground">
+                  Obligatorio. Reportá todos tus pedidos de hoy y finalizá: los no entregados (menos DEVUELTO A DEPÓSITO) pasan al {dayLabel(nextBusinessDay(today))}.
+                </p>
+              </div>
+            </div>
+            {dayClosure ? (
+              <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-3 py-1 text-xs font-black text-emerald-300">
+                ✅ Finalizado {new Date(dayClosure.finalized_at).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })} · {dayClosure.moved} pasaron al {dayLabel(dayClosure.next_day)}
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="nav-btn active"
+                disabled={finalizing || dayOrders.length === 0}
+                onClick={() => void finalizeDay()}
+              >
+                {finalizing ? 'Finalizando...' : dayOrders.length === 0 ? 'Sin pedidos hoy' : '✅ Finalicé mi día'}
+              </button>
+            )}
+          </div>
+
+          {dayOrders.length > 0 && (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                <div className="rounded-xl bg-background/40 p-2"><div className="text-[11px] text-muted-foreground">Pedidos de hoy</div><div className="text-xl font-black">{dayOrders.length}</div></div>
+                <div className="rounded-xl bg-background/40 p-2"><div className="text-[11px] text-muted-foreground">Entregados</div><div className="text-xl font-black text-emerald-300">{dayOrders.filter(o => ['ENTREGADO', 'ENCOMIENDA ENTREGADA'].includes(String(o.status || '').toUpperCase())).length}</div></div>
+                <div className="rounded-xl bg-background/40 p-2"><div className="text-[11px] text-muted-foreground">Sin reportar</div><div className="text-xl font-black text-rose-300">{dayOrders.filter(o => isUnreported(o.status)).length}</div></div>
+                <div className="rounded-xl bg-background/40 p-2"><div className="text-[11px] text-muted-foreground">Pasan al siguiente día</div><div className="text-xl font-black text-violet-300">{dayOrders.filter(o => !staysOnDay(o.status)).length}</div></div>
+              </div>
+              {!dayClosure && dayOrders.some(o => isUnreported(o.status)) && (
+                <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs">
+                  <b>Te falta reportar:</b>{' '}
+                  {dayOrders.filter(o => isUnreported(o.status)).map(o => `#${o.day_seq || '?'} ${o.customer_name || o.order_number || ''} (${o.status || 'sin estado'})`).join(' · ')}
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
+
+      {isDelivery && view === 'pagos' && (
         <section className="rounded-2xl border border-border bg-card/70 p-4 space-y-4 shadow-sm">
           <div className="flex items-center gap-3 pb-2 border-b border-border">
             <div className="h-10 w-10 rounded-xl bg-emerald-500/15 flex items-center justify-center text-lg">🚚</div>
             <div>
-              <h5 className="font-black text-base">Finalicé mi día — Hacer cierre</h5>
+              <h5 className="font-black text-base">Rendición — pago a proveedores</h5>
               <p className="text-xs text-muted-foreground">
                 Elegí el proveedor, verificá la cuenta bancaria y cargá el comprobante. Todos los pedidos elegibles del proveedor se incluyen automáticamente.
               </p>
@@ -790,10 +930,10 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                 </div>
                 <button
                   className="nav-btn active !w-full"
-                  disabled={busy || !selected.length || !newReceipt || Boolean(feesLoadError) || selectedMissingRate || total < 0 || orderLimitReached}
+                  disabled={dayPending || busy || !selected.length || !newReceipt || Boolean(feesLoadError) || selectedMissingRate || total < 0 || orderLimitReached}
                   onClick={submit}
                 >
-                  {busy ? 'Enviando cierre...' : '✅ Finalicé mi día — Enviar cierre con comprobante'}
+                  {busy ? 'Enviando cierre...' : dayPending ? '🔒 Primero finalizá tu día (paso de arriba)' : '✅ Enviar rendición con comprobante'}
                 </button>
               </div>
             </div>

@@ -71,6 +71,7 @@ interface HistoryEntry {
   changed_by_email: string;
   changed_by_role: string;
   changed_by_name?: string | null;
+  event_type?: 'status' | 'assignment' | 'carry' | string;
   message: string | null;
   attachment_url: string | null;
   created_at: string;
@@ -410,34 +411,47 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
                       </div>
                     </div>
                     
-                    {/* Quién reportó */}
-                    <p className="mb-2 text-sm text-gray-200">
-                      {item.changed_by_role === 'DELIVERY' ? '🚚' : '👤'}{' '}
-                      <b>{roleLabel(item.changed_by_role)} {item.changed_by_name || item.changed_by_email}</b>{' '}
-                      <span className="text-gray-400">reportó</span> <b>{item.new_status}</b>
-                    </p>
-
-                    {/* Cambio de estado */}
-                    <div className="flex items-center gap-2 flex-wrap mb-3 p-2 rounded-lg bg-gray-900/50">
-                      <span className={`text-sm font-medium px-2 py-0.5 rounded-full border ${statusClass(item.previous_status || 'PENDIENTE')}`}>
-                        {item.previous_status || '—'}
-                      </span>
-                      <span className="text-gray-500">→</span>
-                      <span className={`text-sm font-bold px-2 py-0.5 rounded-full border ${statusClass(item.new_status)}`}>
-                        {item.new_status}
-                      </span>
-                    </div>
-                    
-                    {/* Mensaje */}
-                    {item.message && (
-                      <div className="mt-2 p-3 bg-amber-500/10 rounded-lg border-l-4 border-amber-500">
-                        <div className="flex items-start gap-2">
-                          <span className="text-base">💬</span>
-                          <p className="text-sm text-gray-300 flex-1">{item.message}</p>
-                        </div>
+                    {item.event_type && item.event_type !== 'status' ? (
+                      /* Asignación o pase de día: el detalle viene en el mensaje */
+                      <div className={`p-3 rounded-lg border-l-4 ${item.event_type === 'assignment' ? 'bg-sky-500/10 border-sky-500' : 'bg-violet-500/10 border-violet-500'}`}>
+                        <p className="text-sm font-semibold text-gray-100">{item.message}</p>
+                        <p className="mt-1 text-xs text-gray-400">
+                          Por {roleLabel(item.changed_by_role)} {item.changed_by_name || item.changed_by_email} · estado {item.new_status}
+                        </p>
                       </div>
-                    )}
+                    ) : (
+                      <>
+                      {/* Quién reportó */}
+                      <p className="mb-2 text-sm text-gray-200">
+                        {item.changed_by_role === 'DELIVERY' ? '🚚' : '👤'}{' '}
+                        <b>{roleLabel(item.changed_by_role)} {item.changed_by_name || item.changed_by_email}</b>{' '}
+                        <span className="text-gray-400">reportó</span> <b>{item.new_status}</b>
+                      </p>
+
+                      {/* Cambio de estado */}
+                      <div className="flex items-center gap-2 flex-wrap mb-3 p-2 rounded-lg bg-gray-900/50">
+                        <span className={`text-sm font-medium px-2 py-0.5 rounded-full border ${statusClass(item.previous_status || 'PENDIENTE')}`}>
+                          {item.previous_status || '—'}
+                        </span>
+                        <span className="text-gray-500">→</span>
+                        <span className={`text-sm font-bold px-2 py-0.5 rounded-full border ${statusClass(item.new_status)}`}>
+                          {item.new_status}
+                        </span>
+                      </div>
                     
+                      {/* Mensaje */}
+                      {item.message && (
+                        <div className="mt-2 p-3 bg-amber-500/10 rounded-lg border-l-4 border-amber-500">
+                          <div className="flex items-start gap-2">
+                            <span className="text-base">💬</span>
+                            <p className="text-sm text-gray-300 flex-1">{item.message}</p>
+                          </div>
+                        </div>
+                      )}
+                    
+                      </>
+                    )}
+
                     {/* BOTÓN VER ARCHIVO ADJUNTO */}
                     {item.attachment_url && (
                       <div className="mt-3">
