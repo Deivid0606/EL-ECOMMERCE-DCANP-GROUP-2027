@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
@@ -556,33 +557,9 @@ export default function OrdersView() {
   });
 
   const fetchAllOrdersPaginated = async () => {
-    const pageSize = 1000;
-    let from = 0;
-    let to = pageSize - 1;
-    let allData: any[] = [];
-    let keepGoing = true;
-
-    while (keepGoing) {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range(from, to);
-
-      if (error) throw error;
-
-      const rows = data || [];
-      allData = [...allData, ...rows];
-
-      if (rows.length < pageSize) {
-        keepGoing = false;
-      } else {
-        from += pageSize;
-        to += pageSize;
-      }
-    }
-
-    return allData;
+    const { data, error } = await fetchAllRows('orders', (q) => q.order('created_at', { ascending: false }));
+    if (error) throw error;
+    return data;
   };
 
   // Carga robusta de deliveries.
