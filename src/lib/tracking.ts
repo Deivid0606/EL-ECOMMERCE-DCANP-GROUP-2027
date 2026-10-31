@@ -40,6 +40,18 @@ export function etaMinutes(from: LatLng, to: LatLng) {
   return { km, minutes: Math.max(1, Math.round((km / 25) * 60)) };
 }
 
+// Links cortos (maps.app.goo.gl, goo.gl/maps) no traen coordenadas: se
+// resuelven en el servidor y se leen de la URL final.
+export async function resolveCoords(text: string): Promise<LatLng | null> {
+  const direct = parseCoords(text);
+  if (direct) return direct;
+  const url = String(text || '').match(/https?:\/\/\S+/)?.[0];
+  if (!url || !/goo\.gl|google\./i.test(url)) return null;
+  const { data, error } = await supabase.functions.invoke('resolve-maps-link', { body: { url } });
+  if (error || !data?.url) return null;
+  return parseCoords(String(data.url));
+}
+
 export const trackingUrl = (token: string) => `${window.location.origin}/?seguimiento=${token}`;
 
 /**
@@ -50,15 +62,15 @@ export const trackingUrl = (token: string) => `${window.location.origin}/?seguim
 export async function generateTrackingLink(order: { id: string; phone?: string | null; customer_name?: string | null; order_number?: string | null }) {
   const answer = window.prompt(
     'Ubicación del cliente (opcional, para calcular la llegada):\n' +
-      'pegá el link de Google Maps o la ubicación que te mandó por WhatsApp, o "latitud, longitud".\n' +
+      'pegá el link de Google Maps (también los cortos maps.app.goo.gl), la ubicación que te mandó por WhatsApp o "latitud, longitud".\n' +
       'Dejalo vacío para usar la dirección del pedido.',
     '',
   );
   if (answer === null) return null;
 
-  const dest = answer.trim() ? parseCoords(answer) : null;
+  const dest = answer.trim() ? await resolveCoords(answer) : null;
   if (answer.trim() && !dest) {
-    toast.error('No se pudo leer la ubicación. Pegá un link de Google Maps con coordenadas o "latitud, longitud".');
+    toast.error('No se pudo leer la ubicación. Probá con el link de Google Maps del punto o con "latitud, longitud" (ej. -25.3092, -57.6325).');
     return null;
   }
 
@@ -75,10 +87,14 @@ export async function generateTrackingLink(order: { id: string; phone?: string |
   const url = trackingUrl(String(data));
   try {
     await navigator.clipboard.writeText(url);
-    toast.success('🛵 Link de seguimiento copiado');
   } catch {
-    toast.success('🛵 Link de seguimiento generado');
+    // Sin portapapeles: el link igual se ofrece por WhatsApp.
   }
+  toast.success('🛵 Link copiado', {
+    description:
+      'La motito aparece cuando el delivery abre la app DCANP en su celular y acepta la ubicación. Si ya la tenía abierta, que recargue la página.',
+    duration: 9000,
+  });
 
   const phone = String(order.phone || '').replace(/\D/g, '').replace(/^0/, '595');
   const name = String(order.customer_name || '').split(' ')[0];

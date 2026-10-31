@@ -174,10 +174,14 @@ export default function TrackingPage({ token }: { token: string }) {
             <div>
               <div className="text-xs text-muted-foreground">🛵 {data.delivery_name} está en camino</div>
               <div className="text-2xl font-black">
-                {eta ? `~${eta.minutes} min` : data.location ? 'En camino' : 'Esperando ubicación…'}
+                {eta ? `~${eta.minutes} min` : data.location ? 'En camino' : 'Preparando tu entrega'}
               </div>
               <div className="text-[11px] text-muted-foreground">
-                {eta ? `A ${eta.km.toFixed(1)} km aprox. · llegada estimada` : 'La llegada se calcula cuando hay ubicación'}
+                {eta
+                  ? `A ${eta.km.toFixed(1)} km aprox. · llegada estimada`
+                  : data.location
+                    ? 'Calculando la llegada…'
+                    : `Vas a ver la 🛵 en el mapa apenas ${data.delivery_name || 'tu delivery'} comparta su ubicación`}
                 {stale !== null && stale > 2 ? ` · última ubicación hace ${stale} min` : ''}
               </div>
             </div>
