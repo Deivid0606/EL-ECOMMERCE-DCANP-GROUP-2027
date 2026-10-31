@@ -58,12 +58,19 @@ interface EditOrder {
   provider_email?: string;
 }
 
+// "Delivery", "Admin", ... para mostrar quién reportó.
+const roleLabel = (role: string | null | undefined) =>
+  ({ DELIVERY: 'Delivery', ADMIN: 'Admin', PROVEEDOR: 'Proveedor', VENDEDOR: 'Vendedor', DESPACHANTE: 'Despachante' } as Record<string, string>)[
+    String(role || '').toUpperCase()
+  ] || 'Usuario';
+
 interface HistoryEntry {
   id: string;
   previous_status: string | null;
   new_status: string;
   changed_by_email: string;
   changed_by_role: string;
+  changed_by_name?: string | null;
   message: string | null;
   attachment_url: string | null;
   created_at: string;
@@ -403,6 +410,13 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
                       </div>
                     </div>
                     
+                    {/* Quién reportó */}
+                    <p className="mb-2 text-sm text-gray-200">
+                      {item.changed_by_role === 'DELIVERY' ? '🚚' : '👤'}{' '}
+                      <b>{roleLabel(item.changed_by_role)} {item.changed_by_name || item.changed_by_email}</b>{' '}
+                      <span className="text-gray-400">reportó</span> <b>{item.new_status}</b>
+                    </p>
+
                     {/* Cambio de estado */}
                     <div className="flex items-center gap-2 flex-wrap mb-3 p-2 rounded-lg bg-gray-900/50">
                       <span className={`text-sm font-medium px-2 py-0.5 rounded-full border ${statusClass(item.previous_status || 'PENDIENTE')}`}>
@@ -472,7 +486,7 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
             className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
             onClick={() => {
               const historyText = history.map(h => 
-                `[${new Date(h.created_at).toLocaleString('es-PY')}] ${h.changed_by_role} (${h.changed_by_email}): ${h.previous_status || '—'} → ${h.new_status}${h.message ? `\n  💬 ${h.message}` : ''}${h.attachment_url ? `\n  📎 Archivo adjunto: ${h.attachment_url}` : ''}`
+                `[${new Date(h.created_at).toLocaleString('es-PY')}] ${roleLabel(h.changed_by_role)} ${h.changed_by_name || h.changed_by_email} reportó: ${h.previous_status || '—'} → ${h.new_status}${h.message ? `\n  💬 ${h.message}` : ''}${h.attachment_url ? `\n  📎 Archivo adjunto: ${h.attachment_url}` : ''}`
               ).join('\n\n');
               navigator.clipboard.writeText(historyText);
               toast.success('Historial copiado al portapapeles');
@@ -886,7 +900,12 @@ export default function OrdersView() {
     setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
     toast.success(`Estado → ${newStatus}`);
-    postNews(`Pedido ${orderNum} cambió a ${newStatus} por ${myEmail}`, orderNum);
+    const reporter = `${roleLabel(role)} ${profile?.name?.trim() || myEmail}`;
+    postNews(
+      `${role === 'DELIVERY' ? '🚚' : '📦'} ${reporter} reportó ${newStatus} en el pedido ${orderNum}` +
+        `${message?.trim() ? `: “${message.trim()}”` : ''}${attachmentUrl ? ' 📷' : ''}`,
+      orderNum
+    );
 
     // El stock lo descuenta/repone la base de datos al cambiar el estado.
     if (isStockDiscountStatus(newStatus) || isStockReturnStatus(newStatus)) {
