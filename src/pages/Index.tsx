@@ -32,6 +32,7 @@ const QRScannerView = lazy(() => import('@/components/QRScannerView'));
 const StoreView = lazy(() => import('@/components/StoreView'));
 const BotSkyImportBridge = lazy(() => import('@/components/BotSkyImportBridge'));
 const TrackingPage = lazy(() => import('@/components/TrackingPage'));
+const RoutePage = lazy(() => import('@/components/RoutePage'));
 const LiveLocationSharer = lazy(() => import('@/components/LiveLocationSharer'));
 const StoreOrderTabBridge = lazy(() =>
   import('@/components/StoreOrdersView').then((m) => ({ default: m.StoreOrderTabBridge }))
@@ -183,6 +184,14 @@ export default function Index() {
 
   // Página pública de seguimiento para el cliente (no requiere sesión).
   const trackingToken = new URLSearchParams(window.location.search).get('seguimiento');
+  const routeToken = new URLSearchParams(window.location.search).get('ruta');
+  if (routeToken) {
+    return (
+      <Suspense fallback={<ViewFallback />}>
+        <RoutePage token={routeToken} />
+      </Suspense>
+    );
+  }
   if (trackingToken) {
     return (
       <Suspense fallback={<ViewFallback />}>

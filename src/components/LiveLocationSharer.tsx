@@ -95,7 +95,7 @@ export default function LiveLocationSharer() {
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
         </span>
-        🛵 Compartiendo ubicación con {active} cliente{active === 1 ? '' : 's'}
+        🛵 Compartiendo tu ubicación en vivo · {active} entrega{active === 1 ? '' : 's'}
       </div>
       <div className="mt-0.5 text-[11px] text-muted-foreground">
         {error || 'Mantené la app abierta hasta entregar.'}

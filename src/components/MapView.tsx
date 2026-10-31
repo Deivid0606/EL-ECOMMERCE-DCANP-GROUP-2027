@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -22,7 +22,22 @@ interface DeliveryLoc {
   updated_at: string;
 }
 
+const LiveMapView = lazy(() => import('@/components/LiveMapView'));
+
 export default function MapView() {
+  const { profile } = useAuth();
+  const role = String(profile?.role || '').toUpperCase();
+  if (role === 'ADMIN' || role === 'PROVEEDOR') {
+    return (
+      <Suspense fallback={<div className="p-6 text-muted-foreground">Cargando mapa…</div>}>
+        <LiveMapView />
+      </Suspense>
+    );
+  }
+  return <DeliveryMapView />;
+}
+
+function DeliveryMapView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
   const myEmail = profile?.email || '';

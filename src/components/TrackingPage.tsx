@@ -19,6 +19,7 @@ type Tracking = {
   dest?: LatLng | null;
   location?: (LatLng & { updated_at: string }) | null;
   trail?: [number, number][];
+  queue?: { seq: number | null; total: number; done: number; ahead: number } | null;
 };
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(Math.round(n || 0));
@@ -40,6 +41,54 @@ const minutesAgo = (iso: string) => Math.max(0, Math.round((Date.now() - new Dat
 export default function TrackingPage({ token }: { token: string }) {
   const [data, setData] = useState<Tracking | null>(null);
   const [geocoded, setGeocoded] = useState<LatLng | null>(null);
+
+  // Modo repartidor: quien lleva el pedido abre el link logueado.
+  const [driver, setDriver] = useState<{ is_tracker: boolean; status: string } | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [gpsError, setGpsError] = useState('');
+  const lastSent = useRef(0);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: session }) => {
+      if (!session.session) return;
+      const { data: info } = await (supabase as any).rpc('tracking_driver_info', { p_token: token });
+      if (info?.is_tracker) setDriver(info);
+    });
+  }, [token]);
+
+  const driverOnRoute = Boolean(driver?.is_tracker) && String(data?.status || driver?.status || '').toUpperCase() === 'EN RUTA' && !data?.finished;
+
+  // Con el pedido en camino, esta página envía la ubicación del repartidor.
+  useEffect(() => {
+    if (!driverOnRoute || !('geolocation' in navigator)) return;
+    const id = navigator.geolocation.watchPosition(
+      async (pos) => {
+        setGpsError('');
+        if (Date.now() - lastSent.current < 10_000) return;
+        lastSent.current = Date.now();
+        await (supabase as any).rpc('report_delivery_location', {
+          p_lat: pos.coords.latitude,
+          p_lng: pos.coords.longitude,
+          p_accuracy: pos.coords.accuracy,
+        });
+      },
+      (err) => setGpsError(err.code === err.PERMISSION_DENIED ? 'Permití la ubicación para que el cliente te vea' : 'Sin señal de GPS'),
+      { enableHighAccuracy: true, maximumAge: 5_000, timeout: 30_000 },
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, [driverOnRoute]);
+
+  const startRoute = async () => {
+    setStarting(true);
+    const { error } = await (supabase as any).rpc('tracking_start_route', { p_token: token });
+    setStarting(false);
+    if (error) {
+      setGpsError(error.message);
+      return;
+    }
+    setDriver((d) => (d ? { ...d, status: 'EN RUTA' } : d));
+    setData((d) => (d ? { ...d, status: 'EN RUTA' } : d));
+  };
   const mapRef = useRef<L.Map | null>(null);
   const mapEl = useRef<HTMLDivElement | null>(null);
   const layers = useRef<{ moto?: L.Marker; home?: L.Marker; trail?: L.Polyline }>({});
@@ -209,6 +258,52 @@ export default function TrackingPage({ token }: { token: string }) {
             </div>
           );
         })()}
+
+        {driver?.is_tracker && !data.finished && (
+          <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 p-4">
+            <div className="text-xs font-black uppercase tracking-wider text-amber-200">Modo repartidor</div>
+            {driverOnRoute ? (
+              <p className="mt-1 text-sm">
+                🛵 <b>Estás en camino.</b> Dejá esta página abierta: el cliente ve tu ubicación en vivo.
+                {gpsError && <span className="block text-xs text-rose-300">{gpsError}</span>}
+              </p>
+            ) : (
+              <>
+                <p className="mt-1 text-sm text-muted-foreground">Cuando salgas con este pedido, avisale al cliente:</p>
+                <button
+                  type="button"
+                  className="nav-btn active mt-2 w-full !py-3 !text-base"
+                  disabled={starting}
+                  onClick={() => void startRoute()}
+                >
+                  {starting ? 'Avisando…' : '🛵 Estoy en camino'}
+                </button>
+                {gpsError && <p className="mt-1 text-xs text-rose-300">{gpsError}</p>}
+              </>
+            )}
+          </div>
+        )}
+
+        {data.queue && data.queue.total > 1 && (
+          <div className="rounded-2xl border border-border p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-xs text-muted-foreground">Entregas de {data.delivery_name || 'tu delivery'} hoy</div>
+                <div className="text-lg font-black">
+                  {data.queue.ahead === 0 ? '¡Sos la próxima entrega! 🎉' : `Faltan ${data.queue.ahead} entrega${data.queue.ahead === 1 ? '' : 's'} antes que vos`}
+                </div>
+              </div>
+              <div className="text-right text-xs text-muted-foreground">
+                {data.queue.done} de {data.queue.total}
+                <br />
+                completadas
+              </div>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-secondary">
+              <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round((data.queue.done / data.queue.total) * 100)}%` }} />
+            </div>
+          </div>
+        )}
 
         <div className="rounded-2xl border border-border p-4">
           <div className="text-sm font-black">{data.customer ? `Hola ${data.customer} 👋` : 'Tu pedido'}</div>
