@@ -504,6 +504,17 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
                       </span>
                     </div>
                     
+                    <p className="mb-2 text-sm">
+                      {item.changed_by_role === 'DELIVERY' ? '🚚' : '👤'}{' '}
+                      <b>
+                        {({ DELIVERY: 'Delivery', ADMIN: 'Admin', PROVEEDOR: 'Proveedor', VENDEDOR: 'Vendedor', DESPACHANTE: 'Despachante' } as Record<string, string>)[
+                          String(item.changed_by_role || '').toUpperCase()
+                        ] || 'Usuario'}{' '}
+                        {item.changed_by_name || item.changed_by_email}
+                      </b>{' '}
+                      <span className="text-muted-foreground">reportó</span> <b>{item.new_status}</b>
+                    </p>
+
                     <div className="flex items-center gap-3 flex-wrap mb-3">
                       <span className={`text-sm font-medium px-3 py-1 rounded-lg ${statusClass(item.previous_status || 'PENDIENTE')} bg-opacity-20`}>
                         {item.previous_status || '—'}
