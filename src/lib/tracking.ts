@@ -111,19 +111,39 @@ export async function generateTrackingLink(order: { id: string; phone?: string |
   try {
     await navigator.clipboard.writeText(url);
   } catch {
-    // Sin portapapeles: el link igual se ofrece por WhatsApp.
+    // Sin portapapeles: se puede copiar desde el aviso.
   }
-  toast.success('🛵 Link copiado', {
-    description:
-      'La motito aparece cuando el delivery abre la app DCANP en su celular y acepta la ubicación. Si ya la tenía abierta, que recargue la página.',
-    duration: 9000,
-  });
 
-  const phone = String(order.phone || '').replace(/\D/g, '').replace(/^0/, '595');
-  const name = String(order.customer_name || '').split(' ')[0];
+  const digits = String(order.phone || '').replace(/\D/g, '');
+  const phone = digits.startsWith('595') ? digits : digits.replace(/^0/, '595');
+  const name = String(order.customer_name || '').trim().split(/\s+/)[0];
   const text = `Hola${name ? ` ${name}` : ''} 👋 Tu pedido${order.order_number ? ` ${order.order_number}` : ''} está en camino 🛵. Seguilo en vivo acá: ${url}`;
-  if (phone.length >= 9 && window.confirm('¿Enviar el link al cliente por WhatsApp?')) {
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
-  }
+  const waUrl = phone.length >= 11 ? `https://wa.me/${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
+
+  // El iPhone bloquea abrir WhatsApp después de esperar al servidor: se abre
+  // con un toque en el botón del aviso (gesto del usuario).
+  toast.success('🛵 Link de seguimiento listo', {
+    description:
+      (phone.length >= 11 ? `Tocá "Enviar por WhatsApp" para mandárselo al ${digits}. ` : 'Tocá "Enviar por WhatsApp" y elegí el chat del cliente. ') +
+      'La motito aparece cuando el delivery abre la app DCANP y acepta la ubicación.',
+    duration: 60000,
+    action: {
+      label: '📲 Enviar por WhatsApp',
+      onClick: () => {
+        // Nueva pestaña (en PC no se sale de la app); si el navegador la bloquea, se abre acá.
+        const tab = window.open(waUrl, '_blank', 'noopener');
+        if (!tab) window.location.href = waUrl;
+      },
+    },
+    cancel: {
+      label: '📋 Copiar link',
+      onClick: () => {
+        void navigator.clipboard?.writeText(url).then(
+          () => toast.success('Link copiado'),
+          () => window.prompt('Copiá el link:', url),
+        );
+      },
+    },
+  });
   return url;
 }
