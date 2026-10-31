@@ -23,24 +23,56 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// El perfil se guarda en el dispositivo para mostrar la app al instante al
+// volver a abrirla, aunque la red tarde o falle (la sesión de Supabase ya
+// persiste en localStorage y se renueva sola).
+const PROFILE_CACHE_KEY = 'dcanp-profile-cache';
+
+const readCachedProfile = (userId?: string): UserProfile | null => {
+  try {
+    const cached = JSON.parse(localStorage.getItem(PROFILE_CACHE_KEY) || 'null') as UserProfile | null;
+    return cached && (!userId || cached.user_id === userId) ? cached : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedProfile = (profile: UserProfile | null) => {
+  try {
+    if (profile) localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile));
+    else localStorage.removeItem(PROFILE_CACHE_KEY);
+  } catch {
+    // Sin almacenamiento: sólo se pierde el arranque instantáneo.
+  }
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profile, setProfileState] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
+  const setProfile = (next: UserProfile | null) => {
+    setProfileState(next);
+    writeCachedProfile(next);
+  };
 
-    const { data: roleData } = await supabase
-      .from('user_roles')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
+  // Reintenta ante errores de red: un corte momentáneo no debe mandar al login.
+  const fetchProfile = async (userId: string, attempt = 0): Promise<void> => {
+    const [profileRes, roleRes] = await Promise.all([
+      supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
+      supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle(),
+    ]);
 
+    if (profileRes.error || roleRes.error) {
+      if (attempt < 5) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(8000, 1000 * 2 ** attempt)));
+        return fetchProfile(userId, attempt + 1);
+      }
+      return;
+    }
+
+    const profileData = profileRes.data;
+    const roleData = roleRes.data;
     if (profileData) {
       setProfile({
         email: profileData.email,
@@ -58,26 +90,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        setUser(session.user);
-        setTimeout(() => fetchProfile(session.user.id), 0);
-      } else {
+    let active = true;
+
+    const applySession = async (sessionUser: User | null) => {
+      if (!active) return;
+      if (!sessionUser) {
         setUser(null);
         setProfile(null);
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+      setUser(sessionUser);
+      const cached = readCachedProfile(sessionUser.id);
+      if (cached) {
+        // Arranque instantáneo con el perfil guardado; se actualiza en segundo plano.
+        setProfileState(cached);
+        setLoading(false);
+        void fetchProfile(sessionUser.id);
+      } else {
+        await fetchProfile(sessionUser.id);
+        if (active) setLoading(false);
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Sólo un cierre de sesión real borra el perfil; los refrescos de token no.
+      if (event === 'SIGNED_OUT') {
+        void applySession(null);
+        return;
+      }
+      if (session?.user && (event === 'SIGNED_IN' || event === 'USER_UPDATED')) {
+        setTimeout(() => void applySession(session.user), 0);
+      } else if (session?.user) {
+        setUser(session.user);
+      }
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setUser(session.user);
-        fetchProfile(session.user.id);
-      }
-      setLoading(false);
+      void applySession(session?.user || null);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {

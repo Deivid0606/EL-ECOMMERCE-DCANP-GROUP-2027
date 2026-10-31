@@ -3,6 +3,7 @@ import ClosurePaymentsPanel from './ClosurePaymentsPanel';
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { generateTrackingLink } from '@/lib/tracking';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
@@ -721,6 +722,19 @@ export default function ClosuresView() {
     if (error) {
       console.error('Error guardando en historial:', error);
     }
+  };
+
+  // Link de seguimiento en vivo para el cliente (admin, proveedor o delivery del pedido).
+  const canTrackOrder = (o: any) =>
+    (isAdmin || isSupplier || isDelivery) &&
+    Boolean(o?.assigned_delivery) &&
+    !['ENTREGADO', 'ENCOMIENDA ENTREGADA', 'CANCELADO', 'CANCELÓ POR WHATSAPP', 'NO DESEA', 'RECHAZADO', 'RECHAZADO EN EL LUGAR', 'DEVUELTO A DEPÓSITO'].includes(
+      String(o?.status || '').toUpperCase(),
+    );
+
+  const shareTracking = async (o: any) => {
+    const url = await generateTrackingLink(o);
+    if (url) window.dispatchEvent(new Event('dcanp-tracking-created'));
   };
 
   // Función para cargar el historial
@@ -4559,13 +4573,24 @@ export default function ClosuresView() {
                     ) : <span className="text-xs">{o.status2 || '—'}</span>}
                   </td>
                   <td>
-                    <button
-                      onClick={() => loadOrderHistory(o)}
-                      className="nav-btn !py-1 !px-2 text-[11px] !bg-blue-600/20 hover:!bg-blue-600/40 text-blue-700"
-                      title="Ver historial"
-                    >
-                      📜 Historial
-                    </button>
+                    <div className="flex flex-col gap-1">
+                      <button
+                        onClick={() => loadOrderHistory(o)}
+                        className="nav-btn !py-1 !px-2 text-[11px] !bg-blue-600/20 hover:!bg-blue-600/40 text-blue-700"
+                        title="Ver historial"
+                      >
+                        📜 Historial
+                      </button>
+                      {canTrackOrder(o) && (
+                        <button
+                          onClick={() => void shareTracking(o)}
+                          className="nav-btn !py-1 !px-2 text-[11px] !bg-emerald-600/20 hover:!bg-emerald-600/40"
+                          title="Generar link de seguimiento en vivo para el cliente"
+                        >
+                          🛵 Link seguimiento
+                        </button>
+                      )}
+                    </div>
                   </td>
                   {canManageRendicion && (
                     <td>

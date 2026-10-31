@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchAllRows } from '@/lib/fetchAllRows';
+import { generateTrackingLink } from '@/lib/tracking';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
@@ -1047,6 +1048,19 @@ export default function OrdersView() {
     }
   };
 
+  // Link de seguimiento en vivo (admin, proveedor del pedido o su delivery).
+  const canTrack = (o: any) =>
+    Boolean(o?.assigned_delivery) &&
+    !['ENTREGADO', 'ENCOMIENDA ENTREGADA', 'CANCELADO', 'CANCELÓ POR WHATSAPP', 'NO DESEA', 'RECHAZADO', 'RECHAZADO EN EL LUGAR', 'DEVUELTO A DEPÓSITO'].includes(
+      String(o?.status || '').toUpperCase(),
+    ) &&
+    (role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY');
+
+  const shareTracking = async (o: any) => {
+    const url = await generateTrackingLink(o);
+    if (url) window.dispatchEvent(new Event('dcanp-tracking-created'));
+  };
+
   const loadOrderHistory = async (order: any) => {
     setLoadingHistory(true);
     setSelectedOrder(order);
@@ -1432,6 +1446,15 @@ export default function OrdersView() {
                       >
                         📜 Historial
                       </button>
+                      {canTrack(o) && (
+                        <button
+                          className="nav-btn !px-2 !py-1 !text-[10px] !bg-emerald-600/20 hover:!bg-emerald-600/40"
+                          onClick={() => void shareTracking(o)}
+                          title="Generar link de seguimiento en vivo para el cliente"
+                        >
+                          🛵 Link
+                        </button>
+                      )}
                     </div>
                   </td>
                   {canEdit && (
@@ -1527,6 +1550,11 @@ export default function OrdersView() {
                   >
                     📜 Historial
                   </button>
+                  {canTrack(o) && (
+                    <button className="nav-btn flex-1 !py-2 !text-sm !bg-emerald-600/20" onClick={() => void shareTracking(o)}>
+                      🛵 Link seguimiento
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

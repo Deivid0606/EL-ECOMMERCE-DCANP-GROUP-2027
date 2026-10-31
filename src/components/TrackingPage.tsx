@@ -1,0 +1,213 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { supabase } from '@/integrations/supabase/client';
+import { etaMinutes, type LatLng } from '@/lib/tracking';
+
+type Tracking = {
+  found: boolean;
+  finished?: boolean;
+  expired?: boolean;
+  status?: string;
+  order_number?: string;
+  customer?: string;
+  city?: string;
+  address?: string;
+  total_gs?: number;
+  items?: { title: string; qty: string }[];
+  delivery_name?: string;
+  dest?: LatLng | null;
+  location?: (LatLng & { updated_at: string }) | null;
+  trail?: [number, number][];
+};
+
+const nf = (n: number) => new Intl.NumberFormat('es-PY').format(Math.round(n || 0));
+const POLL_MS = 10_000;
+
+const motoIcon = L.divIcon({
+  className: '',
+  html: '<div style="font-size:34px;line-height:34px;transform:translate(-17px,-24px);filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))">🛵</div>',
+  iconSize: [0, 0],
+});
+const homeIcon = L.divIcon({
+  className: '',
+  html: '<div style="font-size:30px;line-height:30px;transform:translate(-15px,-28px)">🏠</div>',
+  iconSize: [0, 0],
+});
+
+const minutesAgo = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+
+export default function TrackingPage({ token }: { token: string }) {
+  const [data, setData] = useState<Tracking | null>(null);
+  const [geocoded, setGeocoded] = useState<LatLng | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const mapEl = useRef<HTMLDivElement | null>(null);
+  const layers = useRef<{ moto?: L.Marker; home?: L.Marker; trail?: L.Polyline }>({});
+  const fitted = useRef(false);
+
+  // Consulta periódica mientras el pedido está en camino.
+  useEffect(() => {
+    let alive = true;
+    let timer: number | undefined;
+    const load = async () => {
+      const { data: res } = await (supabase as any).rpc('get_order_tracking', { p_token: token });
+      if (!alive) return;
+      setData((res || { found: false }) as Tracking);
+      if (res?.found && !res.finished) timer = window.setTimeout(load, POLL_MS);
+    };
+    void load();
+    return () => {
+      alive = false;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [token]);
+
+  // Sin ubicación del cliente: se aproxima con la dirección del pedido.
+  useEffect(() => {
+    if (!data?.found || data.dest || geocoded || !data.city) return;
+    const q = [data.address, data.city, 'Paraguay'].filter(Boolean).join(', ');
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`)
+      .then(r => r.json())
+      .then((rows: { lat: string; lon: string }[]) => {
+        if (rows?.[0]) setGeocoded({ lat: Number(rows[0].lat), lng: Number(rows[0].lon) });
+      })
+      .catch(() => undefined);
+  }, [data?.found, data?.dest, data?.city, data?.address, geocoded]);
+
+  const dest = data?.dest || geocoded;
+  const eta = useMemo(() => (data?.location && dest ? etaMinutes(data.location, dest) : null), [data?.location, dest]);
+
+  // Mapa
+  useEffect(() => {
+    if (!mapEl.current || mapRef.current || !data?.found) return;
+    mapRef.current = L.map(mapEl.current, { zoomControl: false, attributionControl: true }).setView([-25.2867, -57.647], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap',
+    }).addTo(mapRef.current);
+    L.control.zoom({ position: 'bottomright' }).addTo(mapRef.current);
+  }, [data?.found]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !data?.found) return;
+    const { location, trail } = data;
+
+    if (trail && trail.length > 1) {
+      if (layers.current.trail) layers.current.trail.setLatLngs(trail);
+      else layers.current.trail = L.polyline(trail, { color: '#8c5cff', weight: 5, opacity: 0.85 }).addTo(map);
+    }
+    if (location) {
+      if (layers.current.moto) layers.current.moto.setLatLng(location);
+      else layers.current.moto = L.marker(location, { icon: motoIcon }).addTo(map);
+    } else if (layers.current.moto) {
+      layers.current.moto.remove();
+      layers.current.moto = undefined;
+    }
+    if (dest) {
+      if (layers.current.home) layers.current.home.setLatLng(dest);
+      else layers.current.home = L.marker(dest, { icon: homeIcon }).addTo(map);
+    }
+
+    const points = [location, dest].filter(Boolean) as LatLng[];
+    if (!fitted.current && points.length) {
+      if (points.length === 2) map.fitBounds(L.latLngBounds(points), { padding: [60, 60], maxZoom: 16 });
+      else map.setView(points[0], 15);
+      fitted.current = true;
+    } else if (location && !map.getBounds().pad(-0.15).contains(location)) {
+      map.panTo(location);
+    }
+  }, [data, dest]);
+
+  if (!data) {
+    return <div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">Cargando seguimiento…</div>;
+  }
+
+  if (!data.found) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-6 text-center">
+        <div>
+          <div className="text-5xl">🔗</div>
+          <h1 className="mt-3 text-xl font-black">Link de seguimiento no válido</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Pedile a tu vendedor un link nuevo.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const delivered = ['ENTREGADO', 'ENCOMIENDA ENTREGADA'].includes(String(data.status || '').toUpperCase());
+  const stale = data.location ? minutesAgo(data.location.updated_at) : null;
+
+  return (
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="flex items-center gap-2">
+          <img src="/icon-192.png" alt="" className="h-9 w-9 rounded-xl" />
+          <div>
+            <div className="text-sm font-black leading-tight">DCANP GROUP</div>
+            <div className="text-[11px] text-muted-foreground">Seguimiento de tu pedido</div>
+          </div>
+        </div>
+        {data.order_number && <span className="chip !text-[11px]">Pedido {data.order_number}</span>}
+      </header>
+
+      <div className="relative flex-1 min-h-[52vh]">
+        <div ref={mapEl} className="absolute inset-0" />
+        {data.finished && (
+          <div className="absolute inset-0 z-[500] flex items-center justify-center bg-background/80 p-6 text-center backdrop-blur-sm">
+            <div>
+              <div className="text-6xl">{delivered ? '✅' : 'ℹ️'}</div>
+              <h2 className="mt-3 text-2xl font-black">
+                {delivered ? '¡Pedido entregado!' : data.expired ? 'Seguimiento finalizado' : `Pedido ${String(data.status || '').toLowerCase()}`}
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {delivered ? 'Gracias por tu compra 💜' : 'La ubicación del delivery ya no se comparte.'}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <section className="space-y-3 border-t border-border p-4">
+        {!data.finished && (
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-primary/30 bg-primary/10 p-4">
+            <div>
+              <div className="text-xs text-muted-foreground">🛵 {data.delivery_name} está en camino</div>
+              <div className="text-2xl font-black">
+                {eta ? `~${eta.minutes} min` : data.location ? 'En camino' : 'Esperando ubicación…'}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {eta ? `A ${eta.km.toFixed(1)} km aprox. · llegada estimada` : 'La llegada se calcula cuando hay ubicación'}
+                {stale !== null && stale > 2 ? ` · última ubicación hace ${stale} min` : ''}
+              </div>
+            </div>
+            <span className="relative flex h-3 w-3">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-400" />
+            </span>
+          </div>
+        )}
+
+        <div className="rounded-2xl border border-border p-4">
+          <div className="text-sm font-black">{data.customer ? `Hola ${data.customer} 👋` : 'Tu pedido'}</div>
+          <div className="mt-2 space-y-1 text-sm">
+            {(data.items || []).map((it, i) => (
+              <div key={i} className="flex justify-between gap-2">
+                <span className="truncate">{it.title}</span>
+                <span className="text-muted-foreground">×{it.qty}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-between border-t border-border pt-2 text-sm">
+            <span className="text-muted-foreground">Total a pagar</span>
+            <b>Gs. {nf(Number(data.total_gs || 0))}</b>
+          </div>
+          {(data.address || data.city) && (
+            <div className="mt-2 text-xs text-muted-foreground">📍 {[data.address, data.city].filter(Boolean).join(' · ')}</div>
+          )}
+          {!data.dest && geocoded && <div className="mt-1 text-[11px] text-muted-foreground">Destino ubicado por dirección (aproximado).</div>}
+        </div>
+      </section>
+    </div>
+  );
+}
