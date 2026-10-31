@@ -80,7 +80,7 @@ export const trackingUrl = (token: string) => `${window.location.origin}/?seguim
  * WhatsApp al cliente. Pide (opcional) la ubicación del cliente para calcular
  * la llegada estimada.
  */
-export async function generateTrackingLink(order: { id: string; phone?: string | null; customer_name?: string | null; order_number?: string | null }) {
+export async function generateTrackingLink(order: { id: string; phone?: string | null; customer_name?: string | null; order_number?: string | null; status?: string | null }) {
   const answer = window.prompt(
     'Ubicación del cliente (opcional, para calcular la llegada):\n' +
       'pegá el link de Google Maps (también el de "Compartir"), la ubicación que te mandó por WhatsApp, "latitud, longitud" o la dirección.\n' +
@@ -124,6 +124,9 @@ export async function generateTrackingLink(order: { id: string; phone?: string |
   // con un toque en el botón del aviso (gesto del usuario).
   toast.success('🛵 Link de seguimiento listo', {
     description:
+      (order.status && String(order.status).toUpperCase() !== 'EN RUTA'
+        ? `Ojo: el pedido está en ${order.status}; el cliente lo ve así hasta que pase a EN RUTA. `
+        : '') +
       (phone.length >= 11 ? `Tocá "Enviar por WhatsApp" para mandárselo al ${digits}. ` : 'Tocá "Enviar por WhatsApp" y elegí el chat del cliente. ') +
       'La motito aparece cuando el delivery abre la app DCANP y acepta la ubicación.',
     duration: 60000,

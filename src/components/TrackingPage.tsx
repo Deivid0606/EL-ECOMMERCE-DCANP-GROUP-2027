@@ -169,28 +169,46 @@ export default function TrackingPage({ token }: { token: string }) {
       </div>
 
       <section className="space-y-3 border-t border-border p-4">
-        {!data.finished && (
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-primary/30 bg-primary/10 p-4">
-            <div>
-              <div className="text-xs text-muted-foreground">🛵 {data.delivery_name} está en camino</div>
-              <div className="text-2xl font-black">
-                {eta ? `~${eta.minutes} min` : data.location ? 'En camino' : 'Preparando tu entrega'}
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                {eta
+        {!data.finished && (() => {
+          // El texto sigue el estado real del pedido (no siempre "en camino").
+          const st = String(data.status || '').toUpperCase();
+          const who = data.delivery_name || 'Tu delivery';
+          const onRoute = st === 'EN RUTA' || Boolean(data.location);
+          const info = onRoute
+            ? {
+                label: `🛵 ${who} está en camino`,
+                title: eta ? `~${eta.minutes} min` : data.location ? 'En camino' : 'Saliendo a entregar',
+                sub: eta
                   ? `A ${eta.km.toFixed(1)} km aprox. · llegada estimada`
                   : data.location
                     ? 'Calculando la llegada…'
-                    : `Vas a ver la 🛵 en el mapa apenas ${data.delivery_name || 'tu delivery'} comparta su ubicación`}
-                {stale !== null && stale > 2 ? ` · última ubicación hace ${stale} min` : ''}
+                    : `Vas a ver la 🛵 en el mapa apenas ${who} comparta su ubicación`,
+                live: Boolean(data.location),
+              }
+            : st === 'REAGENDADO'
+              ? { label: '📅 Entrega reprogramada', title: 'Tu entrega fue reagendada', sub: `${who} te va a avisar cuando salga a entregar.`, live: false }
+              : st === 'NO CONTESTA'
+                ? { label: `📞 ${who} intentó comunicarse`, title: 'No pudimos contactarte', sub: 'Respondé la llamada o el WhatsApp para coordinar la entrega.', live: false }
+                : { label: `📦 Pedido asignado a ${who}`, title: 'Preparando tu entrega', sub: `Cuando ${who} salga vas a ver la 🛵 en el mapa.`, live: false };
+          return (
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-primary/30 bg-primary/10 p-4">
+              <div>
+                <div className="text-xs text-muted-foreground">{info.label}</div>
+                <div className="text-2xl font-black">{info.title}</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {info.sub}
+                  {stale !== null && stale > 2 ? ` · última ubicación hace ${stale} min` : ''}
+                </div>
               </div>
+              {info.live && (
+                <span className="relative flex h-3 w-3 shrink-0">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-400" />
+                </span>
+              )}
             </div>
-            <span className="relative flex h-3 w-3">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-400" />
-            </span>
-          </div>
-        )}
+          );
+        })()}
 
         <div className="rounded-2xl border border-border p-4">
           <div className="text-sm font-black">{data.customer ? `Hola ${data.customer} 👋` : 'Tu pedido'}</div>
