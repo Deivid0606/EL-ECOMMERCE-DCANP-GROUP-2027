@@ -457,8 +457,9 @@ export default function Index() {
         </Suspense>
       )}
 
-      {/* Delivery: comparte su ubicación mientras tenga links de seguimiento activos */}
-      {profile.role === 'DELIVERY' && (
+      {/* Comparte la ubicación mientras haya links de seguimiento activos a su nombre
+          (el delivery, o admin / proveedor que eligieron ser la 🛵) */}
+      {['DELIVERY', 'ADMIN', 'PROVEEDOR'].includes(String(profile.role || '')) && (
         <Suspense fallback={null}>
           <LiveLocationSharer />
         </Suspense>
