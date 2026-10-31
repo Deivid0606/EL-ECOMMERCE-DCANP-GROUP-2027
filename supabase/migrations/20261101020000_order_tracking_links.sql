@@ -180,3 +180,24 @@ DO $$ BEGIN
   PERFORM cron.unschedule('cleanup-location-points') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'cleanup-location-points');
   PERFORM cron.schedule('cleanup-location-points', '17 4 * * *', 'SELECT public.cleanup_location_points()');
 END $$;
+
+-- Avisar al delivery (push) que abra la app para compartir su ubicación.
+-- (Aplicado en producción como migración tracking_link_notify_delivery.)
+CREATE OR REPLACE FUNCTION public.tracking_link_notify() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE uid uuid; o public.orders;
+BEGIN
+  BEGIN
+    SELECT * INTO o FROM public.orders WHERE id = NEW.order_id;
+    FOR uid IN SELECT public.push_users(NEW.delivery_email) LOOP
+      PERFORM public.push_add(uid, 'track:' || NEW.token,
+        '🛵 Compartí tu ubicación con el cliente',
+        left('Pedido ' || coalesce(o.order_number::text, '') || ' · ' || coalesce(o.customer_name, '') || ' sigue tu entrega. Abrí la app DCANP y aceptá la ubicación.', 300),
+        '/?go=orders');
+    END LOOP;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'tracking_link_notify: %', SQLERRM;
+  END;
+  RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS tracking_link_notify ON public.order_tracking_links;
+CREATE TRIGGER tracking_link_notify AFTER INSERT ON public.order_tracking_links FOR EACH ROW EXECUTE FUNCTION public.tracking_link_notify();

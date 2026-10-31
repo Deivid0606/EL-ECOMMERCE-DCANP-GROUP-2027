@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
-const CHECK_MS = 60_000;
+const CHECK_MS = 30_000;
 const SEND_EVERY_MS = 10_000;
 
 /**
@@ -26,11 +26,17 @@ export default function LiveLocationSharer() {
     };
     void check();
     const timer = window.setInterval(check, CHECK_MS);
+    // Al volver a la app (desbloquear el celular, cambiar de pestaña) se revisa al instante.
+    const onVisible = () => document.visibilityState === 'visible' && void check();
     window.addEventListener('dcanp-tracking-created', check);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', check);
     return () => {
       alive = false;
       window.clearInterval(timer);
       window.removeEventListener('dcanp-tracking-created', check);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', check);
     };
   }, []);
 
