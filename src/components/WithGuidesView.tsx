@@ -26,6 +26,23 @@ const displayClientName = (value: any): string => {
   return String(value || '').replace(/\s+/g, ' ').trim() || 'SIN NOMBRE';
 };
 
+type StockProduct = { id: string; sku: string | null; title: string | null; stock: number | null; real_stock: number | null; provider_email: string | null; created_at: string };
+type StockLedgerRow = { order_id: string; qty_delivery: number; qty_global: number };
+
+const lc = (v: unknown) => String(v ?? '').trim().toLowerCase();
+
+// Igual que order_item_product() en la base de datos: id, o SKU desempatando por proveedor y título.
+const findItemProduct = (item: any, products: StockProduct[]) => {
+  const id = String(item?.product_id || item?.id || '');
+  const sku = lc(item?.sku);
+  const candidates = products.filter(p => (id && p.id === id) || (sku && lc(p.sku) === sku));
+  const score = (p: StockProduct) =>
+    (id && p.id === id ? 4 : 0) +
+    (lc(p.provider_email) === lc(item?.provider_email) ? 2 : 0) +
+    (lc(p.title) === lc(item?.title) ? 1 : 0);
+  return candidates.sort((a, b) => score(b) - score(a) || a.created_at.localeCompare(b.created_at))[0];
+};
+
 const getOrderItems = (order: any): any[] => {
   try {
     if (Array.isArray(order?.items_json)) return order.items_json;
@@ -92,6 +109,13 @@ export default function WithGuidesView() {
   const [targetDelivery, setTargetDelivery] = useState('');
   const [assigningBulk, setAssigningBulk] = useState(false);
   const canAssignFromGuides = role === 'ADMIN' || role === 'PROVEEDOR';
+  const canApplyStock = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
+
+  // STOCK: productos, stock por delivery y descuentos vigentes por pedido.
+  const [stockProducts, setStockProducts] = useState<StockProduct[]>([]);
+  const [deliveryStock, setDeliveryStock] = useState<Map<string, number>>(new Map());
+  const [stockLedger, setStockLedger] = useState<Map<string, StockLedgerRow[]>>(new Map());
+  const [applyingStockId, setApplyingStockId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [guidesTodayCount, setGuidesTodayCount] = useState(0);
@@ -270,6 +294,7 @@ export default function WithGuidesView() {
       }
 
       setOrders(allRows);
+      void loadStock(allRows);
 
       const today = todayISO();
       const [guidesTodayRes, deliveredTodayRes] = await Promise.all([
@@ -302,6 +327,56 @@ export default function WithGuidesView() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadStock = async (rows: any[]) => {
+    const [productsRes, deliveryRes] = await Promise.all([
+      supabase.from('products').select('id, sku, title, stock, real_stock, provider_email, created_at'),
+      supabase.from('delivery_stock' as any).select('delivery_email, product_id, quantity'),
+    ]);
+    if (!productsRes.error) setStockProducts((productsRes.data || []) as StockProduct[]);
+    if (!deliveryRes.error) {
+      setDeliveryStock(new Map((deliveryRes.data || []).map((d: any) => [`${lc(d.delivery_email)}|${d.product_id}`, Number(d.quantity || 0)])));
+    }
+
+    // Descuentos vigentes sólo de los pedidos con guía (donde se usa el botón).
+    const ids = rows.filter(o => o.status2 === 'GUIA GENERADA').map(o => o.id);
+    const ledger = new Map<string, StockLedgerRow[]>();
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data } = await supabase
+        .from('order_stock_ledger' as any)
+        .select('order_id, qty_delivery, qty_global')
+        .is('reverted_at', null)
+        .in('order_id', ids.slice(i, i + 200));
+      for (const row of (data || []) as unknown as StockLedgerRow[]) {
+        ledger.set(row.order_id, [...(ledger.get(row.order_id) || []), row]);
+      }
+    }
+    setStockLedger(ledger);
+  };
+
+  const applyStock = async (o: any) => {
+    const items = getOrderItems(o);
+    const summary = items.map((it: any) => `• ${it.title || it.sku} x${it.qty || it.quantity || 1}`).join('\n');
+    if (!window.confirm(`¿Bajar el stock de este pedido?\n\n${summary}\n\nSi el delivery asignado tiene stock propio se descuenta del suyo; si no, del stock global (visible y real). Si el pedido vuelve a DEVUELTO A DEPÓSITO, el stock se repone.`)) return;
+
+    setApplyingStockId(o.id);
+    const { data, error } = await supabase.rpc('apply_order_stock' as any, { p_order_id: o.id });
+    setApplyingStockId(null);
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    const result = (data || {}) as { ok?: boolean; already?: boolean; missing?: string[]; lines?: { delivery: number; global: number }[] };
+    if (result.already) toast.info('Este pedido ya tenía el stock descontado.');
+    else if (result.ok) {
+      const fromDelivery = (result.lines || []).reduce((n, l) => n + l.delivery, 0);
+      const fromGlobal = (result.lines || []).reduce((n, l) => n + l.global, 0);
+      toast.success(`📦 Stock descontado: ${[fromDelivery ? `${fromDelivery} del delivery` : '', fromGlobal ? `${fromGlobal} del global` : ''].filter(Boolean).join(' + ')}`);
+    } else toast.error('No se encontró el producto del pedido en el catálogo.');
+    if (result.missing?.length) toast.warning(`Sin producto en catálogo: ${result.missing.join(', ')}`);
+    await loadStock(orders);
   };
 
   useEffect(() => { 
@@ -1634,7 +1709,7 @@ export default function WithGuidesView() {
 
       {/* Tabla */}
       <div className="overflow-auto rounded-2xl border border-slate-700/80 bg-[#101827] shadow-2xl">
-        <table className="w-full min-w-[1550px] text-sm [&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-3">
+        <table className="w-full min-w-[1740px] text-sm [&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-3">
           <thead className="bg-[#070b18] sticky top-0 z-10">
             <tr className="text-left text-[11px] uppercase tracking-widest text-slate-400 border-b border-slate-700/80">
               <th className="w-[40px] text-center">
@@ -1647,6 +1722,7 @@ export default function WithGuidesView() {
               <th>Ciudad</th>
               <th>Cliente</th>
               <th>Productos</th>
+              <th>Stock</th>
               <th>Repetido</th>
               <th>Teléfono</th>
               <th>Vendedor</th>
@@ -1674,6 +1750,44 @@ export default function WithGuidesView() {
                       </span>
                     )) : <span className="text-slate-500">—</span>}
                   </div>
+                </td>
+                <td className="text-xs min-w-[190px]">
+                  {(() => {
+                    const delivery = lc(o.assigned_delivery || o.delivery_email);
+                    const applied = stockLedger.get(o.id);
+                    return (
+                      <div className="space-y-1.5">
+                        {getOrderItems(o).map((it: any, i: number) => {
+                          const p = findItemProduct(it, stockProducts);
+                          const qty = Number(it.qty || it.quantity || 1);
+                          if (!p) return <div key={i} className="text-amber-300">⚠️ Sin producto</div>;
+                          const own = delivery ? deliveryStock.get(`${delivery}|${p.id}`) || 0 : 0;
+                          const low = own < qty && Number(p.stock || 0) < qty;
+                          return (
+                            <div key={i} className={`whitespace-nowrap ${low ? 'text-rose-300' : 'text-slate-200'}`} title={p.title || ''}>
+                              <b>{p.stock ?? 0}</b> <span className="text-slate-400">· real</span> <b>{p.real_stock ?? 0}</b>
+                              {own > 0 && <span className="ml-1 text-sky-300">· 🚚 {own}</span>}
+                            </div>
+                          );
+                        })}
+                        {o.status2 === 'GUIA GENERADA' && (applied ? (
+                          <span className="inline-flex rounded-full border border-emerald-400/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
+                            ✅ Descontado ({applied.reduce((n, r) => n + r.qty_delivery + r.qty_global, 0)})
+                          </span>
+                        ) : canApplyStock ? (
+                          <button
+                            className="nav-btn !px-2 !py-1 !text-[11px] !bg-orange-500/20 !text-orange-200 border border-orange-400/40"
+                            disabled={applyingStockId === o.id}
+                            onClick={() => void applyStock(o)}
+                          >
+                            {applyingStockId === o.id ? 'Bajando...' : '📦 Bajar stock'}
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-amber-300">Stock sin descontar</span>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </td>
                 <td className="text-xs">
                   {repeatedClients.some(c => normalizeClientName(c.name) === normalizeClientName(o.customer_name)) ? (
@@ -1705,7 +1819,7 @@ export default function WithGuidesView() {
             ))}
             {visibleOrders.length === 0 && (
               <tr>
-                <td colSpan={13} className="text-center text-muted-foreground py-8">Sin pedidos para mostrar</td>
+                <td colSpan={14} className="text-center text-muted-foreground py-8">Sin pedidos para mostrar</td>
               </tr>
             )}
           </tbody>
