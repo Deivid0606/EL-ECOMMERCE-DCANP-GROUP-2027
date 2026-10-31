@@ -108,16 +108,16 @@ export async function generateTrackingLink(order: { id: string; phone?: string |
   }
 
   const url = trackingUrl(String(data));
-  try {
-    await navigator.clipboard.writeText(url);
-  } catch {
-    // Sin portapapeles: se puede copiar desde el aviso.
-  }
 
   const digits = String(order.phone || '').replace(/\D/g, '');
   const phone = digits.startsWith('595') ? digits : digits.replace(/^0/, '595');
   const name = String(order.customer_name || '').trim().split(/\s+/)[0];
   const text = `Hola${name ? ` ${name}` : ''} 👋 Tu pedido${order.order_number ? ` ${order.order_number}` : ''} está en camino 🛵. Seguilo en vivo acá: ${url}`;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Sin portapapeles: se puede copiar desde el aviso.
+  }
   const waUrl = phone.length >= 11 ? `https://wa.me/${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
 
   // El iPhone bloquea abrir WhatsApp después de esperar al servidor: se abre
@@ -136,11 +136,12 @@ export async function generateTrackingLink(order: { id: string; phone?: string |
       },
     },
     cancel: {
-      label: '📋 Copiar link',
+      label: '📋 Copiar mensaje',
       onClick: () => {
-        void navigator.clipboard?.writeText(url).then(
-          () => toast.success('Link copiado'),
-          () => window.prompt('Copiá el link:', url),
+        // El mismo mensaje que se manda por WhatsApp, para pegarlo a mano.
+        void navigator.clipboard?.writeText(text).then(
+          () => toast.success('Mensaje copiado: pegalo en el chat del cliente'),
+          () => window.prompt('Copiá el mensaje:', text),
         );
       },
     },
