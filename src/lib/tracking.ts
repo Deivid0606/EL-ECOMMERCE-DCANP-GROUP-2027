@@ -168,3 +168,47 @@ export async function generateTrackingLink(order: { id: string; phone?: string |
   });
   return url;
 }
+
+export const routeUrl = (token: string) => `${window.location.origin}/?ruta=${token}`;
+
+/**
+ * Link global de la ruta del día de un delivery: el cliente ve la 🛵 y cuántas
+ * entregas tiene antes (sin datos de otros clientes). Sin email = mi propia ruta.
+ */
+export async function generateRouteLink(deliveryEmail?: string | null, name?: string | null) {
+  const { data, error } = await (supabase as any).rpc('create_route_link', { p_delivery_email: deliveryEmail ?? null });
+  if (error || !data) {
+    toast.error(error?.message || 'No se pudo generar el link de ruta');
+    return null;
+  }
+  const url = routeUrl(String(data));
+  const who = String(name || '').trim();
+  const text = `Hola 👋 Seguí en vivo la ruta de entregas${who ? ` de ${who}` : ''} de hoy 🛵 y mirá cuántas entregas faltan antes de la tuya: ${url}`;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Sin portapapeles: se copia desde el aviso.
+  }
+  const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  toast.success('🌐 Link de ruta listo', {
+    description: 'Sirve para todos los clientes del día: ven la 🛵 en vivo y las entregas pendientes (sin datos de los demás).',
+    duration: 60000,
+    action: {
+      label: '📲 Enviar por WhatsApp',
+      onClick: () => {
+        const tab = window.open(waUrl, '_blank', 'noopener');
+        if (!tab) window.location.href = waUrl;
+      },
+    },
+    cancel: {
+      label: '📋 Copiar mensaje',
+      onClick: () => {
+        void navigator.clipboard?.writeText(text).then(
+          () => toast.success('Mensaje copiado'),
+          () => window.prompt('Copiá el mensaje:', text),
+        );
+      },
+    },
+  });
+  return url;
+}

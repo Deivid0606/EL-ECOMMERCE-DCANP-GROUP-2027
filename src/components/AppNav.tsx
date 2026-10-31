@@ -97,7 +97,7 @@ const navItems: NavItem[] = [
   {
     id: 'mapa',
     label: 'Mapa',
-    roles: ['ADMIN', 'DELIVERY'],
+    roles: ['ADMIN', 'PROVEEDOR', 'DELIVERY'],
   },
   {
     id: 'qrScanner',

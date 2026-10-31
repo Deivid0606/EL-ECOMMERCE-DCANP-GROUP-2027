@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { generateRouteLink } from '@/lib/tracking';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 const validFile = (f: File) =>
@@ -878,6 +879,12 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                 ✅ Finalizado {new Date(dayClosure.finalized_at).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })} · {dayClosure.moved} pasaron al {dayLabel(dayClosure.next_day)}
               </span>
             ) : (
+              <div className="flex flex-wrap gap-2">
+              {dayOrders.length > 0 && (
+                <button type="button" className="nav-btn" onClick={() => void generateRouteLink(null)}>
+                  🌐 Link de mi ruta
+                </button>
+              )}
               <button
                 type="button"
                 className="nav-btn active"
@@ -886,6 +893,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
               >
                 {finalizing ? 'Finalizando...' : dayOrders.length === 0 ? 'Sin pedidos hoy' : '✅ Finalicé mi día'}
               </button>
+              </div>
             )}
           </div>
 
