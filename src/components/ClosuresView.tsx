@@ -2134,52 +2134,123 @@ export default function ClosuresView() {
   const totalAPagar = settlementSummary.netToSettle;
   const netRendir = settlementSummary.netToSettle;
 
+  // ============================================
+  // DETALLE FINANCIERO (admin ve todo; proveedor sólo sus pedidos)
+  //
+  // En un pedido ENTREGADO, lo cobrado se reparte así:
+  //   venta = comisión del vendedor + precio del proveedor + delivery cobrado al vendedor
+  // Ganancia producto  = precio del proveedor − costo real
+  // Ganancia delivery  = delivery cobrado al vendedor − pago al delivery
+  // Ganancia neta      = ganancia producto + ganancia delivery
+  // ENCOMIENDA ENTREGADA no suma venta: sólo resta el pago al delivery.
+  // ============================================
+  type FinanceRow = {
+    provider: string;
+    orders: number;
+    venta: number;
+    comisiones: number;
+    precioProveedor: number;
+    costoReal: number;
+    gananciaProducto: number;
+    deliveryCobrado: number;
+    pagoDelivery: number;
+    gananciaDelivery: number;
+    gananciaNeta: number;
+    sinCosto: number;
+  };
+
+  const emptyFinance = (provider: string): FinanceRow => ({
+    provider,
+    orders: 0,
+    venta: 0,
+    comisiones: 0,
+    precioProveedor: 0,
+    costoReal: 0,
+    gananciaProducto: 0,
+    deliveryCobrado: 0,
+    pagoDelivery: 0,
+    gananciaDelivery: 0,
+    gananciaNeta: 0,
+    sinCosto: 0,
+  });
+
+  const orderProviderEmail = (order: any) =>
+    String(
+      order?.provider_email ||
+        String(order?.provider_emails_list || '').split(/[,;\s]+/)[0] ||
+        (() => {
+          try {
+            const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : order.items_json || [];
+            return items[0]?.provider_email || '';
+          } catch {
+            return '';
+          }
+        })(),
+    )
+      .trim()
+      .toLowerCase();
+
+  const orderProviderPrice = (order: any) => {
+    try {
+      const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : order.items_json || [];
+      const fromItems = items.reduce(
+        (sum: number, it: any) => sum + Number(it.provider_price_gs || 0) * Number(it.qty || it.quantity || 1),
+        0,
+      );
+      if (fromItems > 0) return fromItems;
+    } catch {
+      // Sin ítems legibles: se calcula por diferencia.
+    }
+    return Math.max(0, Number(order.total_gs || 0) - Number(order.commission_gs || 0) - Number(order.delivery_gs || 0));
+  };
+
   const financePanel = useMemo(() => {
-    let ventaProductos = 0;
-    let costoRealProductos = 0;
-    let deliveryCobrado = 0;
-    let pagoDelivery = 0;
-    let comisiones = 0;
+    const total = emptyFinance('TOTAL');
+    const byProvider = new Map<string, FinanceRow>();
+    const me = myEmail.trim().toLowerCase();
 
     delivered.forEach((order: any) => {
-      const deliveryPayment = getDeliveryPaymentForOrder(order);
+      const provider = orderProviderEmail(order) || 'Sin proveedor';
+      // El proveedor sólo ve los pedidos de sus productos.
+      if (isSupplier && provider !== me) return;
 
-      /*
-       * En ENCOMIENDA ENTREGADA:
-       * - total_gs no se suma.
-       * - costo de producto no se suma.
-       * - delivery cobrado no se suma.
-       * - comisión no se suma.
-       * - solamente se suma el pago correspondiente al delivery.
-       */
+      const row = byProvider.get(provider) || emptyFinance(provider);
+      const add = (key: keyof Omit<FinanceRow, 'provider'>, value: number) => {
+        row[key] += value;
+        total[key] += value;
+      };
+
+      const pago = getDeliveryPaymentForOrder(order);
+      add('orders', 1);
+      add('pagoDelivery', pago);
+
       if (order.status === 'ENCOMIENDA ENTREGADA') {
-        pagoDelivery += deliveryPayment;
-        return;
+        add('gananciaDelivery', -pago);
+        add('gananciaNeta', -pago);
+      } else {
+        const venta = Number(order.total_gs || 0);
+        const comision = Number(order.commission_gs || 0);
+        const deliveryCobrado = Number(order.delivery_gs || 0);
+        const precio = orderProviderPrice(order);
+        const costo = getOrderRealProductCost(order);
+        if (costo <= 0) add('sinCosto', 1);
+        add('venta', venta);
+        add('comisiones', comision);
+        add('deliveryCobrado', deliveryCobrado);
+        add('precioProveedor', precio);
+        add('costoReal', costo);
+        add('gananciaProducto', precio - costo);
+        add('gananciaDelivery', deliveryCobrado - pago);
+        add('gananciaNeta', precio - costo + deliveryCobrado - pago);
       }
-
-      ventaProductos += Number(order.total_gs || 0);
-      costoRealProductos += getOrderRealProductCost(order);
-      deliveryCobrado += Number(order.delivery_gs || 0);
-      pagoDelivery += deliveryPayment;
-      comisiones += Number(order.commission_gs || 0);
+      byProvider.set(provider, row);
     });
 
-    const gananciaProductos = ventaProductos - costoRealProductos;
-    const gananciaDelivery = deliveryCobrado - pagoDelivery;
-    const utilidadFinal =
-      gananciaProductos + gananciaDelivery - comisiones;
-
     return {
-      ventaProductos,
-      costoRealProductos,
-      gananciaProductos,
-      deliveryCobrado,
-      pagoDelivery,
-      gananciaDelivery,
-      comisiones,
-      utilidadFinal,
+      total,
+      providers: Array.from(byProvider.values()).sort((x, y) => y.gananciaNeta - x.gananciaNeta),
     };
-  }, [delivered, productCostMap, fees]);
+  }, [delivered, productCostMap, fees, isSupplier, myEmail]);
 
 
 
@@ -3852,58 +3923,94 @@ export default function ClosuresView() {
         </>
       )}
 
-      {(isAdmin || isSupplier) && delivered.length > 0 && (
+      {(isAdmin || isSupplier) && financePanel.total.orders > 0 && (
         <div className="app-card !p-4 mb-4 border border-emerald-500/30 bg-emerald-500/5">
           <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
             <div>
-              <h4 className="font-extrabold text-lg">💰 Panel de Ganancia Real</h4>
+              <h4 className="font-extrabold text-lg">💰 Detalle de ganancias {isSupplier ? '· mis productos' : '· todos los proveedores'}</h4>
               <p className="text-xs text-muted-foreground">
-                ENTREGADO suma la operación completa. ENCOMIENDA ENTREGADA excluye el monto del pedido y solo suma el pago al delivery. El costo usa products.real_cost_gs.
+                {financePanel.total.orders} pedidos entregados en los filtros actuales. Venta = comisión del vendedor + precio del proveedor + delivery cobrado al vendedor.
               </p>
             </div>
             <div className="text-right">
-              <div className="text-xs text-muted-foreground">UTILIDAD FINAL</div>
-              <div className="text-2xl font-extrabold text-emerald-400">Gs {nf(financePanel.utilidadFinal)}</div>
+              <div className="text-xs text-muted-foreground">GANANCIA NETA</div>
+              <div className="text-3xl font-extrabold text-emerald-400">Gs {nf(financePanel.total.gananciaNeta)}</div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
-            <div className="kpi-card border border-blue-500/20 bg-blue-500/10">
-              <div className="text-xs text-blue-200 mb-2 font-bold">📦 Resumen productos</div>
-              <div className="flex justify-between text-xs mb-1"><span>Venta productos</span><strong>Gs {nf(financePanel.ventaProductos)}</strong></div>
-              <div className="flex justify-between text-xs mb-1"><span>Costo real productos</span><strong className="text-red-400">- Gs {nf(financePanel.costoRealProductos)}</strong></div>
-              <div className="border-t border-blue-500/20 mt-2 pt-2 flex justify-between text-sm">
-                <span className="font-bold">Ganancia productos</span>
-                <strong className="text-blue-300">Gs {nf(financePanel.gananciaProductos)}</strong>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            <div className="kpi-card border border-slate-500/20">
+              <div className="text-xs text-slate-300 mb-2 font-bold">🧾 Cobrado a clientes</div>
+              <div className="text-xl font-black">Gs {nf(financePanel.total.venta)}</div>
+              <div className="mt-2 space-y-1 text-xs">
+                <div className="flex justify-between"><span>Comisiones vendedores</span><strong className="text-amber-300">Gs {nf(financePanel.total.comisiones)}</strong></div>
+                <div className="flex justify-between"><span>Precio proveedor</span><strong>Gs {nf(financePanel.total.precioProveedor)}</strong></div>
+                <div className="flex justify-between"><span>Delivery cobrado al vendedor</span><strong>Gs {nf(financePanel.total.deliveryCobrado)}</strong></div>
               </div>
+            </div>
+
+            <div className="kpi-card border border-blue-500/20 bg-blue-500/10">
+              <div className="text-xs text-blue-200 mb-2 font-bold">📦 Ganancia del producto</div>
+              <div className="flex justify-between text-xs mb-1"><span>Precio proveedor</span><strong>Gs {nf(financePanel.total.precioProveedor)}</strong></div>
+              <div className="flex justify-between text-xs mb-1"><span>Costo real del producto</span><strong className="text-red-400">- Gs {nf(financePanel.total.costoReal)}</strong></div>
+              <div className="border-t border-blue-500/20 mt-2 pt-2 flex justify-between text-sm">
+                <span className="font-bold">Me queda como proveedor</span>
+                <strong className="text-blue-300">Gs {nf(financePanel.total.gananciaProducto)}</strong>
+              </div>
+              {financePanel.total.sinCosto > 0 && (
+                <div className="mt-1 text-[11px] text-amber-300">⚠️ {financePanel.total.sinCosto} pedido(s) con producto sin costo real cargado</div>
+              )}
             </div>
 
             <div className="kpi-card border border-cyan-500/20 bg-cyan-500/10">
-              <div className="text-xs text-cyan-200 mb-2 font-bold">🚚 Resumen delivery</div>
-              <div className="flex justify-between text-xs mb-1"><span>Delivery cobrado</span><strong>Gs {nf(financePanel.deliveryCobrado)}</strong></div>
-              <div className="flex justify-between text-xs mb-1"><span>Pago delivery</span><strong className="text-red-400">- Gs {nf(financePanel.pagoDelivery)}</strong></div>
+              <div className="text-xs text-cyan-200 mb-2 font-bold">🚚 Ganancia del delivery</div>
+              <div className="flex justify-between text-xs mb-1"><span>Cobrado al vendedor</span><strong>Gs {nf(financePanel.total.deliveryCobrado)}</strong></div>
+              <div className="flex justify-between text-xs mb-1"><span>Pagado al delivery</span><strong className="text-red-400">- Gs {nf(financePanel.total.pagoDelivery)}</strong></div>
               <div className="border-t border-cyan-500/20 mt-2 pt-2 flex justify-between text-sm">
-                <span className="font-bold">Ganancia delivery</span>
-                <strong className="text-cyan-300">Gs {nf(financePanel.gananciaDelivery)}</strong>
-              </div>
-            </div>
-
-            <div className="kpi-card border border-amber-500/20 bg-amber-500/10">
-              <div className="text-xs text-amber-200 mb-2 font-bold">👨‍💼 Comisiones</div>
-              <div className="flex justify-between text-xs mb-1"><span>Comisión vendedor</span><strong className="text-red-400">- Gs {nf(financePanel.comisiones)}</strong></div>
-              <div className="border-t border-amber-500/20 mt-2 pt-2 text-[11px] text-muted-foreground">
-                Tomado desde orders.commission_gs
+                <span className="font-bold">Me queda del delivery</span>
+                <strong className="text-cyan-300">Gs {nf(financePanel.total.gananciaDelivery)}</strong>
               </div>
             </div>
 
             <div className="kpi-card border border-emerald-500/20 bg-emerald-500/10">
-              <div className="text-xs text-emerald-200 mb-2 font-bold">💎 Utilidad neta final</div>
-              <div className="text-[11px] text-muted-foreground mb-2">
-                Ganancia productos + Ganancia delivery - Comisiones
-              </div>
-              <div className="text-3xl font-extrabold text-emerald-400">Gs {nf(financePanel.utilidadFinal)}</div>
+              <div className="text-xs text-emerald-200 mb-2 font-bold">💎 Ganancia neta</div>
+              <div className="text-[11px] text-muted-foreground mb-2">Ganancia del producto + ganancia del delivery</div>
+              <div className="text-3xl font-extrabold text-emerald-400">Gs {nf(financePanel.total.gananciaNeta)}</div>
             </div>
           </div>
+
+          {isAdmin && financePanel.providers.length > 1 && (
+            <div className="mt-4 overflow-auto rounded-xl border border-border">
+              <table className="app-table min-w-[900px]">
+                <thead>
+                  <tr>
+                    <th>Proveedor</th>
+                    <th className="text-right">Pedidos</th>
+                    <th className="text-right">Cobrado</th>
+                    <th className="text-right">Comisiones</th>
+                    <th className="text-right">Costo real</th>
+                    <th className="text-right">Gan. producto</th>
+                    <th className="text-right">Gan. delivery</th>
+                    <th className="text-right">Ganancia neta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {financePanel.providers.map(row => (
+                    <tr key={row.provider}>
+                      <td className="font-semibold">{suppliers.find((sp: any) => String(sp.email || '').toLowerCase() === row.provider)?.name || row.provider}</td>
+                      <td className="text-right">{row.orders}</td>
+                      <td className="text-right">Gs {nf(row.venta)}</td>
+                      <td className="text-right text-amber-300">Gs {nf(row.comisiones)}</td>
+                      <td className="text-right text-red-300">Gs {nf(row.costoReal)}</td>
+                      <td className="text-right text-blue-300">Gs {nf(row.gananciaProducto)}</td>
+                      <td className="text-right text-cyan-300">Gs {nf(row.gananciaDelivery)}</td>
+                      <td className="text-right font-black text-emerald-300">Gs {nf(row.gananciaNeta)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
