@@ -611,6 +611,8 @@ export default function ClosuresView() {
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [fees, setFees] = useState<any[]>([]);
+  // Intentos pagados al delivery (estados configurados, ej. RECHAZADO EN EL LUGAR) por pedido.
+  const [attemptPayByOrder, setAttemptPayByOrder] = useState<Map<string, number>>(new Map());
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   
@@ -1138,6 +1140,21 @@ export default function ClosuresView() {
       setSuppliers([]);
     }
   };
+
+  useEffect(() => {
+    if (!(isAdmin || isSupplier)) return;
+    supabase
+      .from('delivery_attempt_payments' as any)
+      .select('order_id, amount')
+      .then(({ data, error }) => {
+        if (error) return;
+        const map = new Map<string, number>();
+        ((data || []) as unknown as { order_id: string; amount: number }[]).forEach(a =>
+          map.set(a.order_id, (map.get(a.order_id) || 0) + Number(a.amount || 0)),
+        );
+        setAttemptPayByOrder(map);
+      });
+  }, [isAdmin, isSupplier]);
 
   useEffect(() => {
     loadSuppliers();
@@ -2246,11 +2263,28 @@ export default function ClosuresView() {
       byProvider.set(provider, row);
     });
 
+    // Intentos pagados en pedidos no entregados de los filtros actuales.
+    filteredOrders.forEach((order: any) => {
+      if (order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA') return;
+      const pago = attemptPayByOrder.get(order.id) || 0;
+      if (!pago) return;
+      const provider = orderProviderEmail(order) || 'Sin proveedor';
+      if (isSupplier && provider !== me) return;
+      const row = byProvider.get(provider) || emptyFinance(provider);
+      row.pagoDelivery += pago;
+      row.gananciaDelivery -= pago;
+      row.gananciaNeta -= pago;
+      total.pagoDelivery += pago;
+      total.gananciaDelivery -= pago;
+      total.gananciaNeta -= pago;
+      byProvider.set(provider, row);
+    });
+
     return {
       total,
       providers: Array.from(byProvider.values()).sort((x, y) => y.gananciaNeta - x.gananciaNeta),
     };
-  }, [delivered, productCostMap, fees, isSupplier, myEmail]);
+  }, [delivered, filteredOrders, attemptPayByOrder, productCostMap, fees, isSupplier, myEmail]);
 
 
 
@@ -3965,7 +3999,7 @@ export default function ClosuresView() {
             <div className="kpi-card border border-cyan-500/20 bg-cyan-500/10">
               <div className="text-xs text-cyan-200 mb-2 font-bold">🚚 Ganancia del delivery</div>
               <div className="flex justify-between text-xs mb-1"><span>Cobrado al vendedor</span><strong>Gs {nf(financePanel.total.deliveryCobrado)}</strong></div>
-              <div className="flex justify-between text-xs mb-1"><span>Pagado al delivery</span><strong className="text-red-400">- Gs {nf(financePanel.total.pagoDelivery)}</strong></div>
+              <div className="flex justify-between text-xs mb-1"><span>Pagado al delivery (tarifas e intentos)</span><strong className="text-red-400">- Gs {nf(financePanel.total.pagoDelivery)}</strong></div>
               <div className="border-t border-cyan-500/20 mt-2 pt-2 flex justify-between text-sm">
                 <span className="font-bold">Me queda del delivery</span>
                 <strong className="text-cyan-300">Gs {nf(financePanel.total.gananciaDelivery)}</strong>

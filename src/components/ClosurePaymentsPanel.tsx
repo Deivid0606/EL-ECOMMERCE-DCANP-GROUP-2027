@@ -41,6 +41,33 @@ const isUnreported = (status: string | null | undefined) => ['', 'PENDIENTE', 'E
 const staysOnDay = (status: string | null | undefined) =>
   ['ENTREGADO', 'ENCOMIENDA ENTREGADA', 'DEVUELTO A DEPÓSITO'].includes(String(status || '').trim().toUpperCase());
 
+type AttemptPayment = {
+  id: number;
+  order_id: string;
+  status: string;
+  day: string;
+  amount: number;
+  base_fee: number;
+  provider_email: string | null;
+  orders?: { order_number: string | null; customer_name: string | null; city: string | null } | null;
+};
+
+type StatusPayRule = { status: string; mode: 'fixed' | 'percent'; value: number; active: boolean };
+
+// Estados que pueden pagarse al delivery como intento (no entregados).
+const PAYABLE_STATUSES = [
+  'RECHAZADO EN EL LUGAR',
+  'RECHAZADO',
+  'NO CONTESTA',
+  'NO DESEA',
+  'REAGENDADO',
+  'CANCELADO',
+  'CANCELÓ POR WHATSAPP',
+  'DEVUELTO A DEPÓSITO',
+];
+
+const accountKey = (b: any) => `${String(b?.bank_name || '').trim().toLowerCase()}|${String(b?.bank_account || '').replace(/\D/g, '')}`;
+
 type DayOrder = { id: string; order_number: string | null; status: string | null; day_seq: number | null; customer_name: string | null; city: string | null; assigned_at: string };
 type DayClosure = { day: string; next_day: string; orders_total: number; delivered: number; moved: number; finalized_at: string };
 
@@ -82,6 +109,12 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
   const [dayClosure, setDayClosure] = useState<DayClosure | null>(null);
   const [finalizing, setFinalizing] = useState(false);
 
+  // Pagos por intento (estados configurados) y pago único
+  const [attempts, setAttempts] = useState<AttemptPayment[]>([]);
+  const [payMode, setPayMode] = useState<'single' | 'group'>('single');
+  const [statusRules, setStatusRules] = useState<StatusPayRule[]>([]);
+  const [savingRules, setSavingRules] = useState(false);
+
   const canOwnBank = role === 'ADMIN' || role === 'PROVEEDOR';
   const isDelivery = role === 'DELIVERY';
 
@@ -116,8 +149,27 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
       else setOrphans(missing.data || []);
     }
 
+    if (role === 'ADMIN') {
+      const rules = await supabase.from('delivery_status_pay' as any).select('status,mode,value,active');
+      if (!rules.error) {
+        const saved = (rules.data || []) as unknown as StatusPayRule[];
+        setStatusRules(
+          PAYABLE_STATUSES.map(
+            st => saved.find(r => r.status.toUpperCase() === st) || { status: st, mode: 'percent', value: 0, active: false },
+          ),
+        );
+      }
+    }
+
     if (isDelivery) {
       await loadDay();
+
+      const open = await supabase
+        .from('delivery_attempt_payments' as any)
+        .select('id,order_id,status,day,amount,base_fee,provider_email,orders(order_number,customer_name,city)')
+        .is('closure_id', null)
+        .order('day', { ascending: true });
+      if (!open.error) setAttempts((open.data || []) as unknown as AttemptPayment[]);
 
       const { data: options, error: optionError } = await (supabase as any).rpc('list_delivery_bank_destinations');
       setCatalog((options || []).filter((b: any) => b.owner_role === 'PROVEEDOR'));
@@ -287,25 +339,38 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
   const dest = catalog.find(b => b.owner_user_id === destination && b.owner_role === 'PROVEEDOR');
   const destEmail = String(dest?.owner_email || '').trim().toLowerCase();
 
+  // Pago único: proveedores marcados que comparten la misma cuenta bancaria.
+  const groupDests = catalog.filter(b => selectedDestinations.includes(String(b.owner_user_id)) && b.owner_role === 'PROVEEDOR');
+  const sameAccount = groupDests.length >= 2 && new Set(groupDests.map(accountKey)).size === 1;
+  const isGroup = payMode === 'group' && sameAccount;
+  const activeEmails = isGroup
+    ? groupDests.map(b => String(b.owner_email || '').trim().toLowerCase()).filter(Boolean)
+    : destEmail
+      ? [destEmail]
+      : [];
+
+  const orderAddresses = (o: any) =>
+    [
+      ...String(o.provider_emails_list || '')
+        .toLowerCase()
+        .split(/[,;\s]+/),
+      String(o.provider_email || '').toLowerCase(),
+      String(o.supplier_email || '').toLowerCase(),
+    ]
+      .map(x => x.trim())
+      .filter(Boolean);
+
   const eligible = useMemo(
-    () =>
-      orderList.filter(o => {
-        if (!dest || !destEmail) return false;
-        const addresses = [
-          ...String(o.provider_emails_list || '')
-            .toLowerCase()
-            .split(/[,;\s]+/),
-          String(o.provider_email || '').toLowerCase(),
-          String(o.supplier_email || '').toLowerCase(),
-        ]
-          .map(x => x.trim())
-          .filter(Boolean);
-        return addresses.includes(destEmail);
-      }),
-    [orderList, dest, destEmail],
+    () => orderList.filter(o => activeEmails.length > 0 && orderAddresses(o).some(a => activeEmails.includes(a))),
+    [orderList, activeEmails.join(',')],
   );
 
   const selected = eligible;
+  const bankDest = isGroup ? groupDests[0] : dest;
+
+  // Intentos pagados (ej. RECHAZADO EN EL LUGAR) de los proveedores elegidos.
+  const eligibleAttempts = attempts.filter(a => activeEmails.includes(String(a.provider_email || '').toLowerCase()));
+  const attemptsTotal = eligibleAttempts.reduce((sum, a) => sum + Number(a.amount || 0), 0);
 
   const normalize = (value: unknown) =>
     String(value || '')
@@ -326,7 +391,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
   const orderLimitReached = orderList.length >= 5000;
   const selectedMissingRate = selected.some(o => !feeInfo(o).configured);
   const collected = selected.reduce((sum, o) => sum + (o.status === 'ENTREGADO' ? Number(o.total_gs || 0) : 0), 0);
-  const deliveryPay = selected.reduce((sum, o) => sum + feeInfo(o).fee, 0);
+  const deliveryPay = selected.reduce((sum, o) => sum + feeInfo(o).fee, 0) + attemptsTotal;
   const total = collected - deliveryPay;
 
   const historyKpis = useMemo(() => {
@@ -394,6 +459,22 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
     }
   };
 
+  const saveStatusRules = async () => {
+    const invalid = statusRules.find(r => r.active && (!(r.value > 0) || (r.mode === 'percent' && r.value > 100)));
+    if (invalid) {
+      toast.error(`Revisá el valor de ${invalid.status}: monto mayor a 0 o porcentaje entre 1 y 100`);
+      return;
+    }
+    setSavingRules(true);
+    const { error } = await supabase.from('delivery_status_pay' as any).upsert(
+      statusRules.map(r => ({ ...r, value: Number(r.value || 0), updated_by: email, updated_at: new Date().toISOString() })) as any,
+      { onConflict: 'status' },
+    );
+    setSavingRules(false);
+    if (error) toast.error(error.message);
+    else toast.success('Pagos por estado guardados. Se aplican desde ahora a los nuevos reportes.');
+  };
+
   const upload = async (folder: string, id: string, file: File) => {
     if (!validFile(file)) throw new Error('Archivo inválido: JPG, PNG, WEBP o PDF hasta 8 MB');
     const ext = file.type === 'application/pdf' ? 'pdf' : file.type.split('/')[1];
@@ -449,7 +530,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
       toast.error('Primero tocá "Finalicé mi día" para cerrar los pedidos de hoy.');
       return;
     }
-    if (!destination || !selectedDestinations.includes(destination) || !selected.length) {
+    if ((!isGroup && (!destination || !selectedDestinations.includes(destination))) || (!selected.length && !eligibleAttempts.length)) {
       toast.error('Seleccioná un proveedor que tenga pedidos entregados pendientes de rendición');
       return;
     }
@@ -465,7 +546,46 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
       toast.error('No se identificó tu usuario');
       return;
     }
-    if (!confirm(`¿Confirmás que transferiste Gs ${nf(total)} al destinatario seleccionado?`)) return;
+    if (
+      !confirm(
+        isGroup
+          ? `¿Confirmás que transferiste Gs ${nf(total)} en UN SOLO PAGO a la cuenta compartida de ${groupDests.length} proveedores?`
+          : `¿Confirmás que transferiste Gs ${nf(total)} al destinatario seleccionado?`,
+      )
+    )
+      return;
+
+    if (isGroup) {
+      setBusy(true);
+      try {
+        const ext = newReceipt.type === 'application/pdf' ? 'pdf' : newReceipt.type.split('/')[1];
+        const path = `closure-pending/${userId}/${crypto.randomUUID()}.${ext}`;
+        const { error: uploadError } = await supabase.storage.from('financial-receipts').upload(path, newReceipt, {
+          contentType: newReceipt.type,
+          upsert: false,
+        });
+        if (uploadError) throw uploadError;
+        const { error } = await (supabase as any).rpc('submit_delivery_closure_group', {
+          p_destination_user_ids: groupDests.map(b => b.owner_user_id),
+          p_order_ids: selected.map(o => o.id),
+          p_receipt_path: path,
+        });
+        if (error) throw error;
+        toast.success(`Pago único registrado para ${groupDests.length} proveedores, pendiente de aprobación.`);
+        setNewReceipt(null);
+        setSelectedDestinations([]);
+        setDestination('');
+        setPayMode('single');
+        await reload();
+        document.getElementById('closure-submissions')?.scrollIntoView({ behavior: 'smooth' });
+      } catch (e: any) {
+        toast.error('No se registró el pago único: ' + (e.message || 'Error desconocido'));
+        await reload();
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
 
     setBusy(true);
     try {
@@ -613,6 +733,61 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
           </button>
         </div>
       </div>
+
+      {role === 'ADMIN' && view === 'config' && (
+        <section className="rounded-2xl border border-border bg-card/60 p-4 space-y-4 shadow-sm">
+          <div className="flex items-center gap-3 pb-2 border-b border-border">
+            <div className="h-10 w-10 rounded-xl bg-orange-500/15 flex items-center justify-center text-lg">💸</div>
+            <div>
+              <h5 className="font-black text-base">Pago al delivery por estado</h5>
+              <p className="text-xs text-muted-foreground">
+                Elegí qué intentos no entregados se le pagan al delivery: un monto fijo o un porcentaje de su tarifa de esa ciudad. Se descuenta en su rendición.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {statusRules.map((rule, i) => {
+              const update = (patch: Partial<StatusPayRule>) =>
+                setStatusRules(old => old.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+              return (
+                <div
+                  key={rule.status}
+                  className={`grid grid-cols-1 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-2 rounded-xl border p-3 ${rule.active ? 'border-orange-500/40 bg-orange-500/5' : 'border-border bg-background/30'}`}
+                >
+                  <label className="flex items-center gap-2 text-sm font-bold">
+                    <input type="checkbox" checked={rule.active} onChange={e => update({ active: e.target.checked })} />
+                    {rule.status}
+                  </label>
+                  <select className="app-input !py-2" value={rule.mode} disabled={!rule.active} onChange={e => update({ mode: e.target.value as StatusPayRule['mode'] })}>
+                    <option value="fixed">Monto fijo (Gs)</option>
+                    <option value="percent">% de la tarifa de la ciudad</option>
+                  </select>
+                  <input
+                    className="app-input !py-2"
+                    type="number"
+                    min={0}
+                    max={rule.mode === 'percent' ? 100 : undefined}
+                    disabled={!rule.active}
+                    value={rule.value || ''}
+                    placeholder={rule.mode === 'percent' ? 'Ej. 50' : 'Ej. 15000'}
+                    onChange={e => update({ value: Number(e.target.value) })}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {!rule.active
+                      ? 'No se paga'
+                      : rule.mode === 'percent'
+                        ? `Con tarifa de Gs 25.000 → paga Gs ${nf(Math.round((25000 * (rule.value || 0)) / 100))}`
+                        : `Paga Gs ${nf(rule.value || 0)} por intento`}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <button className="nav-btn active" disabled={savingRules} onClick={() => void saveStatusRules()}>
+            {savingRules ? 'Guardando...' : 'Guardar pagos por estado'}
+          </button>
+        </section>
+      )}
 
       {canOwnBank && view === 'config' && (
         <section className="rounded-2xl border border-border bg-card/60 p-4 space-y-4 shadow-sm">
@@ -807,7 +982,36 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                         </button>;
                       })}
                     </div>
-                    <p className="text-xs text-amber-300">Cada proveedor genera un cierre independiente. Se requiere el comprobante de la transferencia correspondiente. No combines cuentas distintas en un único comprobante.</p>
+                    {selectedDestinations.length >= 2 && (
+                      <div className="rounded-xl border border-border bg-background/40 p-2 space-y-2">
+                        <div className="text-xs font-bold">¿Cómo vas a pagar?</div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <button
+                            type="button"
+                            className={`rounded-lg border p-2 text-left text-xs ${payMode === 'single' ? 'border-cyan-400 bg-cyan-500/15 font-black' : 'border-border'}`}
+                            onClick={() => { setPayMode('single'); setNewReceipt(null); }}
+                          >
+                            🧾 Un comprobante por proveedor
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!sameAccount}
+                            className={`rounded-lg border p-2 text-left text-xs disabled:opacity-50 ${isGroup ? 'border-cyan-400 bg-cyan-500/15 font-black' : 'border-border'}`}
+                            onClick={() => { setPayMode('group'); setNewReceipt(null); }}
+                          >
+                            💳 Un solo pago para los {groupDests.length}
+                            <span className="block font-normal text-muted-foreground">
+                              {sameAccount ? 'Comparten la misma cuenta bancaria' : 'No disponible: tienen cuentas distintas'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-xs text-amber-300">
+                      {isGroup
+                        ? `Pago único: se registra un cierre por proveedor con el mismo comprobante. Transferí el total de los ${groupDests.length} a la cuenta compartida.`
+                        : 'Cada proveedor genera un cierre independiente. Se requiere el comprobante de la transferencia correspondiente. No combines cuentas distintas en un único comprobante.'}
+                    </p>
                   </div>
                 )}
                 {catalogError && <p className="text-sm text-red-600" role="alert">{catalogError}</p>}
@@ -818,15 +1022,15 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                 )}
               </div>
 
-              {dest && (
+              {bankDest && (
                 <div className="rounded-2xl border border-primary/20 bg-primary/10 p-4 text-sm space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <strong className="text-base">2. Datos bancarios para transferir</strong>
-                    {dest.bank_alias && (
+                    {bankDest.bank_alias && (
                       <button
                         className="nav-btn"
                         onClick={() => {
-                          void navigator.clipboard.writeText(dest.bank_alias);
+                          void navigator.clipboard.writeText(bankDest.bank_alias);
                           toast.success('Alias copiado');
                         }}
                       >
@@ -835,21 +1039,21 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                     )}
                   </div>
                   <div className="grid sm:grid-cols-2 gap-2">
-                    <div className="rounded-xl bg-background/40 p-3"><span className="text-xs text-muted-foreground">Titular</span><div className="font-extrabold">{dest.bank_holder}</div></div>
-                    <div className="rounded-xl bg-background/40 p-3"><span className="text-xs text-muted-foreground">Banco</span><div className="font-extrabold">{dest.bank_name}</div></div>
-                    <div className="rounded-xl bg-background/40 p-3"><span className="text-xs text-muted-foreground">Cuenta</span><div className="font-extrabold break-all">{dest.bank_account}</div></div>
-                    <div className="rounded-xl bg-background/40 p-3"><span className="text-xs text-muted-foreground">CI / Alias</span><div className="font-extrabold break-all">{dest.bank_ci || '—'} {dest.bank_alias ? `· ${dest.bank_alias}` : ''}</div></div>
+                    <div className="rounded-xl bg-background/40 p-3"><span className="text-xs text-muted-foreground">Titular</span><div className="font-extrabold">{bankDest.bank_holder}</div></div>
+                    <div className="rounded-xl bg-background/40 p-3"><span className="text-xs text-muted-foreground">Banco</span><div className="font-extrabold">{bankDest.bank_name}</div></div>
+                    <div className="rounded-xl bg-background/40 p-3"><span className="text-xs text-muted-foreground">Cuenta</span><div className="font-extrabold break-all">{bankDest.bank_account}</div></div>
+                    <div className="rounded-xl bg-background/40 p-3"><span className="text-xs text-muted-foreground">CI / Alias</span><div className="font-extrabold break-all">{bankDest.bank_ci || '—'} {bankDest.bank_alias ? `· ${bankDest.bank_alias}` : ''}</div></div>
                   </div>
                 </div>
               )}
 
-              {dest && eligible.length === 0 && (
+              {bankDest && eligible.length === 0 && !eligibleAttempts.length && (
                 <p className="text-sm text-amber-700 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
                   No se encontraron pedidos entregados, sin rendir y asignados a este delivery para el proveedor seleccionado.
                 </p>
               )}
 
-              {dest && eligible.length > 0 && (
+              {bankDest && (eligible.length > 0 || eligibleAttempts.length > 0) && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <h6 className="font-black text-sm">3. Pedidos incluidos obligatoriamente</h6>
@@ -877,6 +1081,20 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                       );
                     })}
                   </div>
+                  {eligibleAttempts.length > 0 && (
+                    <div className="rounded-2xl border border-orange-500/25 bg-orange-500/5 divide-y divide-border">
+                      <div className="p-3 text-xs font-black text-orange-200">💸 Intentos pagados ({eligibleAttempts.length}) · se descuentan del neto</div>
+                      {eligibleAttempts.map(a => (
+                        <div key={a.id} className="flex items-start justify-between gap-3 p-3 text-sm">
+                          <div className="min-w-0">
+                            <div className="font-extrabold break-all">#{a.orders?.order_number || a.order_id.slice(0, 8)} · {a.status}</div>
+                            <div className="text-xs text-muted-foreground">{a.orders?.customer_name || ''} · {a.orders?.city || ''} · {a.day.split('-').reverse().join('/')}</div>
+                          </div>
+                          <div className="text-right font-black whitespace-nowrap text-orange-200">- Gs {nf(Number(a.amount))}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -888,7 +1106,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                   <div className="text-2xl font-black">Gs {nf(collected)}</div>
                 </div>
                 <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
-                  <div className="text-xs text-amber-200 mb-1 font-bold">Ganancia del delivery</div>
+                  <div className="text-xs text-amber-200 mb-1 font-bold">Para el delivery (tarifas{attemptsTotal ? " + intentos" : ""})</div>
                   <div className="text-2xl font-black">- Gs {nf(deliveryPay)}</div>
                 </div>
                 <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4">
@@ -930,7 +1148,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                 </div>
                 <button
                   className="nav-btn active !w-full"
-                  disabled={dayPending || busy || !selected.length || !newReceipt || Boolean(feesLoadError) || selectedMissingRate || total < 0 || orderLimitReached}
+                  disabled={dayPending || busy || (!selected.length && !eligibleAttempts.length) || !newReceipt || Boolean(feesLoadError) || selectedMissingRate || total < 0 || orderLimitReached}
                   onClick={submit}
                 >
                   {busy ? 'Enviando cierre...' : dayPending ? '🔒 Primero finalizá tu día (paso de arriba)' : '✅ Enviar rendición con comprobante'}
