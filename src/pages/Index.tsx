@@ -31,6 +31,8 @@ const ShopifyConnectionView = lazy(() => import('@/components/ShopifyConnectionV
 const QRScannerView = lazy(() => import('@/components/QRScannerView'));
 const StoreView = lazy(() => import('@/components/StoreView'));
 const BotSkyImportBridge = lazy(() => import('@/components/BotSkyImportBridge'));
+const TrackingPage = lazy(() => import('@/components/TrackingPage'));
+const LiveLocationSharer = lazy(() => import('@/components/LiveLocationSharer'));
 const StoreOrderTabBridge = lazy(() =>
   import('@/components/StoreOrdersView').then((m) => ({ default: m.StoreOrderTabBridge }))
 );
@@ -178,6 +180,16 @@ export default function Index() {
   // ==========================================
   // CARGANDO SESIÓN
   // ==========================================
+
+  // Página pública de seguimiento para el cliente (no requiere sesión).
+  const trackingToken = new URLSearchParams(window.location.search).get('seguimiento');
+  if (trackingToken) {
+    return (
+      <Suspense fallback={<ViewFallback />}>
+        <TrackingPage token={trackingToken} />
+      </Suspense>
+    );
+  }
 
   if (loading) {
     return (
@@ -442,6 +454,13 @@ export default function Index() {
           <StoreOrderTabBridge
             onLoadOrder={handleSheetConfirm}
           />
+        </Suspense>
+      )}
+
+      {/* Delivery: comparte su ubicación mientras tenga links de seguimiento activos */}
+      {profile.role === 'DELIVERY' && (
+        <Suspense fallback={null}>
+          <LiveLocationSharer />
         </Suspense>
       )}
 
