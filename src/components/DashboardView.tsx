@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useAuth } from '@/hooks/useAuth';
 import {
   BarChart,
@@ -327,57 +328,9 @@ function Avatar({ name, logo }: { name: string; logo?: string | null }) {
 
 const SUPABASE_PAGE_SIZE = 1000;
 
-const fetchAllOrdersPaged = async () => {
-  const rows: OrderRow[] = [];
-  let from = 0;
-
-  while (true) {
-    const { data, error } = await supabase
-      .from('orders')
-      .select('*')
-      .order('created_at', { ascending: true })
-      .range(from, from + SUPABASE_PAGE_SIZE - 1);
-
-    if (error) return { data: rows, error };
-
-    const page = (data || []) as OrderRow[];
-    rows.push(...page);
-
-    if (page.length < SUPABASE_PAGE_SIZE) break;
-    from += SUPABASE_PAGE_SIZE;
-  }
-
-  return { data: rows, error: null as any };
-};
-
-const fetchOrdersByDatePaged = async (
-  column: 'created_at' | 'assigned_at' | 'delivered_at',
-  fromIso: string,
-  toIso: string,
-) => {
-  const rows: OrderRow[] = [];
-  let from = 0;
-
-  while (true) {
-    const { data, error } = await supabase
-      .from('orders')
-      .select('*')
-      .gte(column, fromIso)
-      .lte(column, toIso)
-      .order(column, { ascending: true })
-      .range(from, from + SUPABASE_PAGE_SIZE - 1);
-
-    if (error) return { data: rows, error };
-
-    const page = (data || []) as OrderRow[];
-    rows.push(...page);
-
-    if (page.length < SUPABASE_PAGE_SIZE) break;
-    from += SUPABASE_PAGE_SIZE;
-  }
-
-  return { data: rows, error: null as any };
-};
+// Todos los pedidos visibles para el usuario, en páginas pedidas en paralelo.
+const fetchAllOrdersPaged = () =>
+  fetchAllRows<OrderRow>('orders', (q) => q.order('created_at', { ascending: true }));
 
 const fetchCommissionRequestsPaged = async () => {
   const rows: CommissionRequestRow[] = [];
@@ -402,6 +355,20 @@ const fetchCommissionRequestsPaged = async () => {
   return { data: rows, error: null as any };
 };
 
+type DashboardCache = {
+  email: string;
+  allOrders: OrderRow[];
+  products: ProductRow[];
+  profiles: ProfileRow[];
+  deliveryStocks: DeliveryStockRow[];
+  deliveryRates: Record<string, number>;
+  commissionRequests: CommissionRequestRow[];
+};
+
+// Se conserva mientras la app está abierta: volver al Dashboard muestra los
+// datos al instante y se actualizan en segundo plano.
+let dashboardCache: DashboardCache | null = null;
+
 export default function Dashboard() {
   const { profile } = useAuth();
   const role = norm(profile?.role).toUpperCase();
@@ -409,14 +376,27 @@ export default function Dashboard() {
 
   const [dateFrom, setDateFrom] = useState(firstDayOfMonth());
   const [dateTo, setDateTo] = useState(todayPY());
-  const [orders, setOrders] = useState<OrderRow[]>([]);
-  const [allOrders, setAllOrders] = useState<OrderRow[]>([]);
-  const [products, setProducts] = useState<ProductRow[]>([]);
-  const [profiles, setProfiles] = useState<ProfileRow[]>([]);
-  const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStockRow[]>([]);
-  const [deliveryRates, setDeliveryRates] = useState<Record<string, number>>({});
-  const [commissionRequests, setCommissionRequests] = useState<CommissionRequestRow[]>([]);
+  const cached = dashboardCache?.email === email ? dashboardCache : null;
+  const [allOrders, setAllOrders] = useState<OrderRow[]>(cached?.allOrders || []);
+  const [products, setProducts] = useState<ProductRow[]>(cached?.products || []);
+  const [profiles, setProfiles] = useState<ProfileRow[]>(cached?.profiles || []);
+  const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStockRow[]>(cached?.deliveryStocks || []);
+  const [deliveryRates, setDeliveryRates] = useState<Record<string, number>>(cached?.deliveryRates || {});
+  const [commissionRequests, setCommissionRequests] = useState<CommissionRequestRow[]>(cached?.commissionRequests || []);
   const [loading, setLoading] = useState(false);
+
+  // Pedidos del período (creados, asignados o entregados entre las fechas),
+  // calculados desde todos los pedidos: cambiar fechas no vuelve a descargar.
+  const orders = useMemo(
+    () =>
+      allOrders.filter(
+        (order: any) =>
+          inRange(order.created_at, dateFrom, dateTo) ||
+          inRange(order.assigned_at, dateFrom, dateTo) ||
+          inRange(order.delivered_at, dateFrom, dateTo)
+      ),
+    [allOrders, dateFrom, dateTo]
+  );
 
   const isAdmin = role === 'ADMIN' || role === 'ADMINISTRADOR';
   const isProvider = role === 'PROVEEDOR' || role === 'PROVIDER';
@@ -429,64 +409,41 @@ export default function Dashboard() {
 
     if (error) {
       console.error('Error cargando commission_requests:', error);
-      setCommissionRequests([]);
-      return;
+      return [] as CommissionRequestRow[];
     }
 
-    setCommissionRequests(data || []);
+    return (data || []) as CommissionRequestRow[];
   };
 
   const loadDashboard = async () => {
-    setLoading(true);
-
-    const fromIso = `${dateFrom}T00:00:00`;
-    const toIso = `${dateTo}T23:59:59`;
+    // Con datos en caché se actualiza en segundo plano, sin pantalla de carga.
+    const silent = Boolean(dashboardCache?.email === email && dashboardCache.allOrders.length);
+    if (!silent) setLoading(true);
 
     const [
-      createdRes,
-      assignedRes,
-      deliveredRes,
       allOrdersRes,
       productsRes,
       profilesRes,
       stocksRes,
       ratesRes,
+      requests,
     ] = await Promise.all([
-      fetchOrdersByDatePaged('created_at', fromIso, toIso),
-      fetchOrdersByDatePaged('assigned_at', fromIso, toIso),
-      fetchOrdersByDatePaged('delivered_at', fromIso, toIso),
       // Sin filtro de fecha y SIN límite de 1.000 filas.
-      // Se usa para comisiones disponibles y pedidos pendientes a rendir.
+      // Se usa para el período elegido, comisiones disponibles y pendientes a rendir.
       fetchAllOrdersPaged(),
       supabase.from('products').select('*'),
       supabase.from('profiles').select('email, name, logo_url, phone, role'),
       supabase.from('delivery_stock').select('*'),
       supabase.from('delivery_fees').select('*'),
+      loadCommissionRequests(),
     ]);
-
-    const merged = new Map<string, OrderRow>();
-    [createdRes.data || [], assignedRes.data || [], deliveredRes.data || []]
-      .flat()
-      .forEach((order: any) => {
-        if (order?.id) merged.set(order.id, order);
-      });
-
-    setOrders(Array.from(merged.values()));
-    setAllOrders((allOrdersRes.data || []) as OrderRow[]);
-    setProducts((productsRes.data || []) as ProductRow[]);
-    setProfiles((profilesRes.data || []) as ProfileRow[]);
-    setDeliveryStocks((stocksRes.data || []) as DeliveryStockRow[]);
 
     const rateMap: Record<string, number> = {};
     (ratesRes.data || []).forEach((rate: any) => {
       if (rate?.city) rateMap[norm(rate.city)] = Number(rate.fee_gs || 0);
     });
-    setDeliveryRates(rateMap);
 
     const errors = [
-      createdRes.error,
-      assignedRes.error,
-      deliveredRes.error,
       allOrdersRes.error,
       productsRes.error,
       profilesRes.error,
@@ -495,13 +452,32 @@ export default function Dashboard() {
     ].filter(Boolean);
 
     if (errors.length) console.error('Errores cargando Dashboard:', errors);
-    await loadCommissionRequests();
+
+    const next: DashboardCache = {
+      email,
+      allOrders: (allOrdersRes.data || []) as OrderRow[],
+      products: (productsRes.data || []) as ProductRow[],
+      profiles: (profilesRes.data || []) as ProfileRow[],
+      deliveryStocks: (stocksRes.data || []) as DeliveryStockRow[],
+      deliveryRates: rateMap,
+      commissionRequests: requests,
+    };
+
+    // Ante un error no se pisan los datos buenos que ya había.
+    if (!allOrdersRes.error) dashboardCache = next;
+
+    setAllOrders(next.allOrders);
+    setProducts(next.products);
+    setProfiles(next.profiles);
+    setDeliveryStocks(next.deliveryStocks);
+    setDeliveryRates(next.deliveryRates);
+    setCommissionRequests(next.commissionRequests);
     setLoading(false);
   };
 
   useEffect(() => {
     loadDashboard();
-  }, [dateFrom, dateTo]);
+  }, [email]);
 
   const profileMap = useMemo(() => {
     const map: Record<string, ProfileRow> = {};

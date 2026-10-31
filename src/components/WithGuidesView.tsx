@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
@@ -256,41 +257,18 @@ export default function WithGuidesView() {
 
     try {
       // Sin límite práctico de filas: trae los pedidos en páginas de 1.000
-      // hasta que Supabase ya no devuelva más resultados.
-      const PAGE_SIZE = 1000;
-      let from = 0;
-      let allRows: any[] = [];
+      // pedidas en paralelo.
+      const { data: allRows, error } = await fetchAllRows('orders', (query) => {
+        let q = query.order('created_at', { ascending: false });
+        if (search && search.trim()) q = q.ilike('order_number', `%${search.trim()}%`);
+        if (status2Filter === 'PENDIENTES') q = q.or('status2.is.null,status2.eq.--');
+        else if (status2Filter === 'CON_GUIA') q = q.eq('status2', 'GUIA GENERADA');
+        return q;
+      });
 
-      while (true) {
-        let query = supabase
-          .from('orders')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .range(from, from + PAGE_SIZE - 1);
-
-        if (search && search.trim()) {
-          const searchTerm = search.trim();
-          query = query.ilike('order_number', `%${searchTerm}%`);
-        }
-
-        if (status2Filter === 'PENDIENTES') {
-          query = query.or('status2.is.null,status2.eq.--');
-        } else if (status2Filter === 'CON_GUIA') {
-          query = query.eq('status2', 'GUIA GENERADA');
-        }
-
-        const { data, error } = await query;
-
-        if (error) {
-          toast.error(error.message);
-          return;
-        }
-
-        const batch = data || [];
-        allRows = allRows.concat(batch);
-
-        if (batch.length < PAGE_SIZE) break;
-        from += PAGE_SIZE;
+      if (error) {
+        toast.error(error.message);
+        return;
       }
 
       setOrders(allRows);

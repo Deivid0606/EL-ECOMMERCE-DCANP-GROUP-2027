@@ -1074,3 +1074,19 @@
     }
   }
 }
+
+/* Vista celular (selector de vista o pantalla chica): menos margen interno
+   para aprovechar el ancho, y tablas que se deslizan dentro de su tarjeta. */
+html[data-layout="mobile"] .app-card {
+  padding: 0.875rem;
+  border-radius: 1rem;
+}
+html[data-layout="mobile"] .kpi-card {
+  padding: 0.75rem;
+}
+html[data-layout="mobile"] .nav-btn {
+  padding: 0.55rem 0.8rem;
+}
+html[data-layout="mobile"] .app-table {
+  font-size: 12px;
+}

@@ -1,37 +1,51 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { useLayoutMode } from '@/hooks/useLayoutMode';
 
 import AppHeader from '@/components/AppHeader';
 import { AppNav, type ViewName } from '@/components/AppNav';
 import AuthView from '@/components/AuthView';
-import DashboardView from '@/components/DashboardView';
-import OrdersView from '@/components/OrdersView';
-import NewsView from '@/components/NewsView';
-import ProductsView from '@/components/ProductsView';
-import ProfileView from '@/components/ProfileView';
-import UsersView from '@/components/UsersView';
-import CreateOrderView from '@/components/CreateOrderView';
-import RatesView from '@/components/RatesView';
-import CommissionsView from '@/components/CommissionsView';
-import CommissionRequestsView from '@/components/CommissionRequestsView';
-import ClosuresView from '@/components/ClosuresView';
-import EarningsView from '@/components/EarningsView';
-import ChatView from '@/components/ChatView';
-import AssignOrdersView from '@/components/AssignOrdersView';
-import RankingDeliveryView from '@/components/RankingDeliveryView';
-import RendicionesPagadasView from '@/components/RendicionesPagadasView';
-import WithGuidesView from '@/components/WithGuidesView';
-import CounterView from '@/components/CounterView';
-import MapView from '@/components/MapView';
-import ShopifyInboxView from '@/components/ShopifyInboxView';
-import ShopifyConnectionView from '@/components/ShopifyConnectionView';
-import QRScannerView from '@/components/QRScannerView';
-import StoreView from '@/components/StoreView';
 
-import { StoreOrderTabBridge } from '@/components/StoreOrdersView';
+// Cada pantalla se descarga recién cuando se abre (la app inicial pesa mucho menos).
+const DashboardView = lazy(() => import('@/components/DashboardView'));
+const OrdersView = lazy(() => import('@/components/OrdersView'));
+const NewsView = lazy(() => import('@/components/NewsView'));
+const ProductsView = lazy(() => import('@/components/ProductsView'));
+const ProfileView = lazy(() => import('@/components/ProfileView'));
+const UsersView = lazy(() => import('@/components/UsersView'));
+const CreateOrderView = lazy(() => import('@/components/CreateOrderView'));
+const RatesView = lazy(() => import('@/components/RatesView'));
+const CommissionsView = lazy(() => import('@/components/CommissionsView'));
+const CommissionRequestsView = lazy(() => import('@/components/CommissionRequestsView'));
+const ClosuresView = lazy(() => import('@/components/ClosuresView'));
+const EarningsView = lazy(() => import('@/components/EarningsView'));
+const ChatView = lazy(() => import('@/components/ChatView'));
+const AssignOrdersView = lazy(() => import('@/components/AssignOrdersView'));
+const RankingDeliveryView = lazy(() => import('@/components/RankingDeliveryView'));
+const RendicionesPagadasView = lazy(() => import('@/components/RendicionesPagadasView'));
+const WithGuidesView = lazy(() => import('@/components/WithGuidesView'));
+const CounterView = lazy(() => import('@/components/CounterView'));
+const MapView = lazy(() => import('@/components/MapView'));
+const ShopifyInboxView = lazy(() => import('@/components/ShopifyInboxView'));
+const ShopifyConnectionView = lazy(() => import('@/components/ShopifyConnectionView'));
+const QRScannerView = lazy(() => import('@/components/QRScannerView'));
+const StoreView = lazy(() => import('@/components/StoreView'));
+const BotSkyImportBridge = lazy(() => import('@/components/BotSkyImportBridge'));
+const StoreOrderTabBridge = lazy(() =>
+  import('@/components/StoreOrdersView').then((m) => ({ default: m.StoreOrderTabBridge }))
+);
+
+function ViewFallback() {
+  return (
+    <div className="space-y-3 py-2" aria-busy="true">
+      <div className="h-24 rounded-2xl bg-secondary/40 animate-pulse" />
+      <div className="h-64 rounded-2xl bg-secondary/30 animate-pulse" />
+    </div>
+  );
+}
+
 
 // NUEVO: receptor de pedidos BOT SKY
-import BotSkyImportBridge from '@/components/BotSkyImportBridge';
 
 export interface SheetPrefill {
   customer?: string;
@@ -64,6 +78,11 @@ function isCreateOrderLink() {
   );
 }
 
+function hasStoreOrderParams() {
+  const params = new URLSearchParams(window.location.search);
+  return Boolean(params.get('store_order_ids') || params.get('store_order_id'));
+}
+
 const NOTIFICATION_VIEWS = ['chat', 'store', 'orders', 'products', 'profile'];
 
 function isSpecialOrderLink() {
@@ -78,6 +97,8 @@ export default function Index() {
     signOut,
     refreshProfile,
   } = useAuth();
+
+  const { mode: layoutMode, setMode: setLayoutMode, effective: layout } = useLayoutMode();
 
   const [currentView, setCurrentView] = useState<ViewName>(
     () => (isCreateOrderLink() ? 'order' : 'auth')
@@ -276,7 +297,9 @@ export default function Index() {
             </p>
           </div>
 
-          <BotSkyImportBridge />
+          <Suspense fallback={<ViewFallback />}>
+            <BotSkyImportBridge />
+          </Suspense>
 
         </div>
       </div>
@@ -390,26 +413,42 @@ export default function Index() {
   // APLICACIÓN NORMAL
   // ==========================================
 
+  const pagePadding =
+    layout === 'mobile' ? 'px-3 py-3' : layout === 'tablet' ? 'px-4 py-4' : 'px-6 py-5';
+
   return (
-    <div className="mx-auto max-w-full px-6 py-5">
+    <div className={`mx-auto max-w-full ${pagePadding}`}>
 
       <AppHeader
         onRefresh={handleRefresh}
         lastUpdate={lastUpdate}
+        layout={layout}
+        mode={layoutMode}
+        onModeChange={setLayoutMode}
       />
 
       <AppNav
         currentView={currentView}
-        onNavigate={setCurrentView}
+        onNavigate={(view) => {
+          setCurrentView(view);
+          window.scrollTo({ top: 0 });
+        }}
+        layout={layout}
       />
 
-      {/* Integración original de la tienda */}
-      <StoreOrderTabBridge
-        onLoadOrder={handleSheetConfirm}
-      />
+      {/* Integración original de la tienda (sólo se descarga si hay pedidos en la URL) */}
+      {hasStoreOrderParams() && (
+        <Suspense fallback={null}>
+          <StoreOrderTabBridge
+            onLoadOrder={handleSheetConfirm}
+          />
+        </Suspense>
+      )}
 
       {/* Todas las secciones originales */}
-      {renderView()}
+      <Suspense fallback={<ViewFallback />}>
+        {renderView()}
+      </Suspense>
 
     </div>
   );
