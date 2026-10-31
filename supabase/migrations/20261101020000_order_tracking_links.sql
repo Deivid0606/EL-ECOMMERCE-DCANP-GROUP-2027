@@ -201,3 +201,60 @@ BEGIN
 END; $$;
 DROP TRIGGER IF EXISTS tracking_link_notify ON public.order_tracking_links;
 CREATE TRIGGER tracking_link_notify AFTER INSERT ON public.order_tracking_links FOR EACH ROW EXECUTE FUNCTION public.tracking_link_notify();
+
+-- Busca un lugar / dirección de Paraguay en OpenStreetMap, para links de Google
+-- Maps que traen nombre y dirección pero no coordenadas (lugares compartidos
+-- desde el iPhone). Las funciones Edge no pueden consultar Nominatim, la base sí.
+-- (Aplicado en producción como migraciones geocode_place_py / geocode_place_py_v2.)
+CREATE OR REPLACE FUNCTION public.geocode_place_py(p_text text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions, pg_temp AS $$
+DECLARE
+  clean text;
+  parts text[];
+  attempt text;
+  attempts text[] := '{}';
+  candidate text;
+  res record;
+  row0 jsonb;
+  lat double precision;
+  lng double precision;
+  n integer := 0;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'No autenticado'; END IF;
+  clean := regexp_replace(coalesce(p_text, ''), '\m[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3}\M', ' ', 'gi');
+  clean := trim(both ' ,' from regexp_replace(clean, '\s+', ' ', 'g'));
+  IF length(clean) < 4 THEN RETURN NULL; END IF;
+  parts := array(SELECT trim(x) FROM unnest(string_to_array(clean, ',')) x WHERE trim(x) <> '');
+
+  -- De más completo a menos: texto entero, sin el nombre del lugar, nombre + ciudad.
+  FOREACH candidate IN ARRAY ARRAY[clean, array_to_string(parts[2:], ', '), array_to_string(parts[1:2], ', ')] LOOP
+    IF length(coalesce(candidate, '')) > 3 AND NOT candidate = ANY(attempts) THEN
+      attempts := attempts || candidate;
+    END IF;
+  END LOOP;
+
+  PERFORM http_set_curlopt('CURLOPT_TIMEOUT_MS', '8000');
+  FOREACH attempt IN ARRAY attempts LOOP
+    IF n > 0 THEN PERFORM pg_sleep(1.1); END IF;  -- Nominatim: 1 consulta por segundo.
+    n := n + 1;
+    SELECT * INTO res FROM http((
+      'GET',
+      'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=py&q=' || replace(urlencode(attempt), '+', '%20'),
+      ARRAY[http_header('User-Agent', 'DCANP-Group/1.0 (seguimiento de pedidos)'), http_header('Accept-Language', 'es')],
+      NULL, NULL)::http_request);
+    IF res.status = 200 THEN
+      row0 := (res.content::jsonb) -> 0;
+      -- Una ciudad o departamento entero no sirve como destino.
+      IF row0 IS NOT NULL AND coalesce(row0->>'addresstype', row0->>'type', '') NOT IN ('city', 'town', 'village', 'municipality', 'county', 'state', 'country', 'administrative', 'region') THEN
+        lat := (row0->>'lat')::double precision;
+        lng := (row0->>'lon')::double precision;
+        IF lat BETWEEN -28.5 AND -18.5 AND lng BETWEEN -63.5 AND -53.5 THEN
+          RETURN jsonb_build_object('lat', lat, 'lng', lng, 'approx', attempt <> clean, 'name', row0->>'display_name');
+        END IF;
+      END IF;
+    END IF;
+  END LOOP;
+  RETURN NULL;
+END; $$;
+REVOKE ALL ON FUNCTION public.geocode_place_py(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.geocode_place_py(text) TO authenticated;
