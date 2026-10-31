@@ -34,6 +34,7 @@ const BotSkyImportBridge = lazy(() => import('@/components/BotSkyImportBridge'))
 const TrackingPage = lazy(() => import('@/components/TrackingPage'));
 const RoutePage = lazy(() => import('@/components/RoutePage'));
 const LiveLocationSharer = lazy(() => import('@/components/LiveLocationSharer'));
+const LocationDialogHost = lazy(() => import('@/components/LocationDialog'));
 const StoreOrderTabBridge = lazy(() =>
   import('@/components/StoreOrdersView').then((m) => ({ default: m.StoreOrderTabBridge }))
 );
@@ -473,6 +474,11 @@ export default function Index() {
           <LiveLocationSharer />
         </Suspense>
       )}
+
+      {/* Diálogo para cargar / cambiar / borrar la ubicación del cliente */}
+      <Suspense fallback={null}>
+        <LocationDialogHost />
+      </Suspense>
 
       {/* Todas las secciones originales */}
       <Suspense fallback={<ViewFallback />}>
