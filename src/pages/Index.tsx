@@ -471,7 +471,7 @@ export default function Index() {
           (el delivery, o admin / proveedor que eligieron ser la 🛵) */}
       {['DELIVERY', 'ADMIN', 'PROVEEDOR'].includes(String(profile.role || '')) && (
         <Suspense fallback={null}>
-          <LiveLocationSharer />
+          <LiveLocationSharer askOnOpen={String(profile.role || '') === 'DELIVERY'} />
         </Suspense>
       )}
 
