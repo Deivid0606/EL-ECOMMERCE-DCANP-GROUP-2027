@@ -258,3 +258,11 @@ BEGIN
 END; $$;
 REVOKE ALL ON FUNCTION public.geocode_place_py(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.geocode_place_py(text) TO authenticated;
+
+-- Quién muestra la 🛵: por defecto el delivery asignado; admin / proveedor pueden
+-- elegir su propio celular (tracker_email). Ver migración tracking_tracker_email
+-- aplicada en producción: create_tracking_link(…, p_self_tracker),
+-- my_active_tracking_count y get_order_tracking usan coalesce(tracker_email,
+-- delivery_email); la ubicación sólo se muestra si es de los últimos 15 minutos
+-- antes de crear el link o posterior.
+ALTER TABLE public.order_tracking_links ADD COLUMN IF NOT EXISTS tracker_email text;
