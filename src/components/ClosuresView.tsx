@@ -504,28 +504,40 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
                       </span>
                     </div>
                     
-                    <p className="mb-2 text-sm">
-                      {item.changed_by_role === 'DELIVERY' ? '🚚' : '👤'}{' '}
-                      <b>
-                        {({ DELIVERY: 'Delivery', ADMIN: 'Admin', PROVEEDOR: 'Proveedor', VENDEDOR: 'Vendedor', DESPACHANTE: 'Despachante' } as Record<string, string>)[
-                          String(item.changed_by_role || '').toUpperCase()
-                        ] || 'Usuario'}{' '}
-                        {item.changed_by_name || item.changed_by_email}
-                      </b>{' '}
-                      <span className="text-muted-foreground">reportó</span> <b>{item.new_status}</b>
-                    </p>
+                    {item.event_type && item.event_type !== 'status' ? (
+                      <div className={`mb-3 p-3 rounded-lg border-l-4 ${item.event_type === 'assignment' ? 'bg-sky-500/10 border-sky-500' : 'bg-violet-500/10 border-violet-500'}`}>
+                        <p className="text-sm font-semibold">{item.message}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Por {item.changed_by_name || item.changed_by_email} · estado {item.new_status}
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                      <p className="mb-2 text-sm">
+                        {item.changed_by_role === 'DELIVERY' ? '🚚' : '👤'}{' '}
+                        <b>
+                          {({ DELIVERY: 'Delivery', ADMIN: 'Admin', PROVEEDOR: 'Proveedor', VENDEDOR: 'Vendedor', DESPACHANTE: 'Despachante' } as Record<string, string>)[
+                            String(item.changed_by_role || '').toUpperCase()
+                          ] || 'Usuario'}{' '}
+                          {item.changed_by_name || item.changed_by_email}
+                        </b>{' '}
+                        <span className="text-muted-foreground">reportó</span> <b>{item.new_status}</b>
+                      </p>
 
-                    <div className="flex items-center gap-3 flex-wrap mb-3">
-                      <span className={`text-sm font-medium px-3 py-1 rounded-lg ${statusClass(item.previous_status || 'PENDIENTE')} bg-opacity-20`}>
-                        {item.previous_status || '—'}
-                      </span>
-                      <span className="text-muted-foreground text-lg">→</span>
-                      <span className={`text-sm font-bold px-3 py-1 rounded-lg ${statusClass(item.new_status)}`}>
-                        {item.new_status}
-                      </span>
-                    </div>
+                      <div className="flex items-center gap-3 flex-wrap mb-3">
+                        <span className={`text-sm font-medium px-3 py-1 rounded-lg ${statusClass(item.previous_status || 'PENDIENTE')} bg-opacity-20`}>
+                          {item.previous_status || '—'}
+                        </span>
+                        <span className="text-muted-foreground text-lg">→</span>
+                        <span className={`text-sm font-bold px-3 py-1 rounded-lg ${statusClass(item.new_status)}`}>
+                          {item.new_status}
+                        </span>
+                      </div>
                     
-                    {item.message && (
+                      </>
+                    )}
+
+                    {item.message && (!item.event_type || item.event_type === 'status') && (
                       <div className="mt-2 p-3 bg-muted/30 rounded-lg border-l-4 border-blue-500">
                         <div className="flex items-start gap-2">
                           <span className="text-base">💬</span>
@@ -1812,10 +1824,22 @@ export default function ClosuresView() {
   }, [orders]);
 
   const [onlyPossibleDuplicates, setOnlyPossibleDuplicates] = useState(false);
-  const displayedOrders = useMemo(
-    () => onlyPossibleDuplicates ? filteredOrders.filter(o => possibleDuplicates.ids.has(o.id)) : filteredOrders,
-    [filteredOrders, possibleDuplicates, onlyPossibleDuplicates],
-  );
+
+  // Pedidos que llegaron a esta fecha desde otra (pasados por "Finalicé mi día"
+  // o asignados por primera vez un día anterior).
+  const [onlyCarried, setOnlyCarried] = useState(false);
+  const pyDayKey = (value: string | null | undefined) =>
+    value ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Asuncion' }).format(new Date(value)) : '';
+  const isCarried = (o: any) =>
+    Number(o?.carried_over_count || 0) > 0 ||
+    Boolean(o?.first_assigned_at && o?.assigned_at && pyDayKey(o.first_assigned_at) < pyDayKey(o.assigned_at));
+  const carriedCount = useMemo(() => filteredOrders.filter(isCarried).length, [filteredOrders]);
+
+  const displayedOrders = useMemo(() => {
+    let list = onlyPossibleDuplicates ? filteredOrders.filter(o => possibleDuplicates.ids.has(o.id)) : filteredOrders;
+    if (onlyCarried) list = list.filter(isCarried);
+    return list;
+  }, [filteredOrders, possibleDuplicates, onlyPossibleDuplicates, onlyCarried]);
 
   const normalizeFeeKey = (value: string) =>
     String(value || '')
@@ -3632,6 +3656,12 @@ export default function ClosuresView() {
             <span>{possibleDuplicates.groupsCount} grupos · teléfono, ciudad y fecha</span>
             <span className="metric-link">{onlyPossibleDuplicates ? 'Mostrar todos los pedidos' : 'Ver posibles repetidos'}</span>
           </button>
+          <button type="button" className={`closure-premium-metric metric-duplicates text-left ${onlyCarried ? 'metric-selected' : ''}`} onClick={() => { setSelectedGuideIds(new Set()); setOnlyCarried(v => !v); setClosureTab('pedidos'); }} aria-pressed={onlyCarried}>
+            <span className="metric-label">📅 DE OTRAS FECHAS</span>
+            <strong>{carriedCount}</strong>
+            <span>Pasados a este día desde otra fecha</span>
+            <span className="metric-link">{onlyCarried ? 'Mostrar todos los pedidos' : 'Ver arrastrados'}</span>
+          </button>
         </div>
         <div className="closure-premium-graph">
           <div className="closure-premium-graph-head"><span>Progreso de rendiciones</span><b>{delivered.length ? Math.round(kpis.rendidos / delivered.length * 100) : 0}% rendidos</b></div>
@@ -4074,6 +4104,7 @@ export default function ClosuresView() {
       )}
       <div className="mb-4"><input className="app-input w-full" placeholder="🔎 Buscar pedido, cliente, teléfono o ciudad" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
       <div className="closure-section-heading"><span className="closure-section-number">03</span><div><h3>Listado de pedidos</h3><p>Revisá los detalles, los estados y las rendiciones</p></div></div>
+      {onlyCarried && <div className="closure-duplicate-notice">📅 Mostrando sólo pedidos que llegaron a estas fechas desde otro día (por "Finalicé mi día" o reasignación). <button type="button" className="nav-btn" onClick={() => { setSelectedGuideIds(new Set()); setOnlyCarried(false); }}>Quitar filtro</button></div>}
       {onlyPossibleDuplicates && <div className="closure-duplicate-notice">🔁 Mostrando solamente coincidencias por teléfono, ciudad y día de creación. Revisá manualmente: no son duplicados confirmados. <button type="button" className="nav-btn" onClick={() => { setSelectedGuideIds(new Set()); setOnlyPossibleDuplicates(false); }}>Quitar filtro</button></div>}
       <div className="closure-premium-table overflow-auto">
         <table className="app-table min-w-[1800px]">
@@ -4132,6 +4163,7 @@ export default function ClosuresView() {
                   )}
                   <td className="text-xs whitespace-nowrap">
                     <div className="flex items-center gap-1">
+                      {o.day_seq ? <span className="rounded-md bg-sky-500/15 px-1.5 py-0.5 font-black text-sky-300" title="Número del pedido en la ruta del día">#{o.day_seq}</span> : null}
                       <span>
                         {formatDatePY(
                           activeSection === 'teamClosures'
@@ -4139,6 +4171,14 @@ export default function ClosuresView() {
                             : o.assigned_at,
                         )}
                       </span>
+                      {isCarried(o) && (
+                        <span
+                          className="rounded-md bg-violet-500/15 px-1.5 py-0.5 font-bold text-violet-300"
+                          title={`Primera asignación: ${formatDatePY(o.first_assigned_at)} · pasó ${o.carried_over_count || 0} vez/veces por fin de día`}
+                        >
+                          🔁 de {formatDatePY(o.first_assigned_at)}
+                        </span>
+                      )}
                       {canEditFull && editingDateId === o.id ? (
                         <input
                           type="date"
