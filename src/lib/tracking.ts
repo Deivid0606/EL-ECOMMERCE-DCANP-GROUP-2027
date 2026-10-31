@@ -40,16 +40,37 @@ export function etaMinutes(from: LatLng, to: LatLng) {
   return { km, minutes: Math.max(1, Math.round((km / 25) * 60)) };
 }
 
-// Links cortos (maps.app.goo.gl, goo.gl/maps) no traen coordenadas: se
-// resuelven en el servidor y se leen de la URL final.
+// Busca un lugar o dirección de Paraguay y pide confirmar el resultado.
+async function geocodeAndConfirm(place: string): Promise<LatLng | null> {
+  const { data, error } = await (supabase as any).rpc('geocode_place_py', { p_text: place });
+  if (error || !data?.lat) return null;
+  const ok = window.confirm(
+    `Encontré esta ubicación${data.approx ? ' (aproximada)' : ''}:\n\n${data.name}\n\n¿Usarla como destino del cliente?`,
+  );
+  return ok ? { lat: Number(data.lat), lng: Number(data.lng) } : null;
+}
+
+// Acepta: coordenadas, links de Google Maps (también los cortos de "Compartir",
+// que se resuelven en el servidor) o una dirección escrita.
 export async function resolveCoords(text: string): Promise<LatLng | null> {
   const direct = parseCoords(text);
   if (direct) return direct;
+
   const url = String(text || '').match(/https?:\/\/\S+/)?.[0];
-  if (!url || !/goo\.gl|google\./i.test(url)) return null;
-  const { data, error } = await supabase.functions.invoke('resolve-maps-link', { body: { url } });
-  if (error || !data?.url) return null;
-  return parseCoords(String(data.url));
+  if (url && /goo\.gl|google\./i.test(url)) {
+    const { data, error } = await supabase.functions.invoke('resolve-maps-link', { body: { url } });
+    if (error) return null;
+    if (data?.lat && data?.lng) return { lat: Number(data.lat), lng: Number(data.lng) };
+    const fromUrl = data?.url ? parseCoords(String(data.url)) : null;
+    if (fromUrl) return fromUrl;
+    // Lugar compartido sin coordenadas (iPhone): se busca por nombre y dirección.
+    if (data?.place) return geocodeAndConfirm(String(data.place));
+    return null;
+  }
+
+  // Dirección escrita a mano.
+  if (!url && String(text || '').trim().length > 5) return geocodeAndConfirm(String(text).trim());
+  return null;
 }
 
 export const trackingUrl = (token: string) => `${window.location.origin}/?seguimiento=${token}`;
@@ -62,15 +83,17 @@ export const trackingUrl = (token: string) => `${window.location.origin}/?seguim
 export async function generateTrackingLink(order: { id: string; phone?: string | null; customer_name?: string | null; order_number?: string | null }) {
   const answer = window.prompt(
     'Ubicación del cliente (opcional, para calcular la llegada):\n' +
-      'pegá el link de Google Maps (también los cortos maps.app.goo.gl), la ubicación que te mandó por WhatsApp o "latitud, longitud".\n' +
+      'pegá el link de Google Maps (también el de "Compartir"), la ubicación que te mandó por WhatsApp, "latitud, longitud" o la dirección.\n' +
       'Dejalo vacío para usar la dirección del pedido.',
     '',
   );
   if (answer === null) return null;
 
+  const loading = answer.trim() ? toast.loading('Buscando la ubicación…') : undefined;
   const dest = answer.trim() ? await resolveCoords(answer) : null;
+  if (loading !== undefined) toast.dismiss(loading);
   if (answer.trim() && !dest) {
-    toast.error('No se pudo leer la ubicación. Probá con el link de Google Maps del punto o con "latitud, longitud" (ej. -25.3092, -57.6325).');
+    toast.error('No se encontró la ubicación. En Google Maps mantené apretado el punto exacto del cliente, copiá las coordenadas que aparecen arriba (ej. -25.3092, -57.6325) y pegalas.', { duration: 10000 });
     return null;
   }
 
