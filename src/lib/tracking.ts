@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { askCustomerLocation } from '@/components/LocationDialog';
 
 export type LatLng = { lat: number; lng: number };
 
@@ -81,20 +82,27 @@ export const trackingUrl = (token: string) => `${window.location.origin}/?seguim
  * la llegada estimada.
  */
 export async function generateTrackingLink(order: { id: string; phone?: string | null; customer_name?: string | null; order_number?: string | null; status?: string | null; assigned_delivery?: string | null }) {
-  const answer = window.prompt(
-    'Ubicación del cliente (opcional, para calcular la llegada):\n' +
-      'pegá el link de Google Maps (también el de "Compartir"), la ubicación que te mandó por WhatsApp, "latitud, longitud" o la dirección.\n' +
-      'Dejalo vacío para usar la dirección del pedido.',
-    '',
-  );
-  if (answer === null) return null;
+  const { data: currentDest } = await (supabase as any).rpc('get_order_destination', { p_order_id: order.id });
+  const choice = await askCustomerLocation({ current: currentDest?.lat ? { lat: Number(currentDest.lat), lng: Number(currentDest.lng) } : null });
+  if (choice.action === 'cancel') return null;
 
-  const loading = answer.trim() ? toast.loading('Buscando la ubicación…') : undefined;
-  const dest = answer.trim() ? await resolveCoords(answer) : null;
-  if (loading !== undefined) toast.dismiss(loading);
-  if (answer.trim() && !dest) {
-    toast.error('No se encontró la ubicación. En Google Maps mantené apretado el punto exacto del cliente, copiá las coordenadas que aparecen arriba (ej. -25.3092, -57.6325) y pegalas.', { duration: 10000 });
-    return null;
+  let dest: LatLng | null = null;
+  if (choice.action === 'set') {
+    const loading = toast.loading('Buscando la ubicación…');
+    dest = await resolveCoords(choice.text);
+    toast.dismiss(loading);
+    if (!dest) {
+      toast.error('No se encontró la ubicación. En Google Maps mantené apretado el punto exacto del cliente, copiá las coordenadas que aparecen arriba (ej. -25.3092, -57.6325) y pegalas.', { duration: 10000 });
+      return null;
+    }
+  }
+  if (choice.action === 'clear') {
+    const { error } = await (supabase as any).rpc('set_order_destination', { p_order_id: order.id, p_lat: null, p_lng: null });
+    if (error) {
+      toast.error(error.message);
+      return null;
+    }
+    toast.success('🗑️ Ubicación del cliente borrada');
   }
 
   // ¿Quién muestra la 🛵? Por defecto el delivery asignado; admin / proveedor
@@ -211,4 +219,39 @@ export async function generateRouteLink(deliveryEmail?: string | null, name?: st
     },
   });
   return url;
+}
+
+/** Cambiar o borrar la ubicación del cliente de un pedido que ya tiene link. */
+export async function editOrderLocation(orderId: string) {
+  const { data: currentDest } = await (supabase as any).rpc('get_order_destination', { p_order_id: orderId });
+  const choice = await askCustomerLocation({
+    current: currentDest?.lat ? { lat: Number(currentDest.lat), lng: Number(currentDest.lng) } : null,
+    confirmLabel: 'Guardar',
+  });
+  if (choice.action === 'cancel' || choice.action === 'keep') return false;
+  let dest: LatLng | null = null;
+  if (choice.action === 'set') {
+    const loading = toast.loading('Buscando la ubicación…');
+    dest = await resolveCoords(choice.text);
+    toast.dismiss(loading);
+    if (!dest) {
+      toast.error('No se encontró la ubicación. Probá pegando las coordenadas (ej. -25.3092, -57.6325).');
+      return false;
+    }
+  }
+  const { data, error } = await (supabase as any).rpc('set_order_destination', {
+    p_order_id: orderId,
+    p_lat: dest?.lat ?? null,
+    p_lng: dest?.lng ?? null,
+  });
+  if (error) {
+    toast.error(error.message);
+    return false;
+  }
+  if (!data) {
+    toast.error('Este pedido todavía no tiene link de seguimiento: generalo primero.');
+    return false;
+  }
+  toast.success(dest ? '📍 Ubicación actualizada' : '🗑️ Ubicación borrada');
+  return true;
 }
