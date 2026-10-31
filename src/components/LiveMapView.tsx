@@ -46,6 +46,7 @@ type Stats = {
 const POLL_MS = 8_000;
 const DRIVER_COLORS = ['#8c5cff', '#0ea5e9', '#f97316', '#10b981', '#e11d48', '#eab308', '#14b8a6', '#6366f1'];
 const TILES = {
+  calles: { label: '🗺️ Calles', url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attr: '© OpenStreetMap' },
   claro: { label: '☀️ Claro', url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', attr: '© OpenStreetMap © CARTO' },
   oscuro: { label: '🌙 Oscuro', url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attr: '© OpenStreetMap © CARTO' },
   satelite: {
@@ -137,14 +138,16 @@ export default function LiveMapView() {
   const [filter, setFilter] = useState<'todos' | 'linea' | 'pendientes'>('todos');
   const [tile, setTile] = useState<TileKey>(() => {
     try {
-      return (localStorage.getItem('dcanp-map-tile') as TileKey) || 'claro';
+      const saved = localStorage.getItem('dcanp-map-tile') as TileKey | null;
+      return saved && saved in TILES ? saved : 'calles';
     } catch {
-      return 'claro';
+      return 'calles';
     }
   });
   const [notices, setNotices] = useState<Notice[]>([]);
   const [feed, setFeed] = useState<Notice[]>([]);
   const [lastSync, setLastSync] = useState<number>(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [, setTick] = useState(0);
   const wrapEl = useRef<HTMLDivElement | null>(null);
   const mapEl = useRef<HTMLDivElement | null>(null);
@@ -166,7 +169,12 @@ export default function LiveMapView() {
     let alive = true;
     const load = async () => {
       const { data, error } = await (supabase as any).rpc('live_map_data');
-      if (!alive || error) return;
+      if (!alive) return;
+      if (error) {
+        setLoadError(error.message || 'No se pudo cargar el mapa');
+        return;
+      }
+      setLoadError(null);
       const list = ((data?.drivers || []) as Driver[]).map((d) => ({ ...d, trail: d.trail || [], orders: d.orders || [] }));
 
       const fresh: Notice[] = [];
@@ -221,8 +229,14 @@ export default function LiveMapView() {
     mapRef.current = L.map(mapEl.current, { zoomControl: false }).setView([-25.2867, -57.647], 12);
     L.control.zoom({ position: 'bottomright' }).addTo(mapRef.current);
     layer.current = L.layerGroup().addTo(mapRef.current);
+    // El contenedor puede cambiar de tamaño al terminar de armarse la pantalla.
+    const map = mapRef.current;
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => map.invalidateSize()) : null;
+    if (mapEl.current) ro?.observe(mapEl.current);
+    [200, 800, 2000].forEach((ms) => window.setTimeout(() => mapRef.current?.invalidateSize(), ms));
     mapRef.current.on('dragstart', () => setFollow(false));
     return () => {
+      ro?.disconnect();
       mapRef.current?.remove();
       mapRef.current = null;
     };
@@ -233,7 +247,13 @@ export default function LiveMapView() {
     if (!map) return;
     tileLayer.current?.remove();
     const t = TILES[tile];
-    tileLayer.current = L.tileLayer(t.url, { maxZoom: 19, attribution: t.attr, subdomains: 'abcd' }).addTo(map);
+    tileLayer.current = L.tileLayer(t.url, { maxZoom: 19, attribution: t.attr, subdomains: tile === 'calles' ? 'abc' : 'abcd' }).addTo(map);
+    // Si un estilo no carga (red o bloqueador), se vuelve al mapa de calles.
+    let errors = 0;
+    tileLayer.current.on('tileerror', () => {
+      errors++;
+      if (errors === 4 && tile !== 'calles') setTile('calles');
+    });
     tileLayer.current.bringToBack();
     try {
       localStorage.setItem('dcanp-map-tile', tile);
@@ -445,10 +465,23 @@ export default function LiveMapView() {
             ))}
           </div>
 
+          {loaded && drivers.length > 0 && online === 0 && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-14 z-[400] flex justify-center p-2">
+              <div className="max-w-sm rounded-2xl border border-amber-500/40 bg-background/95 px-3 py-2 text-center text-[11px] shadow-xl">
+                <b className="text-amber-300">📡 Ningún delivery está compartiendo su ubicación ahora.</b>
+                <div className="text-muted-foreground">La 🛵 aparece cuando abre la app DCANP (o su link) con un pedido EN RUTA y acepta la ubicación.</div>
+              </div>
+            </div>
+          )}
+          {loadError && (
+            <div className="absolute inset-x-2 bottom-12 z-[600] rounded-xl border border-red-500/40 bg-background/95 p-3 text-xs text-red-300 shadow-xl">
+              ⚠️ {loadError}. Reintentando…
+            </div>
+          )}
           {loaded && !drivers.length && (
-            <div className="absolute inset-0 z-[400] flex items-center justify-center bg-background/60 p-6 text-center backdrop-blur-sm">
-              <div>
-                <div className="text-5xl">🛵</div>
+            <div className="pointer-events-none absolute inset-x-0 bottom-14 z-[400] flex justify-center p-2 text-center">
+              <div className="rounded-2xl border border-border bg-background/95 px-4 py-3 shadow-xl">
+                <div className="text-3xl">🛵</div>
                 <div className="mt-2 font-black">Sin deliverys en ruta</div>
                 <div className="text-xs text-muted-foreground">No hay pedidos asignados hoy o ya finalizaron su día.</div>
               </div>
