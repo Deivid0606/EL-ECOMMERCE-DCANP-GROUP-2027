@@ -9,10 +9,19 @@ type CatalogProduct = { sku: string; title: string; provider_price_gs: number | 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(Math.round(Number(n) || 0));
 const digits = (v: unknown) => String(v || '').replace(/\D/g, '').replace(/^595/, '').replace(/^0+/, '');
 
-const readItems = (order: any): Line[] => {
+// sale_gs es el total de la línea. Algunos pedidos importados guardan el precio
+// por unidad: si así cuadra con el total del pedido, se pasa a total de línea.
+export const readItems = (order: any): Line[] => {
   try {
     const items = typeof order?.items_json === 'string' ? JSON.parse(order.items_json) : order?.items_json || [];
-    return (items as any[]).map((it) => ({ sku: String(it.sku || ''), qty: Number(it.qty || 1), sale_gs: Number(it.sale_gs || 0) }));
+    const lines = (items as any[]).map((it) => ({ sku: String(it.sku || ''), qty: Number(it.qty || 1), sale_gs: Number(it.sale_gs || 0) }));
+    const total = Number(order?.total_gs || 0);
+    const asLine = lines.reduce((s, l) => s + l.sale_gs, 0);
+    const asUnit = lines.reduce((s, l) => s + l.sale_gs * l.qty, 0);
+    if (total && Math.abs(total - asLine) >= 1 && Math.abs(total - asUnit) < 1) {
+      return lines.map((l) => ({ ...l, sale_gs: l.sale_gs * l.qty }));
+    }
+    return lines;
   } catch {
     return [];
   }

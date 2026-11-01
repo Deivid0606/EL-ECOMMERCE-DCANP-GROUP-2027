@@ -72,3 +72,16 @@ describe('Editar pedido', () => {
     });
   });
 });
+
+import { readItems } from './OrderEditTools';
+
+describe('readItems', () => {
+  it('pasa precio por unidad a total de línea cuando así cuadra con el total', () => {
+    const order = { total_gs: 233000, items_json: [{ sku: 'X', qty: 2, sale_gs: 116500 }] };
+    expect(readItems(order)).toEqual([{ sku: 'X', qty: 2, sale_gs: 233000 }]);
+  });
+  it('deja igual los pedidos que ya guardan el total de línea', () => {
+    const order = { total_gs: 286200, items_json: [{ sku: 'X', qty: 2, sale_gs: 286200 }] };
+    expect(readItems(order)).toEqual([{ sku: 'X', qty: 2, sale_gs: 286200 }]);
+  });
+});
