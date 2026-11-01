@@ -71,6 +71,7 @@ interface Product {
   private_to_emails: string | null;
   is_private: boolean | null;
   is_private_stock?: boolean | null;
+  is_hidden?: boolean | null;
   created_at?: string | null;
   warehouse_city: string | null;
   warranty_info: string | null;
@@ -182,6 +183,7 @@ const canUserSeeProduct = (
     );
   }
   if (["seller", "despachante"].includes(role)) {
+    if (p.is_hidden) return false;
     if (!isPrivate) return true;
     return privateEmails.includes(userEmail);
   }
@@ -1009,6 +1011,16 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
 
   const canSeeRealStock = ["admin", "provider", "despachante"].includes(role);
   const canEdit = ["admin", "provider", "despachante"].includes(role);
+  const canBulk = role === "admin" || role === "provider";
+  const [bulkSel, setBulkSel] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const toggleBulk = (id: string) =>
+    setBulkSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const canSeeRealCost = ["admin", "provider"].includes(role);
   const canLoadOrder = ["seller", "despachante", "delivery"].includes(role);
   const canSeeMoney = ["admin", "provider", "seller", "despachante"].includes(role);
@@ -1467,6 +1479,28 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     loadDeliveryStocks();
   };
 
+  const bulkAction = async (action: "hide" | "show" | "delete") => {
+    const ids = [...bulkSel].filter((id) => {
+      const p = products.find((x) => x.id === id);
+      return p && (role === "admin" || normalizeEmail(p.provider_email) === myEmail);
+    });
+    if (!ids.length) { toast.error("Seleccioná al menos un producto"); return; }
+    if (action === "delete" && !confirm(`🗑️ ¿Eliminar ${ids.length} producto(s)? También se borra su stock en deliverys. No se puede deshacer.`)) return;
+    setBulkBusy(true);
+    const { error } = action === "delete"
+      ? await supabase.from("products").delete().in("id", ids)
+      : await (supabase as any).from("products").update({ is_hidden: action === "hide" }).in("id", ids);
+    setBulkBusy(false);
+    if (error) { toast.error(error.message); return; }
+    toast.success(
+      action === "delete" ? `🗑️ ${ids.length} producto(s) eliminados`
+        : action === "hide" ? `🙈 ${ids.length} producto(s) ocultos para vendedores`
+        : `👁️ ${ids.length} producto(s) visibles otra vez`,
+    );
+    setBulkSel(new Set());
+    load();
+  };
+
   const deleteProduct = async (productId: string) => {
     if (!confirm("¿Estás seguro de que querés eliminar este producto?")) return;
     const { error } = await supabase.from("products").delete().eq("id", productId);
@@ -1793,6 +1827,25 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
             )}
           </div>
 
+          {canBulk && filtered.length > 0 && (
+            <div className="sticky top-2 z-20 mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-[#0d1119]/95 p-3 text-sm backdrop-blur">
+              <label className="flex cursor-pointer items-center gap-2 font-bold text-white">
+                <input
+                  type="checkbox"
+                  checked={filtered.length > 0 && filtered.every((p) => bulkSel.has(p.id))}
+                  onChange={(e) => setBulkSel(e.target.checked ? new Set(filtered.map((p) => p.id)) : new Set())}
+                />
+                Seleccionar todos ({filtered.length})
+              </label>
+              <span className="text-xs text-white/50">{bulkSel.size} seleccionado(s)</span>
+              <div className="ml-auto flex flex-wrap gap-2">
+                <button disabled={bulkBusy || !bulkSel.size} onClick={() => void bulkAction("hide")} className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 font-bold text-amber-300 disabled:opacity-40">🙈 Ocultar</button>
+                <button disabled={bulkBusy || !bulkSel.size} onClick={() => void bulkAction("show")} className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 font-bold text-emerald-300 disabled:opacity-40">👁️ Mostrar</button>
+                <button disabled={bulkBusy || !bulkSel.size} onClick={() => void bulkAction("delete")} className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 font-bold text-rose-300 disabled:opacity-40">🗑️ Eliminar</button>
+              </div>
+            </div>
+          )}
+
           {/* Loading */}
           {loading && (
             <div className="text-center py-16">
@@ -1862,7 +1915,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
 
                   if (viewMode === "compact") {
                     return (
-                      <div key={p.id} className="group rounded-xl border border-white/10 bg-white/[0.03] p-3 flex flex-col sm:flex-row gap-3 sm:items-center hover:bg-white/[0.06] transition-all">
+                      <div key={p.id} className={`group rounded-xl border bg-white/[0.03] p-3 flex flex-col sm:flex-row gap-3 sm:items-center hover:bg-white/[0.06] transition-all ${bulkSel.has(p.id) ? "border-primary" : "border-white/10"} ${p.is_hidden ? "opacity-60" : ""}`}>
+                        {canBulk && <input type="checkbox" className="h-5 w-5 shrink-0" checked={bulkSel.has(p.id)} onChange={() => toggleBulk(p.id)} title="Seleccionar" />}
                         <div className="w-16 h-16 rounded-xl bg-[#1a1f2e] border border-white/10 overflow-hidden flex items-center justify-center cursor-pointer" onClick={() => mainImg && setViewingImage({ url: mainImg, title: p.title, index: 0 })}>
                           {mainImg ? <img src={mainImg} alt={p.title} className="w-full h-full object-contain" /> : <span className="text-xs text-white/30">📷</span>}
                         </div>
@@ -1887,7 +1941,13 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                   }
 
                   return (
-                    <div key={p.id} className="group relative rounded-2xl border border-white/10 bg-gradient-to-b from-[#11161f] to-[#0a0d14] overflow-hidden transition-all duration-200 hover:border-white/20 hover:shadow-xl">
+                    <div key={p.id} className={`group relative rounded-2xl border bg-gradient-to-b from-[#11161f] to-[#0a0d14] overflow-hidden transition-all duration-200 hover:border-white/20 hover:shadow-xl ${bulkSel.has(p.id) ? "border-primary ring-2 ring-primary/50" : "border-white/10"}`}>
+                      {canBulk && (
+                        <label className="absolute bottom-2 left-2 z-10 flex cursor-pointer items-center gap-1 rounded-lg bg-black/70 px-2 py-1 text-[11px] font-bold text-white" onClick={(e) => e.stopPropagation()}>
+                          <input type="checkbox" className="h-4 w-4" checked={bulkSel.has(p.id)} onChange={() => toggleBulk(p.id)} />
+                          Seleccionar
+                        </label>
+                      )}
                       <div className="relative aspect-square overflow-hidden cursor-pointer bg-[#1a1f2e]" onClick={() => mainImg && setViewingImage({ url: mainImg, title: p.title, index: 0 })}>
                         <ProductImageGallery
                           images={images} title={p.title}
@@ -1896,6 +1956,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                           onIndexChange={(idx) => setImgIndex((prev) => ({ ...prev, [p.id]: idx }))}
                         />
                         <div className="absolute top-2 left-2 flex flex-col gap-1">
+                          {p.is_hidden && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/90 text-black backdrop-blur-sm">🙈 Oculto</span>}
+                          {Number(p.stock || 0) <= 0 && !isDelivery && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-black/80 text-white backdrop-blur-sm">⛔ Sin stock</span>}
                           {stockCritical && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/80 text-white backdrop-blur-sm">⚠️ Stock bajo</span>}
                           {topProduct && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/80 text-white backdrop-blur-sm">🔥 Top ventas</span>}
                         </div>

@@ -372,8 +372,8 @@ const CreateOrderView = ({
         if (productsError) throw productsError;
 
         const allProducts = productsData || [];
-        const visibleProducts = allProducts.filter((p: any) =>
-          canAccessProduct(p, profile),
+        const visibleProducts = allProducts.filter(
+          (p: any) => !p.is_hidden && canAccessProduct(p, profile),
         );
 
         const filteredProducts = visibleProducts.filter((p: any) => {
@@ -889,6 +889,17 @@ const CreateOrderView = ({
       return;
     }
 
+    const needBySku = new Map<string, number>();
+    validItems.forEach((i) => needBySku.set(i.sku, (needBySku.get(i.sku) || 0) + Number(i.qty)));
+    const sinStock = [...needBySku].filter(([sku, q]) => Number(catalogMap[sku]?.stock || 0) < q);
+    if (sinStock.length) {
+      toast.error(
+        `Sin stock: ${sinStock.map(([sku, q]) => `${catalogMap[sku]?.title || sku} (stock ${Number(catalogMap[sku]?.stock || 0)}, pedido ${q})`).join("; ")}`,
+        { duration: 8000 },
+      );
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -1143,7 +1154,8 @@ const CreateOrderView = ({
                           : "Seleccionar producto…"}
                       </option>
                       {products.map((p) => (
-                        <option key={p.id} value={p.sku}>
+                        <option key={p.id} value={p.sku} disabled={Number(p.stock || 0) <= 0}>
+                          {Number(p.stock || 0) <= 0 ? "⛔ SIN STOCK · " : ""}
                           {p.title} — {p.sku}
                           {userFavorites.has(p.id) ? " ⭐" : ""}
                           {p.is_private ? " 🔒" : ""}
