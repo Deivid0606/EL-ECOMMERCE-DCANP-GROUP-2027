@@ -33,6 +33,7 @@ const SCHEMA = {
     'faq',
     'sections',
     'image_blocks',
+    'generated_images',
     'video_position',
   ],
   properties: {
@@ -69,6 +70,28 @@ const SCHEMA = {
             type: 'string',
             description:
               'Texto que va debajo de la foto: un título en MAYÚSCULAS con 1 emoji y, si suma, una línea más (separada con una línea en blanco) que empiece con 👉. Tiene que corresponder a lo que se ve en esa foto.',
+          },
+        },
+      },
+    },
+    generated_images: {
+      type: 'array',
+      description:
+        'Si te piden imágenes nuevas (ver "Imágenes a crear"), exactamente esa cantidad; si no, vacío. Cada una es una escena de venta distinta del producto: 1) el producto protagonista en un ambiente atractivo, 2) una persona usándolo en una situación real de Paraguay, 3) el resultado o beneficio principal.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['prompt', 'caption'],
+        properties: {
+          prompt: {
+            type: 'string',
+            description:
+              'Descripción de la escena EN INGLÉS para un generador de imágenes: lugar, personas, acción, luz y encuadre. Sin texto ni letras en la imagen.',
+          },
+          caption: {
+            type: 'string',
+            description:
+              'Texto que va debajo de esa imagen en la página: título en MAYÚSCULAS con 1 emoji y, si suma, una línea más (separada con una línea en blanco) que empiece con 👉.',
           },
         },
       },
@@ -127,6 +150,7 @@ Deno.serve(async (req) => {
     .from('ai_generations')
     .select('id', { count: 'exact', head: true })
     .eq('user_email', email)
+    .eq('kind', 'landing_copy')
     .gte('created_at', since);
   if ((count || 0) >= DAILY_LIMIT) {
     return json({ error: `Llegaste al límite de ${DAILY_LIMIT} generaciones por día. Probá mañana.` }, 429);
@@ -161,7 +185,9 @@ Deno.serve(async (req) => {
   const images: string[] = (Array.isArray(body?.photos) && body.photos.length ? body.photos : product.images || [])
     .filter(isUrl)
     .slice(0, 6);
+  const usingUploads = Array.isArray(body?.photos) && body.photos.length > 0;
   const videoCount = Math.max(0, Math.min(3, Number(body?.videoCount || 0)));
+  const imagesToCreate = Math.max(0, Math.min(3, Number(body?.generateImages || 0)));
 
   const client = new Anthropic({ apiKey });
 
@@ -177,8 +203,11 @@ Deno.serve(async (req) => {
       type: 'text',
       text:
         `Armá la página de venta con estos datos.\n` +
-        `Fotos para la página: ${images.length}${!withImages && images.length ? ' (no se pudieron ver; escribí textos generales del producto para cada una)' : ''}.\n` +
-        `Videos para la página: ${videoCount}.\n\n${facts}`,
+        (usingUploads
+          ? `Fotos para la página: ${images.length}${!withImages ? ' (no se pudieron ver; escribí textos generales del producto para cada una)' : ''}.\n`
+          : `Fotos para la página: 0 (las fotos de arriba son sólo de referencia del producto; image_blocks vacío).\n`) +
+        `Videos para la página: ${videoCount}.\n` +
+        `Imágenes a crear: ${imagesToCreate}.\n\n${facts}`,
     });
     return await client.beta.messages.create({
       model: 'claude-opus-5-5',
