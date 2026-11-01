@@ -4,6 +4,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { pyToday, pyStart, pyEnd } from '@/lib/pyTime';
+import { useOrderEditTools } from '@/components/OrderEditTools';
 
 declare global {
   interface Window {
@@ -722,6 +723,11 @@ export default function WithGuidesView() {
   };
 
   const getSelectedOrders = () => visibleOrders.filter(o => selectedIds.has(o.id));
+  // ✏️ Editar productos / 🔗 fusionar pedidos del mismo cliente.
+  const orderTools = useOrderEditTools(() => {
+    setSelectedIds(new Set());
+    void load();
+  });
 
   const bulkCopyGuides = () => {
     const selected = getSelectedOrders();
@@ -1638,6 +1644,8 @@ export default function WithGuidesView() {
         </section>
       )}
 
+      {orderTools.modal}
+
       {/* Acciones masivas */}
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap gap-2 mb-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl shadow-xl">
@@ -1647,6 +1655,16 @@ export default function WithGuidesView() {
           <button className="nav-btn" style={{ background: '#10b981', color: 'white' }} onClick={bulkMarkAsGuiaGenerada}>
             🚀 Marcar como GUIA GENERADA
           </button>
+          {selectedIds.size >= 2 && (
+            <button className="nav-btn" style={{ background: '#f59e0b', color: 'white' }} onClick={() => void orderTools.mergeOrders(getSelectedOrders())}>
+              🔗 Fusionar {selectedIds.size} pedidos (un solo delivery)
+            </button>
+          )}
+          {selectedIds.size === 1 && (
+            <button className="nav-btn" style={{ background: '#0ea5e9', color: 'white' }} onClick={() => orderTools.openEditor(getSelectedOrders()[0])}>
+              ✏️ Editar productos
+            </button>
+          )}
           <button className="nav-btn" onClick={bulkCopyGuides}>📋 Copiar guías</button>
           <button className="nav-btn active" onClick={downloadTxt}>📥 Descargar TXT</button>
           <button className="nav-btn active" onClick={() => printWithQR()} style={{ background: '#8b5cf6', color: 'white' }}>
@@ -1804,6 +1822,7 @@ export default function WithGuidesView() {
                  </td>
                 <td className="text-xs">
                   <div className="flex gap-1">
+                    <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => orderTools.openEditor(o)} title="Editar productos, cantidades y precios">✏️</button>
                     <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => openGuideModal(o)} title="Ver guía con QR">📄</button>
                     <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => {
                       const text = buildGuideText(o);
