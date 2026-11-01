@@ -2337,6 +2337,20 @@ export default function WebPageBuilder({
                   placeholder="Ej: destacá que es recargable, oferta 2x1 esta semana"
                 />
               </div>
+              <label className="flex items-start gap-2 rounded-xl border border-violet-400/40 bg-background/40 p-3 text-xs">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={aiMakeImages}
+                  onChange={(e) => setAiMakeImages(e.target.checked)}
+                />
+                <span>
+                  <b>🎨 Crear 3 imágenes de venta con IA</b>
+                  <span className="block text-[10px] text-muted-foreground">
+                    Usa la foto real del producto: producto protagonista, una persona usándolo y el resultado. Cada imagen tiene su texto de venta.
+                  </span>
+                </span>
+              </label>
               <div>
                 <label className="app-label">Imágenes de venta</label>
                 <div className="grid gap-1.5">
