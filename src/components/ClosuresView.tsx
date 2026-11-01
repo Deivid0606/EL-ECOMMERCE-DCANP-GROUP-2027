@@ -7,6 +7,7 @@ import { generateTrackingLink } from '@/lib/tracking';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { pyToday, pyStart, pyEnd, pyDateKey } from '@/lib/pyTime';
+import { useOrderEditTools } from '@/components/OrderEditTools';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -2628,6 +2629,13 @@ export default function ClosuresView() {
     [displayedOrders, selectedGuideIds],
   );
 
+  // ✏️ Editar productos / 🔗 fusionar pedidos del mismo cliente (admin, proveedor, despachante).
+  const canEditOrderItems = isAdmin || isSupplier || myRole === 'DESPACHANTE';
+  const orderTools = useOrderEditTools(() => {
+    setSelectedGuideIds(new Set());
+    void loadClosures();
+  });
+
   const selectedDeliveredOrders = useMemo(
     () =>
       selectedOrders.filter(
@@ -4180,6 +4188,30 @@ export default function ClosuresView() {
                 </button>
               </>
             )}
+
+            {canEditOrderItems && selectedOrders.length >= 2 && (
+              <button
+                type="button"
+                className="nav-btn"
+                style={{ background: '#f59e0b', color: 'white' }}
+                onClick={() => void orderTools.mergeOrders(selectedOrders)}
+                title="Une los pedidos del mismo cliente en uno: un solo delivery y la comisión correspondiente"
+              >
+                🔗 Fusionar ({selectedOrders.length})
+              </button>
+            )}
+            {canEditOrderItems && selectedOrders.length === 1 && (
+              <button
+                type="button"
+                className="nav-btn"
+                style={{ background: '#0ea5e9', color: 'white' }}
+                onClick={() => orderTools.openEditor(selectedOrders[0])}
+                title="Cambiar cantidades, precios o agregar productos"
+              >
+                ✏️ Editar productos
+              </button>
+            )}
+            {orderTools.modal}
 
             {canMarkSelectedAsRendido && (
               <>
