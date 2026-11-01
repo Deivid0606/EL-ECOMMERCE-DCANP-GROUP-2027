@@ -825,8 +825,8 @@ export default function WebPageBuilder({
           extraProducts: config.productSnapshots.slice(1).map((p) => p.title),
           photos: aiPhotos.map((m) => m.url),
           videoCount: aiVideos.length,
-          generateImages: aiMakeImages ? 3 : 0,
-          designBanners: aiDesignBanners ? 3 : 0,
+          generateImages: aiMakeImages ? 4 : 0,
+          designBanners: aiDesignBanners ? 4 : 0,
           provider: aiProvider,
           brandColor: config.primaryColor,
           tone: aiTone,
@@ -850,11 +850,32 @@ export default function WebPageBuilder({
       }
 
       // 🎨 Imágenes nuevas creadas por la IA (en paralelo), con la foto real del producto de referencia.
-      const ideas: { prompt: string; caption: string }[] = aiMakeImages ? (copy.generated_images || []).slice(0, 3) : [];
+      const ideas: { prompt: string; caption: string }[] = aiMakeImages ? (copy.generated_images || []).slice(0, 4) : [];
+      // Datos que la IA detectó que faltan (no los usó).
+      const missing: string[] = Array.isArray(copy.analysis?.missing_data) ? copy.analysis.missing_data : [];
+      if (missing.length) {
+        toast.info(`🔎 La IA no usó estos datos porque faltan: ${missing.slice(0, 4).join(" · ")}. Si los tenés, agregalos en Indicaciones.`, {
+          duration: 12000,
+        });
+      }
+      // HERO: imagen principal aparte (pasa a ser la primera foto del producto).
+      const heroIdea = aiMakeImages && copy.hero?.prompt ? copy.hero : null;
+      let heroUrl = "";
       const created: { url: string; caption: string }[] = [];
       const createdByIndex: (string | null)[] = [];
       if (ideas.length) {
-        toast.loading(`🎨 Creando ${ideas.length} imágenes… (1 a 2 minutos)`, { id: loading });
+        toast.loading(`🎨 Creando ${ideas.length + (heroIdea ? 1 : 0)} imágenes… (1 a 2 minutos)`, { id: loading });
+        const heroPromise = heroIdea
+          ? supabase.functions.invoke("ai-landing-image", {
+              body: {
+                prompt: heroIdea.prompt,
+                hook: heroIdea.hook || "",
+                productTitle: main.title,
+                referenceUrl: main.images[0] || "",
+                quality: "high",
+              },
+            })
+          : Promise.resolve(null);
         const results = await Promise.allSettled(
           ideas.map((idea) =>
             supabase.functions.invoke("ai-landing-image", {
@@ -867,6 +888,12 @@ export default function WebPageBuilder({
             }),
           ),
         );
+        try {
+          const heroRes: any = await heroPromise;
+          heroUrl = heroRes?.data?.url || "";
+        } catch {
+          heroUrl = "";
+        }
         let imageError = "";
         results.forEach((r, i) => {
           if (r.status === "fulfilled" && (r.value.data as any)?.url) {
@@ -897,7 +924,7 @@ export default function WebPageBuilder({
       const allowedSrc = new Set([...main.images, ...created.map((c) => c.url)]);
       const bannerBlocks: LandingContentBlock[] = [];
       if (aiDesignBanners) {
-        (copy.banners || []).slice(0, 3).forEach((b: { html: string; caption: string }, bi: number) => {
+        (copy.banners || []).slice(0, 4).forEach((b: { html: string; caption: string }, bi: number) => {
           // {{FOTO_IA_N}} → foto profesional generada (si falló, la foto real del producto).
           const withPhotos = String(b.html || "").replace(/\{\{\s*FOTO_IA_(\d)\s*\}\}/g, (_m, n) => {
             const idx = Number(n) - 1;
@@ -1044,9 +1071,16 @@ export default function WebPageBuilder({
         checkoutTitle: copy.checkout_title || prev.checkoutTitle,
         benefits: Array.isArray(copy.benefits) && copy.benefits.length ? copy.benefits : prev.benefits,
         faq: Array.isArray(copy.faq) && copy.faq.length ? copy.faq : prev.faq,
-        productSnapshots: prev.productSnapshots.map((p, i) =>
-          i === 0 && copy.product_description ? { ...p, description: copy.product_description } : p,
-        ),
+        productSnapshots: prev.productSnapshots.map((p, i) => {
+          if (i !== 0) return p;
+          const next = copy.product_description ? { ...p, description: copy.product_description } : { ...p };
+          if (heroUrl) {
+            // La HERO va primera, fuera del cuerpo de la página.
+            next.images = [heroUrl, ...p.images.filter((u) => u !== heroUrl)];
+            next.media = [{ id: `ai-hero-${uid()}`, type: "image" as const, url: heroUrl, alt: p.title }, ...p.media];
+          }
+          return next;
+        }),
         // Reemplaza sólo los bloques que puso la IA antes; los tuyos quedan.
         contentBlocks: [
           ...mediaBlocks,
@@ -2398,9 +2432,9 @@ export default function WebPageBuilder({
                 <div className="grid gap-1.5">
                   {(
                     [
-                      ["pro", "🚀 PRO: fotos nuevas + diseño", "OpenAI crea fotos publicitarias en alta calidad y la IA diseña el anuncio encima (títulos, insignias). Necesita la clave de OpenAI."],
-                      ["claude", "🎨 Anuncios diseñados con tu foto real", "Producto sin fondo, acercamientos, ilustraciones, sellos de precio e insignias. Sin fotos nuevas."],
-                      ["openai", "📸 Fotos realistas con IA (OpenAI)", "Escenas nuevas con el producto. Necesita la clave de OpenAI."],
+                      ["pro", "🚀 PRO: fotos nuevas + diseño", "Imagen HERO + 4 imágenes (problema, solución, detalles, deseo): OpenAI crea las fotos y la IA diseña el anuncio encima, sin precios. Necesita la clave de OpenAI."],
+                      ["claude", "🎨 Anuncios diseñados con tu foto real", "4 anuncios (problema, solución, detalles, deseo) con tu foto real, ilustraciones e insignias. Sin fotos nuevas."],
+                      ["openai", "📸 Fotos realistas con IA (OpenAI)", "HERO + 4 escenas nuevas con el producto y su texto debajo. Necesita la clave de OpenAI."],
                       ["none", "🚫 Sin imágenes nuevas", "Sólo textos (y tus fotos/videos si subís)."],
                     ] as const
                   ).map(([value, title, hint]) => (

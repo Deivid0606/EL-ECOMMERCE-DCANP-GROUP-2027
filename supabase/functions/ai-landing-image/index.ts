@@ -63,7 +63,14 @@ Deno.serve(async (req) => {
   const scene = String(body?.prompt || '').slice(0, 2000);
   const productTitle = String(body?.productTitle || '').slice(0, 200);
   if (!scene) return json({ error: 'Falta la descripción de la imagen' }, 400);
-  const prompt = `${STYLE}\nProduct: ${productTitle}.\nScene: ${scene}`;
+  const hook = String(body?.hook || '').slice(0, 60);
+  const style = hook
+    ? STYLE.replace(
+        'Do NOT add any text, letters, logos, watermarks or prices to the image.',
+        `Write ONLY this Spanish headline in the image, big, bold and perfectly spelled: "${hook}". No other text, no prices, no logos, no watermarks.`,
+      )
+    : STYLE;
+  const prompt = `${style}\nProduct: ${productTitle}.\nScene: ${scene}`;
   const quality = body?.quality === 'high' ? 'high' : 'medium';
 
   // Foto real del producto como referencia (si se puede descargar).
