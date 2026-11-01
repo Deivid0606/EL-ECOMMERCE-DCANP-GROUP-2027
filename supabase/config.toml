@@ -7,3 +7,6 @@ verify_jwt = true
 
 [functions.ai-landing-image]
 verify_jwt = true
+
+[functions.shopify-autoload]
+verify_jwt = false
