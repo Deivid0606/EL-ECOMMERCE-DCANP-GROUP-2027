@@ -5,6 +5,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 import { generateTrackingLink } from '@/lib/tracking';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { pyDateKey, pyDaysAgo, pyToday } from '@/lib/pyTime';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 const norm = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -14,11 +15,7 @@ const getLocalDate = (value: string | null | undefined) => {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
 
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
+  return pyDateKey(d);
 };
 
 const getSafeDateRange = (fromDate: string, toDate: string) => {
@@ -29,12 +26,9 @@ const getSafeDateRange = (fromDate: string, toDate: string) => {
 
 // Obtener fecha de hace 3 días
 const getLast3Days = () => {
-  const today = new Date();
-  const threeDaysAgo = new Date();
-  threeDaysAgo.setDate(today.getDate() - 3);
   return {
-    from: threeDaysAgo.toISOString().slice(0, 10),
-    to: today.toISOString().slice(0, 10)
+    from: pyDaysAgo(3),
+    to: pyToday()
   };
 };
 

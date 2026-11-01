@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { pyDaysAgo, pyToday, pyStart, pyEnd } from '@/lib/pyTime';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -65,11 +66,8 @@ export default function CommissionsView() {
   const [providers, setProviders] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [commissionRequests, setCommissionRequests] = useState<any[]>([]);
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState(() => pyDaysAgo(30));
+  const [dateTo, setDateTo] = useState(() => pyToday());
 
   useEffect(() => {
     Promise.all([
@@ -86,8 +84,8 @@ export default function CommissionsView() {
 
   const loadCommissions = async () => {
     let query = supabase.from('orders').select('*')
-      .gte('created_at', dateFrom + 'T00:00:00')
-      .lte('created_at', dateTo + 'T23:59:59')
+      .gte('created_at', pyStart(dateFrom))
+      .lte('created_at', pyEnd(dateTo))
       .order('created_at', { ascending: false });
 
     if (role === 'VENDEDOR') {
@@ -144,8 +142,8 @@ export default function CommissionsView() {
     if (!rawDate) return true;
 
     const d = new Date(rawDate);
-    const from = new Date(dateFrom + 'T00:00:00');
-    const to = new Date(dateTo + 'T23:59:59');
+    const from = new Date(pyStart(dateFrom));
+    const to = new Date(pyEnd(dateTo));
 
     return d >= from && d <= to;
   });

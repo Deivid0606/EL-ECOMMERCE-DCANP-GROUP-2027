@@ -6,6 +6,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { generateTrackingLink } from '@/lib/tracking';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { pyToday, pyStart, pyEnd, pyDateKey } from '@/lib/pyTime';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -1536,8 +1537,8 @@ export default function ClosuresView() {
 
     if (!isTeamClosureView) {
       query = query
-        .gte(dateField, dateFrom + 'T00:00:00')
-        .lte(dateField, dateTo + 'T23:59:59')
+        .gte(dateField, pyStart(dateFrom))
+        .lte(dateField, pyEnd(dateTo))
         .order(dateField, { ascending: false });
     }
 
@@ -1781,8 +1782,8 @@ export default function ClosuresView() {
     if (deliveryToCheck) {
       const { data: rp } = await supabase.from('rendiciones_pagadas').select('*')
         .eq('delivery_email', deliveryToCheck)
-        .gte('pagado_en', dateFrom + 'T00:00:00')
-        .lte('pagado_en', dateTo + 'T23:59:59')
+        .gte('pagado_en', pyStart(dateFrom))
+        .lte('pagado_en', pyEnd(dateTo))
         .order('pagado_en', { ascending: false })
         .limit(1);
       setRendicionPagada(rp && rp.length > 0 ? { id: rp[0].id, pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
@@ -1839,7 +1840,7 @@ export default function ClosuresView() {
     for (const order of orders) {
       const phone = String(order.customer_phone || order.phone || '').replace(/\D/g, '');
       const city = String(order.city || '').trim().toLowerCase();
-      const day = String(order.created_at || '').slice(0, 10);
+      const day = order.created_at ? pyDateKey(new Date(order.created_at)) : '';
       if (phone.length < 8 || !city || !day) continue;
       const key = `${phone}|${city}|${day}`;
       groups.set(key, [...(groups.get(key) || []), order]);
@@ -2557,7 +2558,7 @@ export default function ClosuresView() {
 
     const { error } = await supabase.from('rendiciones_pagadas').insert({
       delivery_email: deliveryEmail,
-      fecha_rendicion: new Date().toISOString().slice(0, 10),
+      fecha_rendicion: pyToday(),
       monto_total: totalAPagar,
       nota: rendicionNote || `Rendición ${dateFrom} a ${dateTo} — ${delivered.length} pedidos — Cobrado Gs ${nf(settlementSummary.totalCollected)} — Delivery Gs ${nf(settlementSummary.totalDeliveryPayment)} — Neto Gs ${nf(totalAPagar)}`,
       marcado_por: myEmail,

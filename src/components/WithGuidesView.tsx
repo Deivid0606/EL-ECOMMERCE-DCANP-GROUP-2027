@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { pyToday, pyStart, pyEnd } from '@/lib/pyTime';
 
 declare global {
   interface Window {
@@ -12,7 +13,7 @@ declare global {
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => pyToday();
 
 const normalizeClientName = (value: any): string => {
   return String(value || '')
@@ -295,14 +296,14 @@ export default function WithGuidesView() {
           .from('orders')
           .select('*')
           .eq('status2', 'GUIA GENERADA')
-          .gte('updated_at', today + 'T00:00:00')
-          .lte('updated_at', today + 'T23:59:59'),
+          .gte('updated_at', pyStart(today))
+          .lte('updated_at', pyEnd(today)),
         supabase
           .from('orders')
           .select('*')
           .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
-          .gte('delivered_at', today + 'T00:00:00')
-          .lte('delivered_at', today + 'T23:59:59'),
+          .gte('delivered_at', pyStart(today))
+          .lte('delivered_at', pyEnd(today)),
       ]);
 
       const roleFilter = (o: any) => {
@@ -799,7 +800,7 @@ export default function WithGuidesView() {
     const selected = getSelectedOrders();
     if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
     const content = selected.map(o => buildGuideText(o)).join('\n\n');
-    downloadFile(content, `guias_${new Date().toISOString().slice(0, 10)}.txt`, 'text/plain');
+    downloadFile(content, `guias_${pyToday()}.txt`, 'text/plain');
     toast.success(`${selected.length} guías descargadas en TXT`);
   };
 

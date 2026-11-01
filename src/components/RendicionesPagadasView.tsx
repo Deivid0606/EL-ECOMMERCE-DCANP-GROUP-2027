@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { pyDaysAgo, pyToday } from '@/lib/pyTime';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -13,16 +14,13 @@ export default function RendicionesPagadasView() {
   const [rendiciones, setRendiciones] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<{ email: string; name: string }[]>([]);
   const [filterDelivery, setFilterDelivery] = useState('');
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setMonth(d.getMonth() - 1);
-    return d.toISOString().slice(0, 10);
-  });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState(() => pyDaysAgo(30));
+  const [dateTo, setDateTo] = useState(() => pyToday());
 
   // New rendicion form
   const [showForm, setShowForm] = useState(false);
   const [newDelivery, setNewDelivery] = useState('');
-  const [newFecha, setNewFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [newFecha, setNewFecha] = useState(() => pyToday());
   const [newMonto, setNewMonto] = useState(0);
   const [newNota, setNewNota] = useState('');
 

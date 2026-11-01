@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { pyToday, pyStart, pyEnd, pyDateKey } from '@/lib/pyTime';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -8,8 +9,8 @@ export default function EarningsView() {
   const { profile } = useAuth();
   const [orders, setOrders] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
-  const [dateFrom, setDateFrom] = useState(() => new Date().toISOString().slice(0, 10));
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState(() => pyToday());
+  const [dateTo, setDateTo] = useState(() => pyToday());
 
   const load = async () => {
     const { data: prods } = await supabase.from('products').select('*');
@@ -17,8 +18,8 @@ export default function EarningsView() {
 
     let query = supabase.from('orders').select('*')
       .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
-      .gte('delivered_at', dateFrom + 'T00:00:00')
-      .lte('delivered_at', dateTo + 'T23:59:59');
+      .gte('delivered_at', pyStart(dateFrom))
+      .lte('delivered_at', pyEnd(dateTo));
 
     if (profile?.role === 'PROVEEDOR') {
       query = query.ilike('provider_emails_list', `%${profile.email}%`);
@@ -59,8 +60,8 @@ export default function EarningsView() {
   const totalProfit = rows.reduce((s, r) => s + r.profit, 0);
   const totalUnits = rows.reduce((s, r) => s + r.delivered, 0);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const todayOrders = orders.filter(o => o.delivered_at?.slice(0, 10) === today);
+  const today = pyToday();
+  const todayOrders = orders.filter(o => o.delivered_at && pyDateKey(new Date(o.delivered_at)) === today);
   let todayProfit = 0;
   todayOrders.forEach(o => {
     const items = Array.isArray(o.items_json) ? o.items_json : [];

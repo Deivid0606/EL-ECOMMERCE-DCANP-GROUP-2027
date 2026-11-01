@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { pyFirstOfMonth, pyToday, pyStart, pyEnd } from '@/lib/pyTime';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -13,8 +14,8 @@ export default function AssignOrdersView() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assignDelivery, setAssignDelivery] = useState('');
   const [search, setSearch] = useState('');
-  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState(() => pyFirstOfMonth());
+  const [dateTo, setDateTo] = useState(() => pyToday());
   const [idsInput, setIdsInput] = useState('');
   const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
   const [autoAssignProcessing, setAutoAssignProcessing] = useState(false);
@@ -221,8 +222,8 @@ export default function AssignOrdersView() {
 
   const load = async () => {
     let query = supabase.from('orders').select('*')
-      .gte(filterBy, dateFrom + 'T00:00:00')
-      .lte(filterBy, dateTo + 'T23:59:59')
+      .gte(filterBy, pyStart(dateFrom))
+      .lte(filterBy, pyEnd(dateTo))
       .order(filterBy, { ascending: false }).limit(500);
 
     if (role === 'DELIVERY') {
