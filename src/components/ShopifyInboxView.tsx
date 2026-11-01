@@ -371,6 +371,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [rowOrderNumbers, setRowOrderNumbers] = useState<Record<string, string>>({});
   
   const [autoLoad, setAutoLoad] = useState<boolean>(() => localStorage.getItem(AUTO_LOAD_KEY) === "true");
+  // La auto-carga corre en el servidor (cada 5 min) aunque la app esté cerrada.
+  const [serverAuto, setServerAuto] = useState<{ last_run_at: string | null; last_result: any } | null>(null);
   const [activeFilter, setActiveFilter] = useState<FilterType>(() => {
     const saved = localStorage.getItem(ACTIVE_FILTER_KEY) as FilterType;
     return saved || "CARGAR";
@@ -558,6 +560,42 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   useEffect(() => {
     void loadSkuMappings();
   }, [loadSkuMappings]);
+
+  const loadServerAuto = useCallback(async () => {
+    if (!myEmail) return;
+    const { data } = await (supabase as any)
+      .from("shopify_autoload_settings")
+      .select("enabled, last_run_at, last_result")
+      .eq("user_email", myEmail.toLowerCase())
+      .maybeSingle();
+    if (data) {
+      setAutoLoad(Boolean(data.enabled));
+      setServerAuto({ last_run_at: data.last_run_at, last_result: data.last_result });
+    }
+  }, [myEmail]);
+
+  useEffect(() => {
+    void loadServerAuto();
+    const t = window.setInterval(() => void loadServerAuto(), 60_000);
+    return () => window.clearInterval(t);
+  }, [loadServerAuto]);
+
+  // El servidor usa también tus correcciones de ciudades y productos.
+  const aliasesReady = useRef(false);
+  useEffect(() => {
+    if (!myEmail) return;
+    if (!aliasesReady.current) {
+      aliasesReady.current = true;
+      return;
+    }
+    const t = window.setTimeout(() => {
+      void (supabase as any).from("shopify_autoload_settings").upsert(
+        { user_email: myEmail.toLowerCase(), city_aliases: cityAliases, product_aliases: productAliases, updated_at: new Date().toISOString() },
+        { onConflict: "user_email" },
+      );
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [cityAliases, productAliases, myEmail]);
 
   const getRowKey = useCallback((order: SheetOrder, idx: number): string => {
     if (order.__row) {
@@ -833,20 +871,23 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (loadingRows.current.has(rowKey)) return false;
     loadingRows.current.add(rowKey);
     try {
-      const { data: already } = await (supabase as any)
-        .from("sheet_row_statuses")
-        .select("status")
-        .eq("user_email", myEmail)
-        .eq("sheet_url", sheetUrl)
-        .eq("row_index", Number(rowKey))
-        .maybeSingle();
-      if (already) {
-        if (!quiet) toast.info(`La fila ${rowKey} ya estaba cargada.`);
-        return false;
-      }
-
     const orderId = await generateUniqueOrderId();
     const newStatus: OrderStatus = source === "auto" ? "CARGADO" : "CARGADO_MANUAL";
+      // Se "reserva" la fila antes de crear el pedido: si el servidor (auto-carga) u
+      // otro equipo ya la tomó, no se duplica.
+      const { error: claimError } = await (supabase as any).from("sheet_row_statuses").insert({
+        user_email: myEmail,
+        sheet_url: sheetUrl,
+        row_index: Number(rowKey),
+        status: newStatus,
+        order_number: orderId,
+        updated_at: new Date().toISOString(),
+      });
+      if (claimError) {
+        if (!quiet) toast.info(`La fila ${rowKey} ya estaba cargada.`);
+        await loadStatusesFromDatabase();
+        return false;
+      }
     const productCost = matched.provider_price_gs || 0;
     const qty = parseQuantity(order[colKeys.qty]);
     // Comisión = venta − (precio proveedor × cantidad) − delivery de la ciudad.
@@ -876,15 +917,22 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
 
     const { error } = await supabase.from("orders").insert(payload);
-    if (error) { if (!quiet) toast.error("Error al guardar: " + error.message); return false; }
+    if (error) {
+      // Se libera la fila para poder reintentar.
+      await (supabase as any).from("sheet_row_statuses").delete()
+        .eq("user_email", myEmail).eq("sheet_url", sheetUrl).eq("row_index", Number(rowKey)).eq("order_number", orderId);
+      if (!quiet) toast.error("Error al guardar: " + error.message);
+      return false;
+    }
 
-    await setRowStatus(rowKey, newStatus, orderId);
+    setRowStatuses(prev => ({ ...prev, [rowKey]: newStatus }));
+    setRowOrderNumbers(prev => ({ ...prev, [rowKey]: orderId }));
     if (!quiet) toast.success(`✅ Pedido ${orderId} cargado | ${city} · Delivery: ${nf(deliveryPrice)} Gs`);
     return true;
     } finally {
       loadingRows.current.delete(rowKey);
     }
-  }, [colKeys, matchProduct, matchCity, getCityDepartmentForCity, myEmail, sheetUrl, setRowStatus]);
+  }, [colKeys, matchProduct, matchCity, getCityDepartmentForCity, myEmail, sheetUrl, loadStatusesFromDatabase]);
 
   // 🤖 Auto-carga: todos los pedidos pendientes con cobertura y producto detectado.
   const runAutoLoad = useCallback(async () => {
@@ -1112,8 +1160,25 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         return;
       autoFailed.current.clear();
     }
-    setAutoLoad(!autoLoad);
-    toast.info(!autoLoad ? "🤖 Auto-carga activada" : "⏹️ Auto-carga desactivada");
+    const next = !autoLoad;
+    setAutoLoad(next);
+    void (supabase as any)
+      .from("shopify_autoload_settings")
+      .upsert(
+        {
+          user_email: myEmail.toLowerCase(),
+          enabled: next,
+          enabled_at: next ? new Date().toISOString() : null,
+          city_aliases: cityAliases,
+          product_aliases: productAliases,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_email" },
+      )
+      .then(({ error }: any) => {
+        if (error) toast.error("No se pudo guardar la auto-carga: " + error.message);
+      });
+    toast.info(next ? "🤖 Auto-carga activada: el servidor carga tus pedidos cada 5 minutos, aunque cierres la app" : "⏹️ Auto-carga desactivada");
   };
 
   const getDisplayAmount = (order: SheetOrder) => getAmountFromRow(order, colKeys.amount);
@@ -2051,6 +2116,20 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               <button className={`rounded-2xl px-4 py-2.5 text-sm font-black shadow-lg transition hover:-translate-y-0.5 ${autoLoad ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/25" : "bg-slate-800 text-slate-300 ring-1 ring-slate-700"}`} onClick={toggleAutoLoad}>
                 {autoLoad ? "🤖 Auto ON" : "🤖 Auto OFF"}
               </button>
+              {autoLoad && (
+                <span
+                  className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-bold text-emerald-200"
+                  title="La auto-carga corre en el servidor aunque cierres la app"
+                >
+                  ☁️ Servidor:{" "}
+                  {serverAuto?.last_run_at
+                    ? `revisó ${new Date(serverAuto.last_run_at).toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" })}` +
+                      (serverAuto.last_result?.error
+                        ? ` · ⚠️ ${serverAuto.last_result.error}`
+                        : ` · cargó ${serverAuto.last_result?.loaded ?? 0}`)
+                    : "primera revisión en menos de 5 min"}
+                </span>
+              )}
               <button className="rounded-2xl bg-slate-800 px-4 py-2.5 text-sm font-black text-slate-300 ring-1 ring-slate-700 transition hover:-translate-y-0.5 hover:text-white" onClick={() => loadStatusesFromDatabase()}>
                 🔄 Recargar
               </button>
