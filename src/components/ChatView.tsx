@@ -389,8 +389,8 @@ export default function ChatView() {
     
     try {
       const [profRes, rolesRes] = await Promise.all([
-        supabase.from('profiles').select('email, name, user_id'),
-        supabase.from('user_roles').select('user_id, role'),
+        supabase.from('profiles').select('email, name, user_id').eq('approved', true),
+        supabase.from('user_roles').select('user_id, role').eq('approved', true),
       ]);
 
       const roleMap = new Map<string, string>();

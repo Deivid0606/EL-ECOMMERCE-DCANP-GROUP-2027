@@ -614,7 +614,8 @@ export default function OrdersView() {
     // Primero intentamos leer el rol directamente desde profiles.
     const profilesWithRole = await supabase
       .from('profiles')
-      .select('email, name, user_id, role');
+      .select('email, name, user_id, role')
+      .eq('approved', true);
 
     if (!profilesWithRole.error) {
       profiles = profilesWithRole.data || [];
@@ -622,7 +623,8 @@ export default function OrdersView() {
       console.warn('⚠️ No se pudo leer profiles.role; usando consulta compatible:', profilesWithRole.error);
       const basicProfiles = await supabase
         .from('profiles')
-        .select('email, name, user_id');
+        .select('email, name, user_id')
+        .eq('approved', true);
 
       if (basicProfiles.error) {
         console.error('❌ No se pudieron cargar perfiles para deliveries:', basicProfiles.error);
@@ -696,7 +698,7 @@ export default function OrdersView() {
 
     const [deliveriesRes, providersRes] = await Promise.all([
       loadDeliveryProfiles(allOrdersData),
-      supabase.from('profiles').select('email, name, company_name').eq('role', 'PROVEEDOR')
+      supabase.from('profiles').select('email, name, company_name').eq('role', 'PROVEEDOR').eq('approved', true)
     ]);
 
     if (providersRes.error) {

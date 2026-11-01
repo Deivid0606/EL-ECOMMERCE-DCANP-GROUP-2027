@@ -288,8 +288,20 @@ export default function WithGuidesView() {
         return;
       }
 
-      setOrders(allRows);
-      void loadStock(allRows);
+      // Despachante: sólo los proveedores que le asignó el admin (sin asignación = todos).
+      let rows = allRows;
+      if (role === 'DESPACHANTE') {
+        const { data: mine } = await (supabase as any).rpc('my_dispatch_providers');
+        const allowed: string[] = (mine || []).map((e: string) => String(e).toLowerCase());
+        if (allowed.length) {
+          rows = allRows.filter((o: any) => {
+            const list = `${o.provider_email || ''},${o.provider_emails_list || ''}`.toLowerCase().split(/[,;\s]+/);
+            return list.some((e: string) => e && allowed.includes(e));
+          });
+        }
+      }
+      setOrders(rows);
+      void loadStock(rows);
 
       const today = todayISO();
       const [guidesTodayRes, deliveredTodayRes] = await Promise.all([

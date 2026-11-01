@@ -1018,7 +1018,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
 
   const loadDeliveryUsers = useCallback(async () => {
     if (!canAssignStock) return;
-    const { data, error } = await supabase.from("profiles").select("email, name").eq("role", "delivery");
+    const { data, error } = await supabase.from("profiles").select("email, name").eq("role", "delivery").eq("approved", true);
     if (!error && data) {
       setDeliveryUsers(data.map((d) => ({ email: d.email, name: d.name || d.email })));
     }

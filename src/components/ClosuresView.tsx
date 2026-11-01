@@ -8,6 +8,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { pyToday, pyStart, pyEnd, pyDateKey } from '@/lib/pyTime';
 import { useOrderEditTools } from '@/components/OrderEditTools';
+import DispatcherProvidersPanel from '@/components/DispatcherProvidersPanel';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -3082,6 +3083,7 @@ export default function ClosuresView() {
           </button>
         ))}
       </nav>
+      {isAdmin && closureTab === 'config' && <DispatcherProvidersPanel />}
       {canViewRendicion && (closureTab === 'pagos' || closureTab === 'historial' || closureTab === 'config') && (
         <ClosurePaymentsPanel role={myRole} email={myEmail} userId={profile?.user_id} view={closureTab} />
       )}

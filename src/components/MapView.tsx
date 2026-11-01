@@ -51,7 +51,7 @@ function DeliveryMapView() {
 
   // Load contact names
   useEffect(() => {
-    supabase.from('profiles').select('email, name').then(({ data }) => {
+    supabase.from('profiles').select('email, name').eq('approved', true).then(({ data }) => {
       const m: Record<string, string> = {};
       (data || []).forEach(p => { m[p.email.toLowerCase()] = p.name || p.email; });
       setContacts(m);
