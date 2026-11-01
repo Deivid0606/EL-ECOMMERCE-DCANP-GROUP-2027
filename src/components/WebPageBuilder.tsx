@@ -2357,7 +2357,7 @@ export default function WebPageBuilder({
                   {(
                     [
                       ["pro", "🚀 PRO: fotos profesionales + diseño", "OpenAI crea fotos publicitarias en alta calidad y Claude diseña el anuncio encima (títulos, insignias). Necesita la clave de OpenAI."],
-                      ["claude", "🎨 Banners diseñados por Claude", "Con la foto real del producto, títulos e insignias. Sin costo extra."],
+                      ["claude", "🎨 Diseño PRO con Claude (sólo tu clave de Claude)", "Anuncios con tu foto real: producto sin fondo, acercamientos, ilustraciones, sellos de precio e insignias."],
                       ["openai", "📸 Fotos realistas con IA (OpenAI)", "Escenas nuevas con el producto. Necesita la clave de OpenAI."],
                       ["none", "🚫 Sin imágenes nuevas", "Sólo textos (y tus fotos/videos si subís)."],
                     ] as const
