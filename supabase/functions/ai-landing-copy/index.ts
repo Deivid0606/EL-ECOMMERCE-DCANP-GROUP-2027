@@ -32,6 +32,8 @@ const SCHEMA = {
     'benefits',
     'faq',
     'sections',
+    'image_blocks',
+    'video_position',
   ],
   properties: {
     page_name: { type: 'string', description: 'Nombre corto de la página (2 a 5 palabras).' },
@@ -53,9 +55,33 @@ const SCHEMA = {
         properties: { question: { type: 'string' }, answer: { type: 'string' } },
       },
     },
+    image_blocks: {
+      type: 'array',
+      description:
+        'Una entrada por cada foto numerada que te pasaron (sin repetir), en el orden en que conviene mostrarlas para vender. Vacío si no hay fotos.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['photo', 'caption'],
+        properties: {
+          photo: { type: 'integer', description: 'Número de la foto (Foto 1 = 1).' },
+          caption: {
+            type: 'string',
+            description:
+              'Texto que va debajo de la foto: un título en MAYÚSCULAS con 1 emoji y, si suma, una línea más (separada con una línea en blanco) que empiece con 👉. Tiene que corresponder a lo que se ve en esa foto.',
+          },
+        },
+      },
+    },
+    video_position: {
+      type: 'integer',
+      description:
+        'Si hay videos: después de cuántas fotos se muestra la fila de videos (0 = antes de todas). Si no hay videos, 0.',
+    },
     sections: {
       type: 'array',
-      description: '3 o 4 secciones de venta (problema, solución, cómo se usa, por qué elegirlo).',
+      description:
+        'Secciones de venta solo con texto. Si hay 3 fotos o más, devolvé 0 o 1; si hay menos, 3 o 4 (problema, solución, cómo se usa, por qué elegirlo).',
       items: {
         type: 'object',
         additionalProperties: false,
@@ -130,20 +156,30 @@ Deno.serve(async (req) => {
     .filter(Boolean)
     .join('\n');
 
-  const images = (Array.isArray(product.images) ? product.images : [])
-    .filter((u: unknown) => typeof u === 'string' && /^https:\/\//.test(u))
-    .slice(0, 3);
+  const isUrl = (u: unknown) => typeof u === 'string' && /^https:\/\//.test(u);
+  // Fotos para armar la página (subidas por el vendedor o las del producto).
+  const images: string[] = (Array.isArray(body?.photos) && body.photos.length ? body.photos : product.images || [])
+    .filter(isUrl)
+    .slice(0, 6);
+  const videoCount = Math.max(0, Math.min(3, Number(body?.videoCount || 0)));
 
   const client = new Anthropic({ apiKey });
 
   const run = async (withImages: boolean) => {
-    const content: any[] = [
-      ...(withImages ? images.map((url: string) => ({ type: 'image', source: { type: 'url', url } })) : []),
-      {
-        type: 'text',
-        text: `Escribí los textos de la página de venta con estos datos${withImages && images.length ? ' y las fotos' : ''}:\n\n${facts}`,
-      },
-    ];
+    const content: any[] = [];
+    if (withImages) {
+      images.forEach((url, i) => {
+        content.push({ type: 'text', text: `Foto ${i + 1}:` });
+        content.push({ type: 'image', source: { type: 'url', url } });
+      });
+    }
+    content.push({
+      type: 'text',
+      text:
+        `Armá la página de venta con estos datos.\n` +
+        `Fotos para la página: ${images.length}${!withImages && images.length ? ' (no se pudieron ver; escribí textos generales del producto para cada una)' : ''}.\n` +
+        `Videos para la página: ${videoCount}.\n\n${facts}`,
+    });
     return await client.beta.messages.create({
       model: 'claude-opus-5-5',
       max_tokens: 16000,
