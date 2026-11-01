@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { compactKey, resolveCity, titleSimilarity, type CityMatch, type CityPrice } from "@/lib/fuzzyMatch";
 
 const nf = (n: number) => new Intl.NumberFormat("es-PY").format(n);
 
@@ -398,6 +399,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  // Tarifas reales de delivery por ciudad (tabla client_prices) y "producto → mi SKU".
+  const [cityPrices, setCityPrices] = useState<CityPrice[]>([]);
+  const [skuMappings, setSkuMappings] = useState<Record<string, { sku: string; raw_title: string }>>({});
+  const [skuDrafts, setSkuDrafts] = useState<Record<string, string>>({});
+  const [panel, setPanel] = useState<"pedidos" | "productos" | "ciudades">("pedidos");
+  const autoRunning = useRef(false);
+  const autoFailed = useRef<Set<string>>(new Set());
+  const loadingRows = useRef<Set<string>>(new Set());
 
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
@@ -468,21 +477,87 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return custom || rawCity;
   }, [cityAliases]);
 
-  const hasCoverageForCity = useCallback((rawCity: string): boolean => {
-    return hasCoverage(resolveCityWithUserAlias(rawCity));
-  }, [resolveCityWithUserAlias]);
+  // Ciudades con cobertura: las tarifas reales; si no cargan, la lista de respaldo.
+  const cityList = useMemo<CityPrice[]>(
+    () =>
+      cityPrices.length
+        ? cityPrices
+        : CITY_COVERAGE_DATA.map((c) => ({ city: c.name, price: c.price, departamento: c.department })),
+    [cityPrices],
+  );
+  const userCityAliasMap = useMemo(
+    () => Object.fromEntries(Object.entries(cityAliases).map(([k, v]) => [compactKey(k), v])),
+    [cityAliases],
+  );
+  const cityMatchCache = useMemo(() => new Map<string, CityMatch | null>(), [cityList, userCityAliasMap]);
+  // Detecta la ciudad aunque esté mal escrita, abreviada o con texto de más.
+  const matchCity = useCallback(
+    (rawCity: string): CityMatch | null => {
+      const raw = String(rawCity || "");
+      if (cityMatchCache.has(raw)) return cityMatchCache.get(raw) || null;
+      const m = resolveCity(raw, cityList, userCityAliasMap);
+      cityMatchCache.set(raw, m);
+      return m;
+    },
+    [cityList, userCityAliasMap, cityMatchCache],
+  );
 
-  const getCityDeliveryPriceForCity = useCallback((rawCity: string): number | null => {
-    return getCityDeliveryPrice(resolveCityWithUserAlias(rawCity));
-  }, [resolveCityWithUserAlias]);
+  const hasCoverageForCity = useCallback((rawCity: string): boolean => Boolean(matchCity(rawCity)), [matchCity]);
 
-  const getCityDepartmentForCity = useCallback((rawCity: string): string | null => {
-    return getCityDepartment(resolveCityWithUserAlias(rawCity));
-  }, [resolveCityWithUserAlias]);
+  const getCityDeliveryPriceForCity = useCallback(
+    (rawCity: string): number | null => {
+      const m = matchCity(rawCity);
+      return m ? Number(m.price) || null : null;
+    },
+    [matchCity],
+  );
 
-  const getCityDisplayName = useCallback((rawCity: string): string => {
-    return resolveCityWithUserAlias(rawCity) || rawCity || "—";
-  }, [resolveCityWithUserAlias]);
+  const getCityDepartmentForCity = useCallback(
+    (rawCity: string): string | null => {
+      const m = matchCity(rawCity);
+      if (!m) return null;
+      return (m.departamento || "").trim() || getCityDepartment(m.city) || null;
+    },
+    [matchCity],
+  );
+
+  const getCityDisplayName = useCallback(
+    (rawCity: string): string => matchCity(rawCity)?.city.trim() || resolveCityWithUserAlias(rawCity) || rawCity || "—",
+    [matchCity, resolveCityWithUserAlias],
+  );
+
+  useEffect(() => {
+    supabase
+      .from("client_prices")
+      .select("city, price_gs, departamento")
+      .then(({ data, error }) => {
+        if (error || !data?.length) return;
+        setCityPrices(
+          (data as any[])
+            .filter((r) => r.city && Number(r.price_gs) > 0)
+            .map((r) => ({ city: String(r.city).trim(), price: Number(r.price_gs), departamento: String(r.departamento || "").trim() })),
+        );
+      });
+  }, []);
+
+  const loadSkuMappings = useCallback(async () => {
+    if (!myEmail) return;
+    const { data, error } = await (supabase as any)
+      .from("product_title_mappings")
+      .select("title_key, raw_title, sku")
+      .eq("owner_email", myEmail.toLowerCase());
+    if (error) return;
+    const map: Record<string, { sku: string; raw_title: string }> = {};
+    (data || []).forEach((r: any) => {
+      map[r.title_key] = { sku: r.sku, raw_title: r.raw_title };
+    });
+    setSkuMappings(map);
+    autoFailed.current.clear();
+  }, [myEmail]);
+
+  useEffect(() => {
+    void loadSkuMappings();
+  }, [loadSkuMappings]);
 
   const getRowKey = useCallback((order: SheetOrder, idx: number): string => {
     if (order.__row) {
@@ -661,24 +736,61 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   useEffect(() => { if (myEmail && sheetUrl) loadStatusesFromDatabase(); }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
   useEffect(() => { if (sheetUrl && !initialLoadDone) { readSheet(); setInitialLoadDone(true); } }, [sheetUrl]);
 
-  const readSheet = useCallback(async () => {
-    if (!sheetUrl) { toast.error("Configurá tu URL de Google Sheet"); return; }
-    setLoading(true);
+  const readSheet = useCallback(async (quiet = false) => {
+    if (!sheetUrl) { if (!quiet) toast.error("Configurá tu URL de Google Sheet"); return; }
+    if (!quiet) setLoading(true);
     try {
       const resp = await fetch(`/api/read-sheet?url=${encodeURIComponent(sheetUrl)}&t=${Date.now()}`);
       const json = await resp.json();
-      if (json.error) toast.error(json.error);
+      if (json.error) { if (!quiet) toast.error(json.error); }
       else {
         setSheetHeaders(json.headers || []);
         setSheetOrders(json.orders || []);
         setLastSync(new Date());
-        toast.success(`📊 Sheet cargado: ${json.orders?.length || 0} filas`);
+        if (!quiet) toast.success(`📊 Sheet cargado: ${json.orders?.length || 0} filas`);
       }
-    } catch (err: any) { toast.error("Error: " + err.message); }
-    setLoading(false);
+    } catch (err: any) { if (!quiet) toast.error("Error: " + err.message); }
+    if (!quiet) setLoading(false);
   }, [sheetUrl]);
 
-  const matchProduct = useCallback((rawName: string) => {
+  const productBySku = useMemo(() => {
+    const m = new Map<string, any>();
+    products.forEach((p) => {
+      if (p?.sku) m.set(String(p.sku).trim().toLowerCase(), p);
+    });
+    return m;
+  }, [products]);
+
+  // Producto: 1) el SKU que asignaste a ese nombre, 2) nombre igual o parecido.
+  const matchProductInfo = useCallback(
+    (rawName: string): { product: any; method: "sku" | "auto" | "parecido" } | null => {
+      if (!rawName) return null;
+      const mapped = skuMappings[compactKey(rawName)];
+      if (mapped) {
+        const p = productBySku.get(String(mapped.sku).trim().toLowerCase());
+        if (p) return { product: p, method: "sku" };
+      }
+      const direct = matchProductByName(rawName);
+      if (direct) return { product: direct, method: "auto" };
+      let best: { p: any; score: number } | null = null;
+      for (const p of products) {
+        const score = Math.max(titleSimilarity(rawName, p.title || ""), titleSimilarity(getProductDisplayName(rawName), p.title || ""));
+        if (score >= 0.6 && (!best || score > best.score)) best = { p, score };
+      }
+      return best ? { product: best.p, method: "parecido" } : null;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [skuMappings, productBySku, products, getProductDisplayName],
+  );
+
+  const matchProduct = useCallback((rawName: string) => matchProductInfo(rawName)?.product || null, [matchProductInfo]);
+  // Para cargar en lote / automático: sólo productos seguros (SKU asignado o mismo nombre).
+  const matchProductSafe = useCallback((rawName: string) => {
+    const info = matchProductInfo(rawName);
+    return info && info.method !== "parecido" ? info.product : null;
+  }, [matchProductInfo]);
+
+  function matchProductByName(rawName: string) {
     if (!rawName) return null;
 
     // Si el usuario unificó varios nombres, primero intentamos con el nombre corregido.
@@ -697,27 +809,48 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
              return title.includes(cleanRaw) || cleanRaw.includes(title);
            }) ||
            null;
-  }, [products, getProductDisplayName]);
+  }
 
-  const loadOrder = useCallback(async (order: SheetOrder, rowKey: string, source: "auto" | "manual" = "auto") => {
+  const loadOrder = useCallback(async (order: SheetOrder, rowKey: string, source: "auto" | "manual" = "auto", quiet = false) => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
-    if (!matched) { toast.error(`❌ Producto no detectado: "${productName}"`); return false; }
+    if (!matched) { if (!quiet) toast.error(`❌ Producto no detectado: "${productName}". Asignale tu SKU en 🔗 Productos ↔ SKU.`); return false; }
 
-    const city = order[colKeys.city] || "";
-    const deliveryPrice = getCityDeliveryPriceForCity(city);
-    if (!deliveryPrice) { toast.warning(`⚠️ Ciudad "${city}" sin cobertura`); return false; }
+    const rawCity = order[colKeys.city] || "";
+    const cityMatch = matchCity(rawCity);
+    const deliveryPrice = cityMatch ? Number(cityMatch.price) || 0 : 0;
+    if (!cityMatch || !deliveryPrice) { if (!quiet) toast.warning(`⚠️ Ciudad "${rawCity}" sin cobertura`); return false; }
+    // Se guarda el nombre oficial de la ciudad: así la tarifa del delivery y la comisión salen bien.
+    const city = cityMatch.city.trim();
 
-    const departamento = getCityDepartmentForCity(city);
-    if (!departamento) toast.warning(`⚠️ No se pudo determinar el departamento para "${city}"`);
+    const departamento = getCityDepartmentForCity(rawCity);
+    if (!departamento && !quiet) toast.warning(`⚠️ No se pudo determinar el departamento para "${rawCity}"`);
 
     const salePrice = getAmountFromRow(order, colKeys.amount);
-    if (salePrice === 0) { toast.warning(`⚠️ No se detectó monto en fila ${rowKey}`); return false; }
+    if (salePrice === 0) { if (!quiet) toast.warning(`⚠️ No se detectó monto en fila ${rowKey}`); return false; }
+
+    // Evita cargar dos veces la misma fila (otra pestaña, otro equipo o auto-carga en curso).
+    if (loadingRows.current.has(rowKey)) return false;
+    loadingRows.current.add(rowKey);
+    try {
+      const { data: already } = await (supabase as any)
+        .from("sheet_row_statuses")
+        .select("status")
+        .eq("user_email", myEmail)
+        .eq("sheet_url", sheetUrl)
+        .eq("row_index", Number(rowKey))
+        .maybeSingle();
+      if (already) {
+        if (!quiet) toast.info(`La fila ${rowKey} ya estaba cargada.`);
+        return false;
+      }
 
     const orderId = await generateUniqueOrderId();
     const newStatus: OrderStatus = source === "auto" ? "CARGADO" : "CARGADO_MANUAL";
     const productCost = matched.provider_price_gs || 0;
-    const commission = salePrice - (productCost + deliveryPrice);
+    const qty = parseQuantity(order[colKeys.qty]);
+    // Comisión = venta − (precio proveedor × cantidad) − delivery de la ciudad.
+    const commission = salePrice - (productCost * qty + deliveryPrice);
 
     const payload = {
       order_number: orderId,
@@ -731,7 +864,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       items_json: [{
         sku: matched.sku || "",
         title: matched.title,
-        qty: parseQuantity(order[colKeys.qty]),
+        qty,
         sale_gs: salePrice,
         provider_price_gs: productCost,
         provider_email: matched.provider_email || ""
@@ -743,12 +876,52 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
 
     const { error } = await supabase.from("orders").insert(payload);
-    if (error) { toast.error("Error al guardar: " + error.message); return false; }
+    if (error) { if (!quiet) toast.error("Error al guardar: " + error.message); return false; }
 
     await setRowStatus(rowKey, newStatus, orderId);
-    toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs`);
+    if (!quiet) toast.success(`✅ Pedido ${orderId} cargado | ${city} · Delivery: ${nf(deliveryPrice)} Gs`);
     return true;
-  }, [colKeys, matchProduct, myEmail, setRowStatus]);
+    } finally {
+      loadingRows.current.delete(rowKey);
+    }
+  }, [colKeys, matchProduct, matchCity, getCityDepartmentForCity, myEmail, sheetUrl, setRowStatus]);
+
+  // 🤖 Auto-carga: todos los pedidos pendientes con cobertura y producto detectado.
+  const runAutoLoad = useCallback(async () => {
+    if (autoRunning.current) return;
+    autoRunning.current = true;
+    let loaded = 0;
+    try {
+      for (let i = 0; i < sheetOrders.length; i++) {
+        const order = sheetOrders[i];
+        const rowKey = getRowKey(order, i);
+        if (getRowStatus(rowKey) !== "CARGAR" || autoFailed.current.has(rowKey)) continue;
+        if (!hasCoverageForCity(order[colKeys.city] || "")) continue;
+        if (!matchProductSafe(order[colKeys.product] || "")) {
+          autoFailed.current.add(rowKey);
+          continue;
+        }
+        const ok = await loadOrder(order, rowKey, "auto", true);
+        if (ok) loaded++;
+        else autoFailed.current.add(rowKey);
+      }
+    } finally {
+      autoRunning.current = false;
+    }
+    if (loaded) toast.success(`🤖 Auto-carga: ${loaded} pedido(s) nuevo(s) cargado(s)`);
+  }, [sheetOrders, getRowKey, getRowStatus, hasCoverageForCity, matchProductSafe, loadOrder, colKeys]);
+
+  useEffect(() => {
+    if (!autoLoad || loadingStatuses || !products.length || !sheetOrders.length) return;
+    void runAutoLoad();
+  }, [autoLoad, loadingStatuses, products.length, sheetOrders, runAutoLoad]);
+
+  // Con la auto-carga activa se vuelve a leer el Sheet cada minuto.
+  useEffect(() => {
+    if (!autoLoad || !sheetUrl) return;
+    const timer = window.setInterval(() => void readSheet(true), 60_000);
+    return () => window.clearInterval(timer);
+  }, [autoLoad, sheetUrl, readSheet]);
 
   const handleDirectSave = (order: SheetOrder, rowKey: string) => loadOrder(order, rowKey, "auto");
 
@@ -773,11 +946,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (status !== "CARGAR") continue;
       const city = order[colKeys.city] || "";
       if (!hasCoverageForCity(city)) continue;
-      const success = await loadOrder(order, rowKey, "auto");
+      if (!matchProductSafe(order[colKeys.product] || "")) { errors++; continue; }
+      const success = await loadOrder(order, rowKey, "auto", true);
       if (success) count++; else errors++;
       if (count % 3 === 0) await new Promise(r => setTimeout(r, 100));
     }
-    toast.success(`✅ ${count} cargados | ❌ ${errors} errores`);
+    toast.success(`✅ ${count} cargados | ⚠️ ${errors} sin cargar (revisá 🔗 Productos ↔ SKU)`);
   };
 
   const toggleRowSelection = (rowKey: string) => {
@@ -923,6 +1097,21 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   };
 
   const toggleAutoLoad = () => {
+    if (!autoLoad) {
+      const pending = sheetOrders.filter((o, i) => {
+        const rowKey = getRowKey(o, i);
+        return getRowStatus(rowKey) === "CARGAR" && hasCoverageForCity(o[colKeys.city] || "") && matchProductSafe(o[colKeys.product] || "");
+      }).length;
+      if (
+        !window.confirm(
+          `🤖 Auto-carga\n\nSe van a cargar automáticamente ${pending} pedido(s) pendientes con cobertura y producto detectado, ` +
+            `y desde ahora cada pedido nuevo del Sheet (se revisa cada minuto mientras la app esté abierta).\n\n` +
+            `Antes, marcá como Cancelado lo que no quieras cargar. ¿Activar?`,
+        )
+      )
+        return;
+      autoFailed.current.clear();
+    }
     setAutoLoad(!autoLoad);
     toast.info(!autoLoad ? "🤖 Auto-carga activada" : "⏹️ Auto-carga desactivada");
   };
@@ -1645,6 +1834,180 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     { label: "Cancelados", value: dashboardStats.cancelados, color: "#ef4444" },
   ].filter(d => d.value > 0);
 
+  // Nombres de producto y ciudades tal como vienen del Sheet, con lo que se detectó.
+  const sheetProductRows = (() => {
+    const map = new Map<string, { raw: string; count: number; pending: number }>();
+    sheetOrders.forEach((o, i) => {
+      const raw = String(o[colKeys.product] || "").trim();
+      if (!raw) return;
+      const key = compactKey(raw);
+      const row = map.get(key) || { raw, count: 0, pending: 0 };
+      row.count++;
+      if (getRowStatus(getRowKey(o, i)) === "CARGAR") row.pending++;
+      map.set(key, row);
+    });
+    return [...map.entries()]
+      .map(([key, r]) => ({ key, ...r, info: matchProductInfo(r.raw) }))
+      .sort((a, b) => Number(Boolean(a.info)) - Number(Boolean(b.info)) || b.pending - a.pending || b.count - a.count);
+  })();
+  const unmatchedProductCount = sheetProductRows.filter((r) => !r.info).length;
+
+  const sheetCityRows = (() => {
+    const map = new Map<string, { raw: string; count: number }>();
+    sheetOrders.forEach((o) => {
+      const raw = String(o[colKeys.city] || "").trim();
+      if (!raw) return;
+      const row = map.get(raw.toLowerCase()) || { raw, count: 0 };
+      row.count++;
+      map.set(raw.toLowerCase(), row);
+    });
+    return [...map.values()]
+      .map((r) => ({ ...r, match: matchCity(r.raw) }))
+      .sort((a, b) => Number(Boolean(a.match)) - Number(Boolean(b.match)) || b.count - a.count);
+  })();
+  const unmatchedCityCount = sheetCityRows.filter((r) => !r.match).length;
+
+  const saveSkuMapping = async (rawTitle: string, key: string) => {
+    const sku = String(skuDrafts[key] || "").split(" — ")[0].trim();
+    if (!sku) {
+      toast.error("Elegí o escribí el SKU");
+      return;
+    }
+    const product = productBySku.get(sku.toLowerCase());
+    if (!product) {
+      toast.error(`No existe un producto con el SKU "${sku}"`);
+      return;
+    }
+    const { error } = await (supabase as any).from("product_title_mappings").upsert(
+      { owner_email: myEmail.toLowerCase(), title_key: key, raw_title: rawTitle, sku: product.sku, updated_at: new Date().toISOString() },
+      { onConflict: "owner_email,title_key" },
+    );
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success(`🔗 "${rawTitle}" → ${product.sku} · ${product.title}`);
+    setSkuDrafts((d) => ({ ...d, [key]: "" }));
+    await loadSkuMappings();
+  };
+
+  const removeSkuMapping = async (key: string) => {
+    const { error } = await (supabase as any)
+      .from("product_title_mappings")
+      .delete()
+      .eq("owner_email", myEmail.toLowerCase())
+      .eq("title_key", key);
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Asignación quitada");
+      await loadSkuMappings();
+    }
+  };
+
+  const renderMappingPanel = () => {
+    if (panel === "productos") {
+      return (
+        <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl">
+          <h2 className="text-lg font-black text-white">🔗 Nombre del producto ↔ mi SKU</h2>
+          <p className="mb-4 text-sm text-slate-400">
+            Cada vendedor pone el título que quiere en su página. Asigná acá tu SKU una sola vez y los pedidos con ese nombre se detectan siempre bien.
+          </p>
+          <datalist id="dcanp-sku-options">
+            {products
+              .filter((p) => p?.sku)
+              .map((p) => (
+                <option key={p.id || p.sku} value={`${p.sku} — ${p.title}`} />
+              ))}
+          </datalist>
+          {!sheetProductRows.length && <div className="text-sm text-slate-500">Leé el Sheet para ver los productos de tus pedidos.</div>}
+          <div className="space-y-2">
+            {sheetProductRows.map((r) => {
+              const mapped = skuMappings[r.key];
+              return (
+                <div
+                  key={r.key}
+                  className={`grid gap-2 rounded-2xl border p-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1.4fr)] md:items-center ${r.info ? "border-slate-800 bg-slate-950/50" : "border-rose-500/40 bg-rose-500/5"}`}
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-bold text-white" title={r.raw}>{r.raw}</div>
+                    <div className="text-[11px] text-slate-400">{r.count} pedido(s) · {r.pending} pendiente(s)</div>
+                  </div>
+                  <div className="min-w-0 text-sm">
+                    {r.info ? (
+                      <>
+                        <div className="truncate text-emerald-300" title={r.info.product.title}>✅ {r.info.product.title}</div>
+                        <div className="text-[11px] text-slate-400">
+                          SKU {r.info.product.sku || "—"} ·{" "}
+                          {r.info.method === "sku" ? "🔗 asignado por vos" : r.info.method === "auto" ? "🤖 mismo nombre" : "🤔 nombre parecido: confirmalo"}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="font-bold text-rose-300">❌ Sin detectar: no se carga</div>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      list="dcanp-sku-options"
+                      className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400"
+                      placeholder={mapped ? `Asignado: ${mapped.sku}` : "Escribí tu SKU o buscá el producto"}
+                      value={skuDrafts[r.key] || ""}
+                      onChange={(e) => setSkuDrafts((d) => ({ ...d, [r.key]: e.target.value }))}
+                    />
+                    <button type="button" className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white" onClick={() => void saveSkuMapping(r.raw, r.key)}>
+                      Guardar
+                    </button>
+                    {mapped && (
+                      <button type="button" className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-black text-slate-300" onClick={() => void removeSkuMapping(r.key)} title="Quitar asignación">
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl">
+        <h2 className="text-lg font-black text-white">🏙️ Ciudades detectadas</h2>
+        <p className="mb-4 text-sm text-slate-400">
+          Se reconoce la ciudad aunque esté mal escrita o abreviada, y se usa la tarifa real de delivery de esa ciudad para la comisión. Si alguna quedó mal,
+          usá 📍 Corregir ciudades en la pestaña Pedidos.
+        </p>
+        {!sheetCityRows.length && <div className="text-sm text-slate-500">Leé el Sheet para ver las ciudades de tus pedidos.</div>}
+        <div className="space-y-1.5">
+          {sheetCityRows.map((r) => (
+            <div
+              key={r.raw}
+              className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2 rounded-2xl border px-3 py-2 text-sm ${r.match ? "border-slate-800 bg-slate-950/50" : "border-rose-500/40 bg-rose-500/5"}`}
+            >
+              <div className="min-w-0">
+                <div className="truncate font-bold text-white">{r.raw}</div>
+                <div className="text-[11px] text-slate-400">{r.count} pedido(s)</div>
+              </div>
+              <div className="min-w-0">
+                {r.match ? (
+                  <>
+                    <div className="truncate text-emerald-300">✅ {r.match.city.trim()}</div>
+                    <div className="text-[11px] text-slate-400">
+                      {r.match.departamento || getCityDepartment(r.match.city) || "—"} ·{" "}
+                      {r.match.method === "exacta" ? "igual" : r.match.method === "alias" ? "abreviatura / corregida" : r.match.method === "contiene" ? "dentro del texto" : `parecida (${Math.round(r.match.score * 100)}%)`}
+                    </div>
+                  </>
+                ) : (
+                  <div className="font-bold text-rose-300">❌ Sin cobertura</div>
+                )}
+              </div>
+              <div className="text-right font-black text-white">{r.match ? `${nf(Number(r.match.price))} Gs` : "—"}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="relative h-full w-full overflow-auto bg-slate-950 p-2 text-slate-100 md:p-3">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.18),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_32%)]" />
@@ -1656,7 +2019,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-400 text-2xl shadow-lg shadow-blue-950/40">📦</div>
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-300">Panel operativo</p>
-                <h1 className="text-2xl font-black tracking-tight text-white md:text-3xl">Shopify Inbox PRO</h1>
+                <h1 className="text-2xl font-black tracking-tight text-white md:text-3xl">Pedidos Shopify</h1>
                 <p className="text-sm font-medium text-slate-400">Pedidos, cobertura, carga automática y métricas en tiempo real.</p>
               </div>
             </div>
@@ -1695,6 +2058,29 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </div>
         </div>
 
+        {/* PESTAÑAS */}
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ["pedidos", "📦 Pedidos"],
+              ["productos", `🔗 Productos ↔ SKU${unmatchedProductCount ? ` (${unmatchedProductCount} sin detectar)` : ""}`],
+              ["ciudades", `🏙️ Ciudades${unmatchedCityCount ? ` (${unmatchedCityCount} sin cobertura)` : ""}`],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setPanel(key)}
+              className={`rounded-2xl px-4 py-2.5 text-sm font-black transition ${panel === key ? "bg-white text-slate-950" : "bg-slate-800/80 text-slate-300 ring-1 ring-slate-700 hover:text-white"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {panel !== "pedidos" && renderMappingPanel()}
+
+        <div className={panel === "pedidos" ? "contents" : "hidden"}>
         {/* KPIS */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <MetricCard title="Ventas" value={`${nf(dashboardStats.totalVenta)} Gs`} subtitle={`Cargados · ${dashboardDateLabel}`} icon="💰" tone="emerald" />
@@ -1977,6 +2363,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               </div>
             </div>
           </aside>
+        </div>
+
         </div>
 
         {renderGuideModal()}

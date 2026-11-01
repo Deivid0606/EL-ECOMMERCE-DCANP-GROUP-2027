@@ -81,7 +81,7 @@ const navItems: NavItem[] = [
   { id: 'orders', label: 'Pedidos' },
   {
     id: 'shopifyInbox',
-    label: 'Pedidos Shopify + WhatsApp',
+    label: 'Pedidos Shopify',
     roles: ['ADMIN', 'VENDEDOR'],
   },
   {
