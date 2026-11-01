@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { pyDaysAgo, pyToday, pyStart, pyEnd } from '@/lib/pyTime';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -29,11 +30,8 @@ export default function CommissionRequestsView() {
   const [showForm, setShowForm] = useState(false);
   const [newProvider, setNewProvider] = useState('');
   const [newNote, setNewNote] = useState('');
-  const [newFrom, setNewFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [newTo, setNewTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [newFrom, setNewFrom] = useState(() => pyDaysAgo(30));
+  const [newTo, setNewTo] = useState(() => pyToday());
 
   const load = async () => {
     const [reqRes, profRes, prodRes] = await Promise.all([
@@ -50,8 +48,8 @@ export default function CommissionRequestsView() {
 
   const loadBalanceOrders = async () => {
     const { data } = await supabase.from('orders').select('*')
-      .gte('created_at', newFrom + 'T00:00:00')
-      .lte('created_at', newTo + 'T23:59:59')
+      .gte('created_at', pyStart(newFrom))
+      .lte('created_at', pyEnd(newTo))
       .eq('created_by', myEmail);
     
     const rendidos = (data || []).filter(o => {

@@ -1,6 +1,10 @@
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
+import { installPyTimeZone } from "./lib/pyTime";
+
+// Toda la app muestra la hora de Paraguay, sin importar la zona del dispositivo.
+installPyTimeZone();
 
 const rootElement = document.getElementById("root");
 

@@ -5,23 +5,15 @@ import { createPortal } from "react-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { pyEnd, pyFirstOfMonth, pyStart, pyToday } from '@/lib/pyTime';
 
 const nf = (n: number) =>
   new Intl.NumberFormat("es-PY").format(Math.round(Number(n || 0)));
 
-const todayPY = () => {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-};
+const todayPY = () => pyToday();
 
 const firstDayOfMonth = () => {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${yyyy}-${mm}-01`;
+  return pyFirstOfMonth();
 };
 
 const norm = (s: string) =>
@@ -584,8 +576,8 @@ const ProductDetailModal = ({
       const { data, error } = await supabase
         .from("orders")
         .select("*")
-        .gte("created_at", `${metricsFromDate}T00:00:00`)
-        .lte("created_at", `${metricsToDate}T23:59:59`);
+        .gte("created_at", pyStart(metricsFromDate))
+        .lte("created_at", pyEnd(metricsToDate));
       if (error) throw error;
 
       let m = { ...emptyMetrics, product_id: product.id, sku: product.sku || "" };
@@ -1190,8 +1182,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       const { data, error } = await supabase
         .from("orders")
         .select("*")
-        .gte("created_at", `${fromDate}T00:00:00`)
-        .lte("created_at", `${toDate}T23:59:59`);
+        .gte("created_at", pyStart(fromDate))
+        .lte("created_at", pyEnd(toDate));
       if (error) throw error;
 
       const next: Record<string, ProductMetrics> = {};

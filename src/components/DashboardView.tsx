@@ -15,6 +15,7 @@ import {
   Cell,
   Legend,
 } from 'recharts';
+import { pyDateKey, pyFirstOfMonth, pyToday } from '@/lib/pyTime';
 
 const nf = (value: number) =>
   new Intl.NumberFormat('es-PY').format(Math.round(Number(value || 0)));
@@ -38,20 +39,9 @@ const CANCEL_STATES = new Set([
   'cancelo por whatsapp',
 ]);
 
-const todayPY = () => {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-};
+const todayPY = () => pyToday();
 
-const firstDayOfMonth = () => {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}-01`;
-};
+const firstDayOfMonth = () => pyFirstOfMonth();
 
 const inRange = (date: string | null | undefined, from: string, to: string) => {
   if (!date) return false;
@@ -1187,7 +1177,7 @@ export default function Dashboard() {
   const barData = useMemo(() => {
     const map: Record<string, number> = {};
     createdOrders.forEach((order) => {
-      const day = order.created_at.slice(0, 10);
+      const day = pyDateKey(new Date(order.created_at));
       map[day] = (map[day] || 0) + Number(order.total_gs || 0);
     });
 

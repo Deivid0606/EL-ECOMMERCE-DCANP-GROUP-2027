@@ -11,6 +11,9 @@ const cities = [
   { city: 'Capiata', price: 45000, departamento: 'Central' },
   { city: 'Mariano Roque Alonso', price: 40000, departamento: 'Central' },
   { city: 'Pedro Juan Caballero', price: 50000, departamento: 'Amambay' },
+  { city: 'Presidente franco', price: 50000, departamento: 'Alto Paraná' },
+  { city: 'Coronel Oviedo', price: 55000, departamento: 'Caaguazú' },
+  { city: 'San Alberto', price: 55000, departamento: 'Alto Paraná' },
 ];
 
 describe('resolveCity', () => {
@@ -28,12 +31,18 @@ describe('resolveCity', () => {
     ['capiatá', 'Capiata'],
     ['MRA', 'Mariano Roque Alonso'],
     ['pedro juan', 'Pedro Juan Caballero'],
+    ['PUERTO PDTE. FRANCO', 'Presidente franco'],
+    ['Pto. Pte. Franco', 'Presidente franco'],
+    ['Cnel. Oviedo', 'Coronel Oviedo'],
+    ['Sam Alberto alto parana', 'San Alberto'],
   ])('%s → %s', (raw, expected) => {
     expect(resolveCity(raw, cities)?.city).toBe(expected);
   });
 
   it('no inventa ciudades', () => {
     expect(resolveCity('Encarnación', cities)).toBeNull();
+    expect(resolveCity('SANTANÍ', cities)).toBeNull();
+    expect(resolveCity('PILAR', cities)).toBeNull();
     expect(resolveCity('', cities)).toBeNull();
   });
 });

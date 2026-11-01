@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { pyDaysAgo, pyToday, pyStart, pyEnd } from '@/lib/pyTime';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -8,14 +9,14 @@ export default function RankingDeliveryView() {
   const { profile } = useAuth();
   const role = profile?.role;
   const [orders, setOrders] = useState<any[]>([]);
-  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10); });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState(() => pyDaysAgo(7));
+  const [dateTo, setDateTo] = useState(() => pyToday());
 
   const load = async () => {
     const { data } = await supabase.from('orders').select('*')
       .not('assigned_delivery', 'is', null)
-      .gte('assigned_at', dateFrom + 'T00:00:00')
-      .lte('assigned_at', dateTo + 'T23:59:59');
+      .gte('assigned_at', pyStart(dateFrom))
+      .lte('assigned_at', pyEnd(dateTo));
     setOrders(data || []);
   };
 

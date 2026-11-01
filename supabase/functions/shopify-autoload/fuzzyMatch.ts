@@ -73,6 +73,22 @@ const CITY_ALIASES: Record<string, string> = {
   pagoanticipado: 'interiorpagoanticipado',
 };
 
+// Abreviaturas comunes en direcciones ("Pto. Pdte. Franco", "Cnel. Oviedo").
+const ABBREVIATIONS: Record<string, string> = {
+  pdte: 'presidente', pte: 'presidente', pdt: 'presidente', pres: 'presidente',
+  pto: 'puerto', pt: 'puerto',
+  cnel: 'coronel', cnl: 'coronel',
+  gral: 'general', grl: 'general',
+  sta: 'santa', sto: 'santo', sn: 'san',
+  mcal: 'mariscal', mal: 'mariscal',
+  dr: 'doctor', fdo: 'fernando', j: 'jose',
+};
+const expandAbbreviations = (text: string) =>
+  wordsKey(text)
+    .split(' ')
+    .map((w) => ABBREVIATIONS[w] || w)
+    .join(' ');
+
 /**
  * Busca la ciudad de cobertura que corresponde al texto escrito por el cliente,
  * aunque tenga errores, abreviaturas o texto de más ("Barrio X, San Lorenzo").
@@ -94,11 +110,16 @@ export function resolveCity(raw: string, cities: CityPrice[], userAliases: Recor
   if (byKey.has(key)) return { ...byKey.get(key)!, method: 'exacta', score: 1 };
   if (CITY_ALIASES[key] && byKey.has(CITY_ALIASES[key])) return { ...byKey.get(CITY_ALIASES[key])!, method: 'alias', score: 1 };
 
+  // Con las abreviaturas expandidas ("pto pdte franco" → "puerto presidente franco").
+  const expandedText = expandAbbreviations(text);
+  const expandedKey = compactKey(expandedText);
+  if (expandedKey !== key && byKey.has(expandedKey)) return { ...byKey.get(expandedKey)!, method: 'alias', score: 1 };
+
   // El nombre de una ciudad aparece dentro del texto (se elige el más largo).
   let contained: CityPrice | null = null;
   for (const c of cities) {
     const ck = compactKey(c.city);
-    if (ck.length >= 5 && key.includes(ck) && (!contained || ck.length > compactKey(contained.city).length)) contained = c;
+    if (ck.length >= 5 && (key.includes(ck) || expandedKey.includes(ck)) && (!contained || ck.length > compactKey(contained.city).length)) contained = c;
   }
   if (contained) return { ...contained, method: 'contiene', score: 0.95 };
 
@@ -109,8 +130,8 @@ export function resolveCity(raw: string, cities: CityPrice[], userAliases: Recor
   }
 
   // Parecida (errores de tipeo): se compara el texto completo y cada grupo de 1 a 4 palabras.
-  const words = wordsKey(text).split(' ').filter(Boolean);
-  const candidates = new Set<string>([key]);
+  const words = expandedText.split(' ').filter(Boolean);
+  const candidates = new Set<string>([key, expandedKey]);
   for (let size = 1; size <= 4; size++) {
     for (let i = 0; i + size <= words.length; i++) candidates.add(words.slice(i, i + size).join(''));
   }
