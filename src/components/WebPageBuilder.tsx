@@ -665,8 +665,9 @@ export default function WebPageBuilder({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMedia, setAiMedia] = useState<LandingMediaItem[]>([]);
   // Imágenes de venta: banners diseñados por Claude, fotos realistas (OpenAI) o ninguna.
-  const [aiImageMode, setAiImageMode] = useState<"claude" | "openai" | "none">("claude");
-  const aiMakeImages = aiImageMode === "openai";
+  const [aiImageMode, setAiImageMode] = useState<"pro" | "claude" | "openai" | "none">("claude");
+  const aiMakeImages = aiImageMode === "openai" || aiImageMode === "pro";
+  const aiDesignBanners = aiImageMode === "claude" || aiImageMode === "pro";
 
   const filteredProducts = useMemo(() => {
     const query = productSearch.trim().toLowerCase();
@@ -810,7 +811,7 @@ export default function WebPageBuilder({
           photos: aiPhotos.map((m) => m.url),
           videoCount: aiVideos.length,
           generateImages: aiMakeImages ? 3 : 0,
-          designBanners: aiImageMode === "claude" ? 3 : 0,
+          designBanners: aiDesignBanners ? 3 : 0,
           brandColor: config.primaryColor,
           tone: aiTone,
           audience: aiAudience,
@@ -835,12 +836,18 @@ export default function WebPageBuilder({
       // 🎨 Imágenes nuevas creadas por la IA (en paralelo), con la foto real del producto de referencia.
       const ideas: { prompt: string; caption: string }[] = aiMakeImages ? (copy.generated_images || []).slice(0, 3) : [];
       const created: { url: string; caption: string }[] = [];
+      const createdByIndex: (string | null)[] = [];
       if (ideas.length) {
         toast.loading(`🎨 Creando ${ideas.length} imágenes… (1 a 2 minutos)`, { id: loading });
         const results = await Promise.allSettled(
           ideas.map((idea) =>
             supabase.functions.invoke("ai-landing-image", {
-              body: { prompt: idea.prompt, productTitle: main.title, referenceUrl: main.images[0] || "" },
+              body: {
+                prompt: idea.prompt,
+                productTitle: main.title,
+                referenceUrl: main.images[0] || "",
+                quality: aiImageMode === "pro" ? "high" : "medium",
+              },
             }),
           ),
         );
@@ -848,6 +855,7 @@ export default function WebPageBuilder({
         results.forEach((r, i) => {
           if (r.status === "fulfilled" && (r.value.data as any)?.url) {
             created.push({ url: (r.value.data as any).url, caption: ideas[i].caption });
+            createdByIndex[i] = (r.value.data as any).url;
           } else if (!imageError) {
             imageError =
               (r.status === "fulfilled" ? (r.value.data as any)?.error : "") ||
@@ -870,11 +878,16 @@ export default function WebPageBuilder({
       }
 
       // 🎨 Banners diseñados por Claude (HTML). Sólo se permiten las fotos del producto.
-      const allowedSrc = new Set(main.images);
+      const allowedSrc = new Set([...main.images, ...created.map((c) => c.url)]);
       const bannerBlocks: LandingContentBlock[] = [];
-      if (aiImageMode === "claude") {
-        (copy.banners || []).slice(0, 3).forEach((b: { html: string; caption: string }) => {
-          const doc = new DOMParser().parseFromString(String(b.html || ""), "text/html");
+      if (aiDesignBanners) {
+        (copy.banners || []).slice(0, 3).forEach((b: { html: string; caption: string }, bi: number) => {
+          // {{FOTO_IA_N}} → foto profesional generada (si falló, la foto real del producto).
+          const withPhotos = String(b.html || "").replace(/\{\{\s*FOTO_IA_(\d)\s*\}\}/g, (_m, n) => {
+            const idx = Number(n) - 1;
+            return createdByIndex[idx] || createdByIndex[bi] || main.images[0] || "";
+          });
+          const doc = new DOMParser().parseFromString(withPhotos, "text/html");
           doc.querySelectorAll("img").forEach((img) => {
             if (!allowedSrc.has(img.getAttribute("src") || "")) img.remove();
           });
@@ -889,7 +902,8 @@ export default function WebPageBuilder({
 
       // Fotos con su texto (como las páginas que mejor venden) + fila de videos.
       const photosUsed = new Set<number>();
-      const imageBlocks: LandingContentBlock[] = created.map((img) => ({
+      // En modo PRO las fotos generadas van dentro de los banners de Claude.
+      const imageBlocks: LandingContentBlock[] = (aiImageMode === "pro" ? [] : created).map((img) => ({
         id: `ai-${uid()}`,
         type: "image" as const,
         enabled: true,
@@ -2337,25 +2351,12 @@ export default function WebPageBuilder({
                   placeholder="Ej: destacá que es recargable, oferta 2x1 esta semana"
                 />
               </div>
-              <label className="flex items-start gap-2 rounded-xl border border-violet-400/40 bg-background/40 p-3 text-xs">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={aiMakeImages}
-                  onChange={(e) => setAiMakeImages(e.target.checked)}
-                />
-                <span>
-                  <b>🎨 Crear 3 imágenes de venta con IA</b>
-                  <span className="block text-[10px] text-muted-foreground">
-                    Usa la foto real del producto: producto protagonista, una persona usándolo y el resultado. Cada imagen tiene su texto de venta.
-                  </span>
-                </span>
-              </label>
               <div>
                 <label className="app-label">Imágenes de venta</label>
                 <div className="grid gap-1.5">
                   {(
                     [
+                      ["pro", "🚀 PRO: fotos profesionales + diseño", "OpenAI crea fotos publicitarias en alta calidad y Claude diseña el anuncio encima (títulos, insignias). Necesita la clave de OpenAI."],
                       ["claude", "🎨 Banners diseñados por Claude", "Con la foto real del producto, títulos e insignias. Sin costo extra."],
                       ["openai", "📸 Fotos realistas con IA (OpenAI)", "Escenas nuevas con el producto. Necesita la clave de OpenAI."],
                       ["none", "🚫 Sin imágenes nuevas", "Sólo textos (y tus fotos/videos si subís)."],

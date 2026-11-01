@@ -214,6 +214,7 @@ Deno.serve(async (req) => {
   const imagesToCreate = Math.max(0, Math.min(3, Number(body?.generateImages || 0)));
   const bannersToDesign = Math.max(0, Math.min(3, Number(body?.designBanners || 0)));
   const productPhotos: string[] = (product.images || []).filter(isUrl).slice(0, 3);
+  const proMode = imagesToCreate > 0 && bannersToDesign > 0;
   const brandColor = /^#[0-9a-f]{6}$/i.test(String(body?.brandColor || '')) ? String(body.brandColor) : '';
 
   const client = new Anthropic({ apiKey });
@@ -237,7 +238,12 @@ Deno.serve(async (req) => {
         `Imágenes a crear: ${imagesToCreate}.\n` +
         `Banners a diseñar: ${bannersToDesign}.\n` +
         (bannersToDesign
-          ? `URLs de las fotos del producto para usar en los banners:\n${productPhotos.map((u, i) => `${i + 1}. ${u}`).join('\n') || '(no hay; diseñá sin foto, con íconos y emojis grandes)'}\n` +
+          ? (proMode
+              ? `MODO PRO: cada banner N usa como FONDO a pantalla completa la foto profesional N que se va a generar con la escena de generated_images[N]. ` +
+                `Usá exactamente src="{{FOTO_IA_N}}" (ej. {{FOTO_IA_1}}) en un <img> con position:absolute; inset:0; width:100%; height:100%; object-fit:cover. ` +
+                `Encima poné una capa de degradé oscuro para que se lea el texto, el título grande y las insignias, como un anuncio profesional de Instagram. ` +
+                `En las escenas de generated_images dejá espacio libre (arriba o abajo) para el texto.\n`
+              : `URLs de las fotos del producto para usar en los banners:\n${productPhotos.map((u, i) => `${i + 1}. ${u}`).join('\n') || '(no hay; diseñá sin foto, con íconos y emojis grandes)'}\n`) +
             (brandColor ? `Color de la marca: ${brandColor}.\n` : '')
           : '') +
         `\n${facts}`,
