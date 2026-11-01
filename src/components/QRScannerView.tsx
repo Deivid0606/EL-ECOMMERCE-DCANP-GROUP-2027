@@ -95,6 +95,7 @@ export default function QRScannerView() {
       .from('profiles')
       .select('email, full_name')
       .eq('role', 'DELIVERY')
+      .eq('approved', true)
       .eq('active', true);
 
     if (!error && data) {

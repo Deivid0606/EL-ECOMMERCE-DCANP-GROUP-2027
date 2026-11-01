@@ -12,16 +12,35 @@ export default function UsersView() {
     setLoading(true);
     const { data: profiles } = await supabase.from('profiles').select('*');
     const { data: roles } = await supabase.from('user_roles').select('*');
+    // Última conexión, ventas, comisión pendiente y perfil de cobro (sólo admin).
+    const { data: overview } = await (supabase as any).rpc('admin_users_overview');
+    const ov = new Map<string, any>(((overview || []) as any[]).map((o) => [o.user_id, o]));
 
     const merged = (profiles || []).map(p => {
       const r = (roles || []).find(r => r.user_id === p.user_id);
-      return { ...p, role: r?.role || 'PENDIENTE', approved: r?.approved || false, role_id: r?.id };
+      return { ...p, role: r?.role || 'PENDIENTE', approved: r?.approved || false, role_id: r?.id, overview: ov.get(p.user_id) };
     });
     setUsers(merged);
     setLoading(false);
   };
 
   useEffect(() => { loadUsers(); }, []);
+
+  const viewDocs = async (o: any) => {
+    const paths = [o?.id_front_path, o?.id_back_path, o?.selfie_path].filter(Boolean);
+    if (!paths.length) { toast.info('Todavía no subió fotos de su cédula'); return; }
+    for (const path of paths) {
+      const { data } = await supabase.storage.from('kyc-documents').createSignedUrl(path, 300);
+      if (data?.signedUrl) window.open(data.signedUrl, '_blank', 'noopener');
+    }
+  };
+
+  const lastSeen = (iso?: string | null) => {
+    if (!iso) return 'Nunca';
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    const when = new Date(iso).toLocaleString('es-PY', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return days <= 0 ? `Hoy ${when.split(' ').pop()}` : days === 1 ? `Ayer · ${when}` : `Hace ${days} días · ${when}`;
+  };
 
   const filtered = users.filter(u => {
     if (filterRole && u.role !== filterRole) return false;
@@ -89,10 +108,10 @@ export default function UsersView() {
       </div>
 
       <div className="overflow-auto">
-        <table className="app-table min-w-[900px]">
+        <table className="app-table min-w-[1300px]">
           <thead>
             <tr>
-              <th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th><th>Acciones</th>
+              <th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th><th>Última conexión</th><th className="text-right">Ventas</th><th className="text-right">Comisión pendiente</th><th>Perfil de cobro</th><th>Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -114,6 +133,32 @@ export default function UsersView() {
                   <span className={`badge-status ${u.approved ? 'badge-entregado' : 'badge-pendiente'}`}>
                     {u.approved ? 'Aprobado' : 'Pendiente'}
                   </span>
+                </td>
+                <td className="text-xs whitespace-nowrap">{lastSeen(u.overview?.last_sign_in_at)}</td>
+                <td className="text-right text-xs">
+                  {u.overview?.sales ? (
+                    <>
+                      <b>{u.overview.sales}</b>
+                      <span className="text-muted-foreground"> · {u.overview.delivered} entregadas</span>
+                    </>
+                  ) : '—'}
+                </td>
+                <td className={`text-right text-xs font-bold ${Number(u.overview?.pending_commission || 0) > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                  {Number(u.overview?.pending_commission || 0) > 0 ? `Gs ${new Intl.NumberFormat('es-PY').format(Math.round(u.overview.pending_commission))}` : '—'}
+                </td>
+                <td className="text-xs">
+                  {u.role === 'VENDEDOR' ? (
+                    u.overview?.payout_ready ? (
+                      <span className="text-emerald-400">✅ Completo</span>
+                    ) : (
+                      <span className="text-amber-400" title={(u.overview?.payout_missing || []).join(', ')}>
+                        ⚠️ Faltan {(u.overview?.payout_missing || []).length}
+                      </span>
+                    )
+                  ) : <span className="text-muted-foreground">—</span>}
+                  {(u.overview?.id_front_path || u.overview?.selfie_path) && (
+                    <button type="button" className="ml-1 underline" onClick={() => void viewDocs(u.overview)}>🪪 Ver</button>
+                  )}
                 </td>
                 <td>
                   <div className="flex gap-1">

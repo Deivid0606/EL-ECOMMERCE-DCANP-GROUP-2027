@@ -32,6 +32,13 @@ export default function CommissionRequestsView() {
   const [newNote, setNewNote] = useState('');
   const [newFrom, setNewFrom] = useState(() => pyDaysAgo(30));
   const [newTo, setNewTo] = useState(() => pyToday());
+  // Perfil completo (datos, cobro, cédula y selfie) para poder pedir el cobro.
+  const [payout, setPayout] = useState<{ ready: boolean; missing: string[] } | null>(null);
+  useEffect(() => {
+    (supabase as any).rpc('my_payout_status').then(({ data }: any) => {
+      if (data) setPayout({ ready: Boolean(data.ready), missing: data.missing || [] });
+    });
+  }, []);
 
   const load = async () => {
     const [reqRes, profRes, prodRes] = await Promise.all([
@@ -212,6 +219,10 @@ export default function CommissionRequestsView() {
 
   const createRequest = async () => {
     if (!newProvider) { toast.error('Elegí un proveedor'); return; }
+    if (payout && !payout.ready) {
+      toast.error(`Para cobrar completá tu perfil: ${payout.missing.join(', ')}`, { duration: 9000 });
+      return;
+    }
 
     const balance = balances.find(b => b.provider === newProvider);
     const available = balance?.available || 0;
@@ -401,6 +412,15 @@ export default function CommissionRequestsView() {
               </div>
             );
           })()}
+          {payout && !payout.ready ? (
+            <div className="mb-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              <b className="text-amber-300">⚠️ Todavía no podés cobrar.</b> Completá en <b>Perfil</b>: {payout.missing.join(' · ')}
+            </div>
+          ) : (
+            <div className="mb-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-300">
+              ✅ Tus datos de cobro del perfil se envían solos con la solicitud.
+            </div>
+          )}
           <div className="mb-3">
             <label className="app-label">Nota (opcional)</label>
             <input className="app-input" value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Nota para el proveedor" />
@@ -408,7 +428,7 @@ export default function CommissionRequestsView() {
           <button 
             className="nav-btn active" 
             onClick={createRequest}
-            disabled={!newProvider || (balances.find(b => b.provider === newProvider)?.available || 0) <= 0}
+            disabled={!newProvider || (payout !== null && !payout.ready) || (balances.find(b => b.provider === newProvider)?.available || 0) <= 0}
           >
             Enviar solicitud
           </button>
@@ -433,7 +453,25 @@ export default function CommissionRequestsView() {
             {filtered.map((r) => (
               <tr key={r.id}>
                 <td className="text-xs whitespace-nowrap">{r.requested_at ? new Date(r.requested_at).toLocaleDateString('es-PY') : ''}</td>
-                <td className="text-xs">{r.vendor_email}</td>
+                <td className="text-xs">
+                  {r.vendor_email}
+                  {(role === 'ADMIN' || role === 'PROVEEDOR') && r.meta_json?.payout && (() => {
+                    const p = r.meta_json.payout;
+                    const line = p.method === 'wallet'
+                      ? `📱 ${p.wallet_provider} · ${p.wallet_number} · ${p.wallet_holder}`
+                      : `🏦 ${p.bank_name} · ${p.bank_type} · N° ${p.bank_num} · ${p.bank_holder} (CI ${p.bank_holder_ci})`;
+                    return (
+                      <button
+                        type="button"
+                        className="mt-1 block max-w-[260px] truncate rounded-md bg-secondary/60 px-1.5 py-0.5 text-left text-[10px]"
+                        title={`${line} — tocá para copiar`}
+                        onClick={() => { void navigator.clipboard?.writeText(line); toast.success('Datos de cobro copiados'); }}
+                      >
+                        {line}
+                      </button>
+                    );
+                  })()}
+                </td>
                 <td className="text-xs">{r.provider_email}</td>
                 <td className="text-right text-xs font-bold">{nf(Number(r.amount_gs || 0))}</td>
                 <td className="text-xs whitespace-nowrap">{r.range_from} — {r.range_to}</td>

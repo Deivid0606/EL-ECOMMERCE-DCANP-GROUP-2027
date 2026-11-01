@@ -216,7 +216,7 @@ export default function AssignOrdersView() {
 
   useEffect(() => {
     if (role === 'ADMIN' || role === 'PROVEEDOR') {
-      supabase.from('profiles').select('email, name').then(({ data }) => setDeliveries(data || []));
+      supabase.from('profiles').select('email, name').eq('approved', true).then(({ data }) => setDeliveries(data || []));
     }
   }, [role]);
 
