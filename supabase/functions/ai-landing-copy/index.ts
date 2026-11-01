@@ -2,7 +2,8 @@
 // a partir del producto seleccionado: título, descripción, precio, garantía y
 // fotos. Devuelve JSON listo para cargar en el editor.
 //
-// Requiere el secreto ANTHROPIC_API_KEY en Supabase (Edge Functions › Secrets).
+// Motor: Claude (ANTHROPIC_API_KEY) u OpenAI (OPENAI_API_KEY, modelo en
+// OPENAI_TEXT_MODEL, por defecto gpt-4.1). Se elige desde el editor.
 import Anthropic from 'npm:@anthropic-ai/sdk';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -152,9 +153,10 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json({ error: 'Método no permitido' }, 405);
 
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!apiKey) {
-    return json({ error: 'La IA todavía no está activada: falta cargar la clave ANTHROPIC_API_KEY en Supabase.' }, 503);
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
+  const openaiKey = Deno.env.get('OPENAI_API_KEY') || '';
+  if (!apiKey && !openaiKey) {
+    return json({ error: 'La IA todavía no está activada: falta cargar la clave ANTHROPIC_API_KEY u OPENAI_API_KEY en Supabase.' }, 503);
   }
 
   // Sólo usuarios con sesión.
@@ -186,6 +188,12 @@ Deno.serve(async (req) => {
   } catch {
     return json({ error: 'Datos inválidos' }, 400);
   }
+  // Motor elegido en el editor (si falta su clave, se usa el otro).
+  let provider: 'claude' | 'openai' = body?.provider === 'openai' ? 'openai' : 'claude';
+  if (provider === 'openai' && !openaiKey) {
+    return json({ error: 'Para usar OpenAI falta cargar la clave OPENAI_API_KEY en Supabase.' }, 503);
+  }
+  if (provider === 'claude' && !apiKey) provider = 'openai';
   const product = body?.product || {};
   const title = String(product.title || '').slice(0, 200);
   if (!title) return json({ error: 'Elegí un producto' }, 400);
@@ -217,19 +225,7 @@ Deno.serve(async (req) => {
   const proMode = imagesToCreate > 0 && bannersToDesign > 0;
   const brandColor = /^#[0-9a-f]{6}$/i.test(String(body?.brandColor || '')) ? String(body.brandColor) : '';
 
-  const client = new Anthropic({ apiKey });
-
-  const run = async (withImages: boolean) => {
-    const content: any[] = [];
-    if (withImages) {
-      images.forEach((url, i) => {
-        content.push({ type: 'text', text: `Foto ${i + 1}:` });
-        content.push({ type: 'image', source: { type: 'url', url } });
-      });
-    }
-    content.push({
-      type: 'text',
-      text:
+  const buildText = (withImages: boolean) =>
         `Armá la página de venta con estos datos.\n` +
         (usingUploads
           ? `Fotos para la página: ${images.length}${!withImages ? ' (no se pudieron ver; escribí textos generales del producto para cada una)' : ''}.\n`
@@ -254,8 +250,68 @@ Deno.serve(async (req) => {
                 `- Todo debe verse perfecto en un celular de 360px de ancho (usá %, clamp() y aspect-ratio:1/1).\n`) +
             (brandColor ? `Color de la marca: ${brandColor}.\n` : '')
           : '') +
-        `\n${facts}`,
-    });
+        `\n${facts}`;
+
+  // ---------- OpenAI ----------
+  if (provider === 'openai') {
+    const callOpenAI = async (withImages: boolean) => {
+      const content: any[] = [];
+      if (withImages) {
+        images.forEach((url, i) => {
+          content.push({ type: 'text', text: `Foto ${i + 1}:` });
+          content.push({ type: 'image_url', image_url: { url } });
+        });
+      }
+      content.push({ type: 'text', text: buildText(withImages) });
+      return await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: Deno.env.get('OPENAI_TEXT_MODEL') || 'gpt-4.1',
+          messages: [
+            { role: 'system', content: SYSTEM },
+            { role: 'user', content },
+          ],
+          response_format: { type: 'json_schema', json_schema: { name: 'landing_page', strict: true, schema: SCHEMA } },
+          max_completion_tokens: 16000,
+        }),
+      });
+    };
+    let res = await callOpenAI(images.length > 0);
+    if (!res.ok && res.status === 400 && images.length > 0) res = await callOpenAI(false);
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error('openai text error', res.status, JSON.stringify(out).slice(0, 500));
+      if (res.status === 401) return json({ error: 'La clave OPENAI_API_KEY no es válida.' }, 503);
+      if (res.status === 429) return json({ error: 'OpenAI está ocupado o sin saldo. Probá en un minuto.' }, 429);
+      return json({ error: 'La IA no pudo generar la página. Probá de nuevo.' }, 502);
+    }
+    const msg = out?.choices?.[0]?.message;
+    if (msg?.refusal) {
+      return json({ error: 'La IA no pudo escribir textos para este producto. Probá cambiando la descripción.' }, 422);
+    }
+    let copyOpenAI: unknown;
+    try {
+      copyOpenAI = JSON.parse(String(msg?.content || ''));
+    } catch {
+      return json({ error: 'La respuesta de la IA llegó incompleta. Probá de nuevo.' }, 502);
+    }
+    await admin.from('ai_generations').insert({ user_email: email, kind: 'landing_copy', product_title: title });
+    return json({ copy: copyOpenAI, provider: 'openai' });
+  }
+
+  // ---------- Claude ----------
+  const client = new Anthropic({ apiKey });
+
+  const run = async (withImages: boolean) => {
+    const content: any[] = [];
+    if (withImages) {
+      images.forEach((url, i) => {
+        content.push({ type: 'text', text: `Foto ${i + 1}:` });
+        content.push({ type: 'image', source: { type: 'url', url } });
+      });
+    }
+    content.push({ type: 'text', text: buildText(withImages) });
     return await client.beta.messages.create({
       model: 'claude-opus-5-5',
       max_tokens: 16000,
@@ -301,5 +357,5 @@ Deno.serve(async (req) => {
   }
 
   await admin.from('ai_generations').insert({ user_email: email, kind: 'landing_copy', product_title: title });
-  return json({ copy });
+  return json({ copy, provider: 'claude' });
 });
