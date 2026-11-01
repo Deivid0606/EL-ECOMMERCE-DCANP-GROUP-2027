@@ -665,6 +665,21 @@ export default function WebPageBuilder({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMedia, setAiMedia] = useState<LandingMediaItem[]>([]);
   // Imágenes de venta: banners diseñados por Claude, fotos realistas (OpenAI) o ninguna.
+  const [aiProvider, setAiProvider] = useState<"claude" | "openai">(() => {
+    try {
+      return localStorage.getItem("dcanp-ai-provider") === "openai" ? "openai" : "claude";
+    } catch {
+      return "claude";
+    }
+  });
+  const chooseAiProvider = (value: "claude" | "openai") => {
+    setAiProvider(value);
+    try {
+      localStorage.setItem("dcanp-ai-provider", value);
+    } catch {
+      // Preferencia sólo de este navegador.
+    }
+  };
   const [aiImageMode, setAiImageMode] = useState<"pro" | "claude" | "openai" | "none">("claude");
   const aiMakeImages = aiImageMode === "openai" || aiImageMode === "pro";
   const aiDesignBanners = aiImageMode === "claude" || aiImageMode === "pro";
@@ -812,6 +827,7 @@ export default function WebPageBuilder({
           videoCount: aiVideos.length,
           generateImages: aiMakeImages ? 3 : 0,
           designBanners: aiDesignBanners ? 3 : 0,
+          provider: aiProvider,
           brandColor: config.primaryColor,
           tone: aiTone,
           audience: aiAudience,
@@ -2318,7 +2334,7 @@ export default function WebPageBuilder({
             <div className="rounded-[24px] border border-violet-500/40 bg-gradient-to-br from-violet-500/10 to-sky-500/10 p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="font-black">✨ Crear la página con IA</div>
-                <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] font-bold text-violet-200">Claude</span>
+                <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] font-bold text-violet-200">{aiProvider === "openai" ? "OpenAI" : "Claude"}</span>
               </div>
               <div className="text-xs text-muted-foreground">
                 Arma la página completa: fotos con texto de venta, videos, título, descripción, beneficios, preguntas frecuentes y botón.
@@ -2352,12 +2368,38 @@ export default function WebPageBuilder({
                 />
               </div>
               <div>
+                <label className="app-label">Motor de IA (textos y diseño)</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(
+                    [
+                      ["claude", "🧠 Claude", "Anthropic"],
+                      ["openai", "🤖 OpenAI", "ChatGPT"],
+                    ] as const
+                  ).map(([value, title, hint]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => chooseAiProvider(value)}
+                      className={`rounded-xl border p-2 text-left text-xs ${
+                        aiProvider === value ? "border-violet-400 bg-violet-500/15" : "border-border bg-background/40"
+                      }`}
+                    >
+                      <b>{title}</b>
+                      <span className="block text-[10px] text-muted-foreground">{hint}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-1 text-[10px] text-muted-foreground">
+                  Las fotos nuevas (modo 🚀 PRO o 📸) siempre las crea OpenAI.
+                </div>
+              </div>
+              <div>
                 <label className="app-label">Imágenes de venta</label>
                 <div className="grid gap-1.5">
                   {(
                     [
-                      ["pro", "🚀 PRO: fotos profesionales + diseño", "OpenAI crea fotos publicitarias en alta calidad y Claude diseña el anuncio encima (títulos, insignias). Necesita la clave de OpenAI."],
-                      ["claude", "🎨 Diseño PRO con Claude (sólo tu clave de Claude)", "Anuncios con tu foto real: producto sin fondo, acercamientos, ilustraciones, sellos de precio e insignias."],
+                      ["pro", "🚀 PRO: fotos nuevas + diseño", "OpenAI crea fotos publicitarias en alta calidad y la IA diseña el anuncio encima (títulos, insignias). Necesita la clave de OpenAI."],
+                      ["claude", "🎨 Anuncios diseñados con tu foto real", "Producto sin fondo, acercamientos, ilustraciones, sellos de precio e insignias. Sin fotos nuevas."],
                       ["openai", "📸 Fotos realistas con IA (OpenAI)", "Escenas nuevas con el producto. Necesita la clave de OpenAI."],
                       ["none", "🚫 Sin imágenes nuevas", "Sólo textos (y tus fotos/videos si subís)."],
                     ] as const
