@@ -664,6 +664,7 @@ export default function WebPageBuilder({
   const [aiNotes, setAiNotes] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMedia, setAiMedia] = useState<LandingMediaItem[]>([]);
+  const [aiMakeImages, setAiMakeImages] = useState(true);
 
   const filteredProducts = useMemo(() => {
     const query = productSearch.trim().toLowerCase();
@@ -806,6 +807,7 @@ export default function WebPageBuilder({
           extraProducts: config.productSnapshots.slice(1).map((p) => p.title),
           photos: aiPhotos.map((m) => m.url),
           videoCount: aiVideos.length,
+          generateImages: aiMakeImages ? 3 : 0,
           tone: aiTone,
           audience: aiAudience,
           notes: aiNotes,
@@ -826,9 +828,63 @@ export default function WebPageBuilder({
         return;
       }
 
+      // 🎨 Imágenes nuevas creadas por la IA (en paralelo), con la foto real del producto de referencia.
+      const ideas: { prompt: string; caption: string }[] = aiMakeImages ? (copy.generated_images || []).slice(0, 3) : [];
+      const created: { url: string; caption: string }[] = [];
+      if (ideas.length) {
+        toast.loading(`🎨 Creando ${ideas.length} imágenes… (1 a 2 minutos)`, { id: loading });
+        const results = await Promise.allSettled(
+          ideas.map((idea) =>
+            supabase.functions.invoke("ai-landing-image", {
+              body: { prompt: idea.prompt, productTitle: main.title, referenceUrl: main.images[0] || "" },
+            }),
+          ),
+        );
+        let imageError = "";
+        results.forEach((r, i) => {
+          if (r.status === "fulfilled" && (r.value.data as any)?.url) {
+            created.push({ url: (r.value.data as any).url, caption: ideas[i].caption });
+          } else if (!imageError) {
+            imageError =
+              (r.status === "fulfilled" ? (r.value.data as any)?.error : "") ||
+              "Alguna imagen no se pudo crear.";
+          }
+        });
+        if (imageError) {
+          // El mensaje real viene en el cuerpo de la respuesta de error.
+          const failed = results.find((r) => r.status === "fulfilled" && r.value.error) as
+            | PromiseFulfilledResult<any>
+            | undefined;
+          try {
+            const detail = await failed?.value.error?.context?.json?.();
+            if (detail?.error) imageError = detail.error;
+          } catch {
+            // sin detalle
+          }
+          toast.warning(`🎨 ${imageError} Se armó la página con ${created.length} imagen(es) nueva(s).`, { duration: 9000 });
+        }
+      }
+
       // Fotos con su texto (como las páginas que mejor venden) + fila de videos.
       const photosUsed = new Set<number>();
-      const imageBlocks: LandingContentBlock[] = [];
+      const imageBlocks: LandingContentBlock[] = created.map((img) => ({
+        id: `ai-${uid()}`,
+        type: "image" as const,
+        enabled: true,
+        url: img.url,
+        alt: main.title,
+        width: "full" as const,
+        rounded: true,
+        text: img.caption || "",
+        textPosition: "bottom" as const,
+        textAlign: "left" as const,
+        blockAlign: "center" as const,
+        marginTop: 12,
+        marginBottom: 12,
+        imageScale: 100,
+        imageOffsetX: 0,
+        imageOffsetY: 0,
+      }));
       (copy.image_blocks || []).forEach((ib: { photo: number; caption: string }) => {
         const photo = aiPhotos[Number(ib.photo) - 1];
         if (!photo || photosUsed.has(Number(ib.photo))) return;
@@ -2249,13 +2305,27 @@ export default function WebPageBuilder({
                   placeholder="Ej: destacá que es recargable, oferta 2x1 esta semana"
                 />
               </div>
+              <label className="flex items-start gap-2 rounded-xl border border-violet-400/40 bg-background/40 p-3 text-xs">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={aiMakeImages}
+                  onChange={(e) => setAiMakeImages(e.target.checked)}
+                />
+                <span>
+                  <b>🎨 Crear 3 imágenes de venta con IA</b>
+                  <span className="block text-[10px] text-muted-foreground">
+                    Usa la foto real del producto: producto protagonista, una persona usándolo y el resultado. Cada imagen tiene su texto de venta.
+                  </span>
+                </span>
+              </label>
               <div>
-                <label className="app-label">Fotos y videos para la página</label>
+                <label className="app-label">Videos (y fotos propias, opcional)</label>
                 <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-violet-400/50 bg-background/40 p-3 text-center text-xs hover:bg-background/70">
                   <span className="text-2xl">📸🎬</span>
-                  <span className="font-bold">{uploading ? "Subiendo…" : "Subí hasta 6 fotos y 3 videos"}</span>
+                  <span className="font-bold">{uploading ? "Subiendo…" : "Subí hasta 3 videos (y si querés, fotos propias)"}</span>
                   <span className="text-[10px] text-muted-foreground">
-                    La IA las ordena y escribe un texto de venta para cada foto. Sin fotos usa las del producto.
+                    Los videos van en una fila con reproducción automática. Si subís fotos, la IA les escribe el texto también.
                   </span>
                   <input
                     type="file"

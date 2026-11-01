@@ -4,3 +4,6 @@ verify_jwt = false
 
 [functions.ai-landing-copy]
 verify_jwt = true
+
+[functions.ai-landing-image]
+verify_jwt = true
