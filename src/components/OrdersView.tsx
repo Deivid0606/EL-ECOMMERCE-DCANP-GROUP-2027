@@ -993,7 +993,7 @@ export default function OrdersView() {
       return;
     }
 
-    toast.success(val ? `Estado 2 → ${val}` : 'Guía removida: vuelve a Pedidos con guías');
+    toast.success(val ? `Estado 2 → ${val}` : 'Guía removida: vuelve a Despacho');
 
     setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));

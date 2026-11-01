@@ -47,7 +47,7 @@ const navItems: NavItem[] = [
   { id: 'chat', label: 'Chat' },
   {
     id: 'withGuides',
-    label: 'Pedidos con guías',
+    label: 'Despacho',
     roles: ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'],
   },
   {
