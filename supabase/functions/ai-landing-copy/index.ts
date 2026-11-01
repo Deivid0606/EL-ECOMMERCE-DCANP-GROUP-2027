@@ -34,6 +34,7 @@ const SCHEMA = {
     'sections',
     'image_blocks',
     'generated_images',
+    'banners',
     'video_position',
   ],
   properties: {
@@ -92,6 +93,29 @@ const SCHEMA = {
             type: 'string',
             description:
               'Texto que va debajo de esa imagen en la página: título en MAYÚSCULAS con 1 emoji y, si suma, una línea más (separada con una línea en blanco) que empiece con 👉.',
+          },
+        },
+      },
+    },
+    banners: {
+      type: 'array',
+      description:
+        'Si te piden banners (ver "Banners a diseñar"), exactamente esa cantidad; si no, vacío. Son las imágenes de venta de la página, diseñadas en HTML: 1) producto protagonista con la promesa principal, 2) beneficios o cómo se usa, 3) oferta / pago al recibir / envío.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['html', 'caption'],
+        properties: {
+          html: {
+            type: 'string',
+            description:
+              'Un solo <div> raíz con estilos INLINE (style="..."), sin <script>, sin <style>, sin eventos, sin fuentes ni recursos externos salvo las fotos del producto que te pasaron (por URL exacta). ' +
+              'Formato cuadrado (width:100%; aspect-ratio:1/1; max-width:100%; overflow:hidden; box-sizing:border-box; position:relative), fondo con degradé llamativo, la foto del producto grande y nítida (<img src="URL" style="object-fit:contain">), ' +
+              'un título grande en MAYÚSCULAS, 2 o 3 insignias o íconos con emojis y textos cortos. Fuente: font-family:system-ui,Arial,sans-serif. Tamaños en % o clamp() para que se vea bien en celular y PC.',
+          },
+          caption: {
+            type: 'string',
+            description: 'Texto opcional debajo del banner (puede ir vacío si el banner ya lo dice todo).',
           },
         },
       },
@@ -188,6 +212,9 @@ Deno.serve(async (req) => {
   const usingUploads = Array.isArray(body?.photos) && body.photos.length > 0;
   const videoCount = Math.max(0, Math.min(3, Number(body?.videoCount || 0)));
   const imagesToCreate = Math.max(0, Math.min(3, Number(body?.generateImages || 0)));
+  const bannersToDesign = Math.max(0, Math.min(3, Number(body?.designBanners || 0)));
+  const productPhotos: string[] = (product.images || []).filter(isUrl).slice(0, 3);
+  const brandColor = /^#[0-9a-f]{6}$/i.test(String(body?.brandColor || '')) ? String(body.brandColor) : '';
 
   const client = new Anthropic({ apiKey });
 
@@ -207,7 +234,13 @@ Deno.serve(async (req) => {
           ? `Fotos para la página: ${images.length}${!withImages ? ' (no se pudieron ver; escribí textos generales del producto para cada una)' : ''}.\n`
           : `Fotos para la página: 0 (las fotos de arriba son sólo de referencia del producto; image_blocks vacío).\n`) +
         `Videos para la página: ${videoCount}.\n` +
-        `Imágenes a crear: ${imagesToCreate}.\n\n${facts}`,
+        `Imágenes a crear: ${imagesToCreate}.\n` +
+        `Banners a diseñar: ${bannersToDesign}.\n` +
+        (bannersToDesign
+          ? `URLs de las fotos del producto para usar en los banners:\n${productPhotos.map((u, i) => `${i + 1}. ${u}`).join('\n') || '(no hay; diseñá sin foto, con íconos y emojis grandes)'}\n` +
+            (brandColor ? `Color de la marca: ${brandColor}.\n` : '')
+          : '') +
+        `\n${facts}`,
     });
     return await client.beta.messages.create({
       model: 'claude-opus-5-5',
