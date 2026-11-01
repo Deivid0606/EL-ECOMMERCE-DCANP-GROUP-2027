@@ -23,6 +23,21 @@ const normalizeClientName = (value: any): string => {
     .trim();
 };
 
+// Celular comparable: sólo dígitos, sin 595 / 0 inicial (0981 123 456 = +595 981123456).
+const normalizePhone = (value: any): string => {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('595')) digits = digits.slice(3);
+  digits = digits.replace(/^0+/, '');
+  return digits.length >= 6 ? digits.slice(-9) : '';
+};
+
+// Mismo cliente = mismo nombre y apellido (sin acentos, mayúsculas ni signos) + mismo celular.
+const clientKey = (name: any, phone: any): string => {
+  const n = normalizeClientName(name).replace(/[^a-z0-9ñ ]/g, '').replace(/\s+/g, ' ').trim();
+  const p = normalizePhone(phone);
+  return n && p ? `${n}|${p}` : '';
+};
+
 const displayClientName = (value: any): string => {
   return String(value || '').replace(/\s+/g, ' ').trim() || 'SIN NOMBRE';
 };
@@ -598,17 +613,20 @@ export default function WithGuidesView() {
   const repeatedClients = useMemo(() => {
     const map: Record<string, { name: string; count: number; guides: string[]; phones: string[] }> = {};
     visibleOrders.forEach(o => {
-      const key = normalizeClientName(o.customer_name);
+      const key = clientKey(o.customer_name, o.phone);
       if (!key) return;
       if (!map[key]) map[key] = { name: displayClientName(o.customer_name), count: 0, guides: [], phones: [] };
       map[key].count += 1;
       map[key].guides.push(o.order_number || o.id?.slice(0, 8) || 'SIN ID');
       if (o.phone && !map[key].phones.includes(o.phone)) map[key].phones.push(o.phone);
     });
-    return Object.values(map)
-      .filter(item => item.count > 1)
+    return Object.entries(map)
+      .filter(([, item]) => item.count > 1)
+      .map(([key, item]) => ({ ...item, key }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [visibleOrders]);
+
+  const repeatedKeys = useMemo(() => new Set(repeatedClients.map(c => c.key)), [repeatedClients]);
 
   const repeatedClientsCount = repeatedClients.length;
   const repeatedGuidesCount = repeatedClients.reduce((sum, item) => sum + item.count, 0);
@@ -1306,7 +1324,7 @@ export default function WithGuidesView() {
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-2xl shadow-lg shadow-cyan-500/20">📦</div>
           <div>
-            <h3 className="text-2xl md:text-3xl font-black text-white leading-tight">Pedidos con guías</h3>
+            <h3 className="text-2xl md:text-3xl font-black text-white leading-tight">Despacho</h3>
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-2 justify-end">
@@ -1365,7 +1383,7 @@ export default function WithGuidesView() {
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div>
               <div className="text-sm font-black text-amber-200">⚠️ Clientes repetidos detectados</div>
-              <div className="text-xs text-slate-300">Se comparan nombres exactos normalizados dentro de los filtros visibles.</div>
+              <div className="text-xs text-slate-300">Repetido = mismo nombre y apellido <b>y</b> mismo celular (sin importar acentos, mayúsculas ni el formato del número), dentro de los filtros visibles.</div>
             </div>
             <button
               className="nav-btn"
@@ -1768,7 +1786,7 @@ export default function WithGuidesView() {
                   })()}
                 </td>
                 <td className="text-xs">
-                  {repeatedClients.some(c => normalizeClientName(c.name) === normalizeClientName(o.customer_name)) ? (
+                  {repeatedKeys.has(clientKey(o.customer_name, o.phone)) ? (
                     <span className="px-2 py-1 rounded-full bg-amber-500/20 text-amber-300 font-black">Repetido</span>
                   ) : (
                     <span className="text-slate-500">—</span>
