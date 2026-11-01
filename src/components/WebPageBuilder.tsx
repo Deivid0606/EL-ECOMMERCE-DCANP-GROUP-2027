@@ -663,6 +663,7 @@ export default function WebPageBuilder({
   const [aiAudience, setAiAudience] = useState("");
   const [aiNotes, setAiNotes] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiMedia, setAiMedia] = useState<LandingMediaItem[]>([]);
 
   const filteredProducts = useMemo(() => {
     const query = productSearch.trim().toLowerCase();
@@ -722,6 +723,7 @@ export default function WebPageBuilder({
     setInsertAtIndex(null);
     setDraggedBlockIndex(null);
     setProductSearch("");
+    setAiMedia([]);
     setEditorOpen(true);
   };
 
@@ -733,6 +735,7 @@ export default function WebPageBuilder({
     setInsertAtIndex(null);
     setDraggedBlockIndex(null);
     setProductSearch("");
+    setAiMedia([]);
     setEditorOpen(true);
   };
 
@@ -763,6 +766,24 @@ export default function WebPageBuilder({
   };
 
   // ✨ Textos de la página generados con IA (Claude) a partir del producto.
+  const aiPhotos = aiMedia.filter((m) => m.type === "image").slice(0, 6);
+  const aiVideos = aiMedia.filter((m) => m.type === "video").slice(0, 3);
+
+  const uploadAiMedia = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setUploading(true);
+    try {
+      const added: LandingMediaItem[] = [];
+      for (const file of Array.from(files).slice(0, 9)) {
+        const item = await uploadFile(file, "ai-media");
+        if (item) added.push(item);
+      }
+      if (added.length) setAiMedia((prev) => [...prev, ...added]);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const generateWithAI = async () => {
     const main = config.productSnapshots[0];
     if (!main) {
@@ -783,6 +804,8 @@ export default function WebPageBuilder({
             images: main.images,
           },
           extraProducts: config.productSnapshots.slice(1).map((p) => p.title),
+          photos: aiPhotos.map((m) => m.url),
+          videoCount: aiVideos.length,
           tone: aiTone,
           audience: aiAudience,
           notes: aiNotes,
@@ -803,7 +826,76 @@ export default function WebPageBuilder({
         return;
       }
 
-      const aiBlocks: LandingContentBlock[] = (copy.sections || []).flatMap(
+      // Fotos con su texto (como las páginas que mejor venden) + fila de videos.
+      const photosUsed = new Set<number>();
+      const imageBlocks: LandingContentBlock[] = [];
+      (copy.image_blocks || []).forEach((ib: { photo: number; caption: string }) => {
+        const photo = aiPhotos[Number(ib.photo) - 1];
+        if (!photo || photosUsed.has(Number(ib.photo))) return;
+        photosUsed.add(Number(ib.photo));
+        imageBlocks.push({
+          id: `ai-${uid()}`,
+          type: "image",
+          enabled: true,
+          url: photo.url,
+          alt: main.title,
+          width: "full",
+          rounded: true,
+          text: ib.caption || "",
+          textPosition: "bottom",
+          textAlign: "left",
+          blockAlign: "center",
+          marginTop: 12,
+          marginBottom: 12,
+          imageScale: 100,
+          imageOffsetX: 0,
+          imageOffsetY: 0,
+        });
+      });
+      // Fotos que la IA no usó: igual se muestran al final de las fotos.
+      aiPhotos.forEach((photo, i) => {
+        if (photosUsed.has(i + 1)) return;
+        imageBlocks.push({
+          id: `ai-${uid()}`,
+          type: "image",
+          enabled: true,
+          url: photo.url,
+          alt: main.title,
+          width: "full",
+          rounded: true,
+          text: "",
+          textPosition: "bottom",
+          textAlign: "left",
+          blockAlign: "center",
+          marginTop: 12,
+          marginBottom: 12,
+          imageScale: 100,
+          imageOffsetX: 0,
+          imageOffsetY: 0,
+        });
+      });
+      const mediaBlocks: LandingContentBlock[] = [...imageBlocks];
+      if (aiVideos.length) {
+        const at = Math.max(0, Math.min(imageBlocks.length, Number(copy.video_position ?? imageBlocks.length)));
+        mediaBlocks.splice(at, 0, {
+          id: `ai-${uid()}`,
+          type: "video_row",
+          enabled: true,
+          videos: aiVideos,
+          desktopColumns: Math.min(3, aiVideos.length) as 1 | 2 | 3,
+          mobileColumns: Math.min(3, aiVideos.length) as 1 | 2 | 3,
+          gap: 12,
+          width: "wide",
+          aspect: "portrait",
+          rounded: true,
+          controls: true,
+          autoplay: true,
+          muted: true,
+          loop: true,
+        });
+      }
+
+      const sectionBlocks: LandingContentBlock[] = (copy.sections || []).flatMap(
         (sec: { emoji: string; heading: string; text: string }) => [
           {
             id: `ai-${uid()}`,
@@ -839,7 +931,8 @@ export default function WebPageBuilder({
         ),
         // Reemplaza sólo los bloques que puso la IA antes; los tuyos quedan.
         contentBlocks: [
-          ...aiBlocks,
+          ...mediaBlocks,
+          ...sectionBlocks,
           ...prev.contentBlocks.filter((b) => !String(b.id).startsWith("ai-")),
         ],
       }));
@@ -2126,7 +2219,7 @@ export default function WebPageBuilder({
                 <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] font-bold text-violet-200">Claude</span>
               </div>
               <div className="text-xs text-muted-foreground">
-                Escribe título, descripción, beneficios, preguntas frecuentes, botón y secciones de venta usando el producto elegido y sus fotos.
+                Arma la página completa: fotos con texto de venta, videos, título, descripción, beneficios, preguntas frecuentes y botón.
               </div>
               <div>
                 <label className="app-label">Tono</label>
@@ -2156,20 +2249,70 @@ export default function WebPageBuilder({
                   placeholder="Ej: destacá que es recargable, oferta 2x1 esta semana"
                 />
               </div>
+              <div>
+                <label className="app-label">Fotos y videos para la página</label>
+                <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-violet-400/50 bg-background/40 p-3 text-center text-xs hover:bg-background/70">
+                  <span className="text-2xl">📸🎬</span>
+                  <span className="font-bold">{uploading ? "Subiendo…" : "Subí hasta 6 fotos y 3 videos"}</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    La IA las ordena y escribe un texto de venta para cada foto. Sin fotos usa las del producto.
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    multiple
+                    className="hidden"
+                    disabled={uploading}
+                    onChange={(e) => {
+                      const files = e.target.files;
+                      void uploadAiMedia(files).finally(() => {
+                        e.target.value = "";
+                      });
+                    }}
+                  />
+                </label>
+                {aiMedia.length > 0 && (
+                  <div className="mt-2 grid grid-cols-4 gap-1.5">
+                    {aiMedia.map((m, i) => (
+                      <div key={m.id} className="relative aspect-square overflow-hidden rounded-lg border border-border bg-secondary">
+                        {m.type === "image" ? (
+                          <img src={m.url} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <video src={m.url} muted className="h-full w-full object-cover" />
+                        )}
+                        <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[9px] font-bold text-white">
+                          {m.type === "image" ? `📷 ${aiMedia.slice(0, i + 1).filter((x) => x.type === "image").length}` : "🎬"}
+                        </span>
+                        <button
+                          type="button"
+                          className="absolute right-1 top-1 rounded-full bg-black/70 px-1.5 text-[10px] text-white"
+                          onClick={() => setAiMedia((prev) => prev.filter((x) => x.id !== m.id))}
+                          title="Quitar"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {(aiMedia.filter((m) => m.type === "image").length > 6 || aiMedia.filter((m) => m.type === "video").length > 3) && (
+                  <div className="mt-1 text-[10px] text-amber-300">Se usan las primeras 6 fotos y 3 videos.</div>
+                )}
+              </div>
               <button
                 type="button"
                 className="nav-btn active w-full"
-                disabled={aiLoading || config.productSnapshots.length === 0}
+                disabled={aiLoading || uploading || config.productSnapshots.length === 0}
                 onClick={() => void generateWithAI()}
               >
                 {aiLoading
                   ? "✨ Escribiendo…"
                   : config.productSnapshots.length === 0
                     ? "Elegí un producto primero"
-                    : "✨ Generar textos con IA"}
+                    : "✨ Armar página completa con IA"}
               </button>
               <div className="text-[10px] text-muted-foreground">
-                Reemplaza los textos de la página (no toca precios, fotos ni tus bloques propios). Revisá todo antes de publicar.
+                Arma la página con tus fotos, videos y textos (no toca precios ni tus bloques propios). Revisá todo antes de publicar.
               </div>
             </div>
 
