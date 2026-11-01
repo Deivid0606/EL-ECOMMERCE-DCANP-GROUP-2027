@@ -659,6 +659,10 @@ export default function WebPageBuilder({
   const [insertAtIndex, setInsertAtIndex] = useState<number | null>(null);
   const [draggedBlockIndex, setDraggedBlockIndex] = useState<number | null>(null);
   const [productSearch, setProductSearch] = useState("");
+  const [aiTone, setAiTone] = useState("Vendedor y urgente");
+  const [aiAudience, setAiAudience] = useState("");
+  const [aiNotes, setAiNotes] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
 
   const filteredProducts = useMemo(() => {
     const query = productSearch.trim().toLowerCase();
@@ -756,6 +760,98 @@ export default function WebPageBuilder({
             : prev.heroHeadline,
       };
     });
+  };
+
+  // ✨ Textos de la página generados con IA (Claude) a partir del producto.
+  const generateWithAI = async () => {
+    const main = config.productSnapshots[0];
+    if (!main) {
+      toast.error("Primero elegí un producto.");
+      return;
+    }
+    setAiLoading(true);
+    const loading = toast.loading("✨ La IA está escribiendo tu página… (puede tardar hasta 1 minuto)");
+    try {
+      const { data, error } = await supabase.functions.invoke("ai-landing-copy", {
+        body: {
+          product: {
+            title: main.title,
+            price: main.price,
+            compareAtPrice: main.compareAtPrice,
+            description: main.description,
+            warranty: main.warranty,
+            images: main.images,
+          },
+          extraProducts: config.productSnapshots.slice(1).map((p) => p.title),
+          tone: aiTone,
+          audience: aiAudience,
+          notes: aiNotes,
+        },
+      });
+      let message = (data as any)?.error as string | undefined;
+      if (error && !message) {
+        try {
+          message = (await (error as any).context?.json?.())?.error;
+        } catch {
+          // sin detalle
+        }
+        message = message || "No se pudo conectar con la IA.";
+      }
+      const copy = (data as any)?.copy;
+      if (message || !copy) {
+        toast.error(message || "La IA no devolvió textos.");
+        return;
+      }
+
+      const aiBlocks: LandingContentBlock[] = (copy.sections || []).flatMap(
+        (sec: { emoji: string; heading: string; text: string }) => [
+          {
+            id: `ai-${uid()}`,
+            type: "heading" as const,
+            enabled: true,
+            text: sec.heading,
+            emoji: sec.emoji,
+            align: "center" as const,
+            size: "lg" as const,
+          },
+          {
+            id: `ai-${uid()}`,
+            type: "text" as const,
+            enabled: true,
+            text: sec.text,
+            align: "center" as const,
+          },
+        ],
+      );
+
+      setConfig((prev) => ({
+        ...prev,
+        announcement: copy.announcement || prev.announcement,
+        heroHeadline: copy.hero_headline || prev.heroHeadline,
+        heroDescription: copy.hero_description || prev.heroDescription,
+        buttonText: copy.button_text || prev.buttonText,
+        buttonSubtext: copy.button_subtext || prev.buttonSubtext,
+        checkoutTitle: copy.checkout_title || prev.checkoutTitle,
+        benefits: Array.isArray(copy.benefits) && copy.benefits.length ? copy.benefits : prev.benefits,
+        faq: Array.isArray(copy.faq) && copy.faq.length ? copy.faq : prev.faq,
+        productSnapshots: prev.productSnapshots.map((p, i) =>
+          i === 0 && copy.product_description ? { ...p, description: copy.product_description } : p,
+        ),
+        // Reemplaza sólo los bloques que puso la IA antes; los tuyos quedan.
+        contentBlocks: [
+          ...aiBlocks,
+          ...prev.contentBlocks.filter((b) => !String(b.id).startsWith("ai-")),
+        ],
+      }));
+      if (!name.trim() && copy.page_name) {
+        setName(copy.page_name);
+        if (!editingId && !slug) setSlug(slugify(copy.page_name));
+      }
+      toast.success("✨ ¡Listo! Revisá los textos en la vista previa y cambiá lo que quieras antes de publicar.");
+    } finally {
+      toast.dismiss(loading);
+      setAiLoading(false);
+    }
   };
 
   const updateSnapshot = (
@@ -2023,6 +2119,59 @@ export default function WebPageBuilder({
                 </div>
               </div>
             ))}
+
+            <div className="rounded-[24px] border border-violet-500/40 bg-gradient-to-br from-violet-500/10 to-sky-500/10 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-black">✨ Crear la página con IA</div>
+                <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] font-bold text-violet-200">Claude</span>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Escribe título, descripción, beneficios, preguntas frecuentes, botón y secciones de venta usando el producto elegido y sus fotos.
+              </div>
+              <div>
+                <label className="app-label">Tono</label>
+                <select className="app-input" value={aiTone} onChange={(e) => setAiTone(e.target.value)}>
+                  <option>Vendedor y urgente</option>
+                  <option>Amigable y cercano</option>
+                  <option>Premium y elegante</option>
+                  <option>Divertido</option>
+                  <option>Profesional y técnico</option>
+                </select>
+              </div>
+              <div>
+                <label className="app-label">Público (opcional)</label>
+                <input
+                  className="app-input"
+                  value={aiAudience}
+                  onChange={(e) => setAiAudience(e.target.value)}
+                  placeholder="Ej: mamás, oficinistas, gamers, dueños de mascotas"
+                />
+              </div>
+              <div>
+                <label className="app-label">Indicaciones (opcional)</label>
+                <textarea
+                  className="app-input min-h-[60px]"
+                  value={aiNotes}
+                  onChange={(e) => setAiNotes(e.target.value)}
+                  placeholder="Ej: destacá que es recargable, oferta 2x1 esta semana"
+                />
+              </div>
+              <button
+                type="button"
+                className="nav-btn active w-full"
+                disabled={aiLoading || config.productSnapshots.length === 0}
+                onClick={() => void generateWithAI()}
+              >
+                {aiLoading
+                  ? "✨ Escribiendo…"
+                  : config.productSnapshots.length === 0
+                    ? "Elegí un producto primero"
+                    : "✨ Generar textos con IA"}
+              </button>
+              <div className="text-[10px] text-muted-foreground">
+                Reemplaza los textos de la página (no toca precios, fotos ni tus bloques propios). Revisá todo antes de publicar.
+              </div>
+            </div>
 
             <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
               <div className="font-black">3. Agregar y ordenar bloques</div>
