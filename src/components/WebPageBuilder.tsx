@@ -664,7 +664,9 @@ export default function WebPageBuilder({
   const [aiNotes, setAiNotes] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMedia, setAiMedia] = useState<LandingMediaItem[]>([]);
-  const [aiMakeImages, setAiMakeImages] = useState(true);
+  // Imágenes de venta: banners diseñados por Claude, fotos realistas (OpenAI) o ninguna.
+  const [aiImageMode, setAiImageMode] = useState<"claude" | "openai" | "none">("claude");
+  const aiMakeImages = aiImageMode === "openai";
 
   const filteredProducts = useMemo(() => {
     const query = productSearch.trim().toLowerCase();
@@ -808,6 +810,8 @@ export default function WebPageBuilder({
           photos: aiPhotos.map((m) => m.url),
           videoCount: aiVideos.length,
           generateImages: aiMakeImages ? 3 : 0,
+          designBanners: aiImageMode === "claude" ? 3 : 0,
+          brandColor: config.primaryColor,
           tone: aiTone,
           audience: aiAudience,
           notes: aiNotes,
@@ -863,6 +867,24 @@ export default function WebPageBuilder({
           }
           toast.warning(`🎨 ${imageError} Se armó la página con ${created.length} imagen(es) nueva(s).`, { duration: 9000 });
         }
+      }
+
+      // 🎨 Banners diseñados por Claude (HTML). Sólo se permiten las fotos del producto.
+      const allowedSrc = new Set(main.images);
+      const bannerBlocks: LandingContentBlock[] = [];
+      if (aiImageMode === "claude") {
+        (copy.banners || []).slice(0, 3).forEach((b: { html: string; caption: string }) => {
+          const doc = new DOMParser().parseFromString(String(b.html || ""), "text/html");
+          doc.querySelectorAll("img").forEach((img) => {
+            if (!allowedSrc.has(img.getAttribute("src") || "")) img.remove();
+          });
+          const html = sanitizeCustomHtml(doc.body.innerHTML);
+          if (!html.trim()) return;
+          bannerBlocks.push({ id: `ai-${uid()}`, type: "custom_html", enabled: true, html, width: "normal" });
+          if (b.caption?.trim()) {
+            bannerBlocks.push({ id: `ai-${uid()}`, type: "text", enabled: true, text: b.caption, align: "center" });
+          }
+        });
       }
 
       // Fotos con su texto (como las páginas que mejor venden) + fila de videos.
@@ -930,9 +952,19 @@ export default function WebPageBuilder({
           imageOffsetY: 0,
         });
       });
-      const mediaBlocks: LandingContentBlock[] = [...imageBlocks];
+      const mediaBlocks: LandingContentBlock[] = [...bannerBlocks, ...imageBlocks];
       if (aiVideos.length) {
-        const at = Math.max(0, Math.min(imageBlocks.length, Number(copy.video_position ?? imageBlocks.length)));
+        const visuals = bannerBlocks.filter((b) => b.type === "custom_html").length + imageBlocks.length;
+        let at = Math.max(0, Math.min(visuals, Number(copy.video_position ?? visuals)));
+        // Convierte "después de N imágenes" en posición dentro de la lista (los textos de banner van pegados).
+        let seen = 0;
+        let idx = 0;
+        while (idx < mediaBlocks.length && seen < at) {
+          if (mediaBlocks[idx].type !== "text") seen++;
+          idx++;
+          while (idx < mediaBlocks.length && mediaBlocks[idx].type === "text") idx++;
+        }
+        at = idx;
         mediaBlocks.splice(at, 0, {
           id: `ai-${uid()}`,
           type: "video_row",
@@ -2305,20 +2337,37 @@ export default function WebPageBuilder({
                   placeholder="Ej: destacá que es recargable, oferta 2x1 esta semana"
                 />
               </div>
-              <label className="flex items-start gap-2 rounded-xl border border-violet-400/40 bg-background/40 p-3 text-xs">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={aiMakeImages}
-                  onChange={(e) => setAiMakeImages(e.target.checked)}
-                />
-                <span>
-                  <b>🎨 Crear 3 imágenes de venta con IA</b>
-                  <span className="block text-[10px] text-muted-foreground">
-                    Usa la foto real del producto: producto protagonista, una persona usándolo y el resultado. Cada imagen tiene su texto de venta.
-                  </span>
-                </span>
-              </label>
+              <div>
+                <label className="app-label">Imágenes de venta</label>
+                <div className="grid gap-1.5">
+                  {(
+                    [
+                      ["claude", "🎨 Banners diseñados por Claude", "Con la foto real del producto, títulos e insignias. Sin costo extra."],
+                      ["openai", "📸 Fotos realistas con IA (OpenAI)", "Escenas nuevas con el producto. Necesita la clave de OpenAI."],
+                      ["none", "🚫 Sin imágenes nuevas", "Sólo textos (y tus fotos/videos si subís)."],
+                    ] as const
+                  ).map(([value, title, hint]) => (
+                    <label
+                      key={value}
+                      className={`flex cursor-pointer items-start gap-2 rounded-xl border p-2.5 text-xs ${
+                        aiImageMode === value ? "border-violet-400 bg-violet-500/15" : "border-border bg-background/40"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="ai-image-mode"
+                        className="mt-0.5"
+                        checked={aiImageMode === value}
+                        onChange={() => setAiImageMode(value)}
+                      />
+                      <span>
+                        <b>{title}</b>
+                        <span className="block text-[10px] text-muted-foreground">{hint}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
               <div>
                 <label className="app-label">Videos (y fotos propias, opcional)</label>
                 <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-violet-400/50 bg-background/40 p-3 text-center text-xs hover:bg-background/70">
