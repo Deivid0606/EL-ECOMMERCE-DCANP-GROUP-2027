@@ -243,7 +243,15 @@ Deno.serve(async (req) => {
                 `Usá exactamente src="{{FOTO_IA_N}}" (ej. {{FOTO_IA_1}}) en un <img> con position:absolute; inset:0; width:100%; height:100%; object-fit:cover. ` +
                 `Encima poné una capa de degradé oscuro para que se lea el texto, el título grande y las insignias, como un anuncio profesional de Instagram. ` +
                 `En las escenas de generated_images dejá espacio libre (arriba o abajo) para el texto.\n`
-              : `URLs de las fotos del producto para usar en los banners:\n${productPhotos.map((u, i) => `${i + 1}. ${u}`).join('\n') || '(no hay; diseñá sin foto, con íconos y emojis grandes)'}\n`) +
+              : `URLs de las fotos del producto para usar en los banners:\n${productPhotos.map((u, i) => `${i + 1}. ${u}`).join('\n') || '(no hay; diseñá sin foto, con ilustraciones SVG, íconos y emojis grandes)'}\n` +
+                `DISEÑO PRO (como anuncios de Instagram/TikTok de marcas grandes), cada banner distinto:\n` +
+                `- Si la foto tiene fondo blanco o claro, poné el producto sobre un fondo CLARO y usá mix-blend-mode:multiply en el <img> para que el fondo blanco desaparezca y el producto quede "flotando"; agregá una sombra suave debajo (un div ovalado con filter:blur).\n` +
+                `- Banner 1: producto grande protagonista con halo de luz o rayos (SVG), título potente y precio/oferta en un sello o etiqueta.\n` +
+                `- Banner 2: acercamiento a un detalle (misma foto con transform:scale(1.6–2.2) y object-position hacia la parte importante dentro de un círculo o recuadro con borde) + 3 beneficios con íconos SVG o emojis.\n` +
+                `- Banner 3: oferta y confianza: "Pagás al recibir", envío, garantía si existe, con insignias, flecha hacia abajo "PEDILO AHORA".\n` +
+                `- Podés dibujar ilustraciones vectoriales con <svg> inline (formas, ondas, chispas, rayos, íconos simples); nada de texto dentro del SVG.\n` +
+                `- Paleta de 2–3 colores que combinen con el producto y la marca, contraste alto, títulos con font-weight:900 y letter-spacing, bordes redondeados, sombras (box-shadow) y degradés.\n` +
+                `- Todo debe verse perfecto en un celular de 360px de ancho (usá %, clamp() y aspect-ratio:1/1).\n`) +
             (brandColor ? `Color de la marca: ${brandColor}.\n` : '')
           : '') +
         `\n${facts}`,
