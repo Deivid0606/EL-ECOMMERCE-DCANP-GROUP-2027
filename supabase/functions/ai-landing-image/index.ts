@@ -19,7 +19,7 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 
 const STYLE =
-  'Professional e-commerce advertising photo for a Paraguayan online store. Realistic, bright natural light, clean and modern, ' +
+  'Professional e-commerce advertising photo shot by a commercial photographer for a Paraguayan online store. Photorealistic, studio-quality lighting, sharp focus, rich colors, shallow depth of field, premium and modern look, ' +
   'high detail, vertical-friendly composition with the product clearly visible and recognizable. ' +
   'Keep the product exactly as in the reference photo (same shape, colors and details). ' +
   'Do NOT add any text, letters, logos, watermarks or prices to the image.';
@@ -64,6 +64,7 @@ Deno.serve(async (req) => {
   const productTitle = String(body?.productTitle || '').slice(0, 200);
   if (!scene) return json({ error: 'Falta la descripción de la imagen' }, 400);
   const prompt = `${STYLE}\nProduct: ${productTitle}.\nScene: ${scene}`;
+  const quality = body?.quality === 'high' ? 'high' : 'medium';
 
   // Foto real del producto como referencia (si se puede descargar).
   let reference: Blob | null = null;
@@ -87,7 +88,7 @@ Deno.serve(async (req) => {
     form.append('model', model);
     form.append('prompt', prompt);
     form.append('size', '1024x1024');
-    form.append('quality', 'medium');
+    form.append('quality', quality);
     form.append('n', '1');
     const ext = reference.type.includes('png') ? 'png' : reference.type.includes('webp') ? 'webp' : 'jpg';
     form.append('image', reference, `product.${ext}`);
@@ -100,7 +101,7 @@ Deno.serve(async (req) => {
     res = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, prompt, size: '1024x1024', quality: 'medium', n: 1 }),
+      body: JSON.stringify({ model, prompt, size: '1024x1024', quality, n: 1 }),
     });
   }
 
