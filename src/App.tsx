@@ -10,6 +10,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/useAuth";
 import NewPasswordModal from "./components/NewPasswordModal.tsx";
+import ViewErrorBoundary from "./components/ViewErrorBoundary.tsx";
 
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -76,6 +77,7 @@ const App = () => (
         <Sonner />
         <NewPasswordModal />
 
+        <ViewErrorBoundary>
         <HashRouter>
           <Routes>
             <Route path="/" element={<Index />} />
@@ -108,6 +110,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
         </HashRouter>
+        </ViewErrorBoundary>
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
