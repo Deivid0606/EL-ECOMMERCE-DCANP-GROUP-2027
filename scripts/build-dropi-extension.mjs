@@ -8,7 +8,7 @@ const fill = readFileSync(new URL('../src/lib/dropiFill.bookmarklet.js', import.
 const manifest = {
   manifest_version: 3,
   name: 'DCANP → Dropi',
-  version: '1.0.0',
+  version: '1.0.1',
   description: 'Completa solo el formulario de Dropi con los pedidos de DCANP Group.',
   content_scripts: [{ matches: ['https://app.dropi.com.py/*'], js: ['content.js'], run_at: 'document_start' }],
 };

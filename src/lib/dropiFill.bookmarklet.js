@@ -49,9 +49,10 @@
     return null;
   };
   const ok = [], miss = [];
+  const filled = new Set();
   const fill = (name, el, v) => {
     if (v === undefined || v === null || v === '') return;
-    if (el) { setVal(el, v); ok.push(name); } else miss.push(name);
+    if (el) { setVal(el, v); filled.add(el); ok.push(name); } else miss.push(name);
   };
 
   const waitFor = async (fn, ms) => {
@@ -161,8 +162,14 @@
       await sleep(450);
       opened = [...document.querySelectorAll('body *')].some((x) => vis(x) && !before.has(x));
     }
+    // Sólo se escribe en el buscador de la lista (nuevo o dentro del desplegable), nunca en
+    // un campo del cliente (antes la ciudad terminaba escrita en «Nombres»).
     const a = document.activeElement;
-    if (a && a.tagName === 'INPUT' && a !== byPh('Nombres')) { setVal(a, value); await sleep(800); }
+    const insideDropdown = a && (!before.has(a) || (trig.parentElement && trig.parentElement.parentElement && trig.parentElement.parentElement.contains(a)));
+    if (a && a.tagName === 'INPUT' && !filled.has(a) && !a.placeholder.match(/nombre|apellido|telefono|teléfono|direcci|correo/i) && insideDropdown) {
+      setVal(a, value);
+      await sleep(800);
+    }
     const fresh = [...document.querySelectorAll('body *')].filter((x) => vis(x) && !before.has(x));
     const pool = fresh.length ? fresh : [...document.querySelectorAll('[role=option],li,.ng-option,mat-option,.dropdown-item,.option,.p-dropdown-item')].filter(vis);
     const cands = pool.filter((x) => leafText(x) && !x.querySelector('input'));
