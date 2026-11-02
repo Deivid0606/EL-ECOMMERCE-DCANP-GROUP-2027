@@ -65,6 +65,7 @@ export const buildDropiPayload = (o: DropiOrder, dropiId: string) => {
     total,
     product: o.product,
     dropiId: dropiId.trim(),
+    dropiSearch: (dropiId.trim() || o.product || '').trim(),
     notes: o.notes || '',
   };
 };
@@ -112,7 +113,7 @@ export default function DropiButton({ order, className }: { order: DropiOrder; c
       window.prompt('Copiá estos datos (Ctrl+C):', text);
     }
     window.open(DROPI_SEARCH_URL, '_blank', 'noopener');
-    toast.success('📋 Pedido copiado. En Dropi abrí "Crear Orden" del producto y tocá el favorito 🟠 Llenar Dropi.', { duration: 9000 });
+    toast.success('📋 Pedido copiado. En Dropi tocá el favorito 🟠 Llenar Dropi: busca el producto, abre el formulario y lo completa.', { duration: 9000 });
     setOpen(false);
   };
 
@@ -156,21 +157,24 @@ export default function DropiButton({ order, className }: { order: DropiOrder; c
                 </div>
               </div>
 
-              <label className="app-label">ID del producto en Dropi</label>
+              <label className="app-label">Nombre del producto en Dropi (o su ID)</label>
               <input
                 className="app-input"
-                placeholder="Ej. 15214"
+                placeholder="Ej. Rodillera Termica Para El Dolor"
                 value={dropiId}
-                onChange={(e) => setDropiId(e.target.value.replace(/[^\w-]/g, ''))}
+                onChange={(e) => setDropiId(e.target.value)}
               />
-              <p className="mt-1 text-[11px] text-muted-foreground">Se recuerda para este producto. Lo ves en Dropi debajo del nombre (ID: …).</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Copialo tal cual aparece en Dropi: el botón «Llenar Dropi» lo busca, abre «Enviar a cliente» de ese producto y completa todo. Se
+                recuerda para este producto.
+              </p>
 
               <button type="button" className="nav-btn active mt-3 w-full !py-2.5" onClick={() => void go()}>
                 📋 Copiar y abrir Dropi
               </button>
 
               <button type="button" className="mt-3 text-xs font-bold text-primary underline" onClick={() => setShowHelp((v) => !v)}>
-                {showHelp ? 'Ocultar' : '¿Primera vez? Instalá el botón «Llenar Dropi»'}
+                {showHelp ? 'Ocultar' : '¿Primera vez o se actualizó? Instalá el botón «Llenar Dropi»'}
               </button>
               {showHelp && (
                 <div className="mt-2 space-y-2 rounded-xl border border-orange-500/40 bg-orange-500/10 p-3 text-xs">
@@ -181,8 +185,9 @@ export default function DropiButton({ order, className }: { order: DropiOrder; c
                     <b>2.</b> Arrastrá este botón a la barra: <BookmarkletLink />
                   </p>
                   <p>
-                    <b>3.</b> Iniciá sesión en Dropi una vez. Después, en cada pedido: <b>Cargar a Dropi</b> → en Dropi abrí <b>Crear Orden</b> del
-                    producto → tocá <b>🟠 Llenar Dropi</b> → revisá, elegí transportadora y tocá <b>Enviar al cliente</b>.
+                    <b>3.</b> Iniciá sesión en Dropi una vez. Después, en cada pedido: <b>Cargar a Dropi</b> → en la pestaña de Dropi que se abre
+                    tocá <b>🟠 Llenar Dropi</b> (busca el producto, abre el formulario y lo completa) → revisá, elegí transportadora y tocá{' '}
+                    <b>Enviar al cliente</b>.
                   </p>
                   <p className="text-muted-foreground">La primera vez Chrome puede preguntar si Dropi puede leer el portapapeles: tocá «Permitir».</p>
                 </div>
