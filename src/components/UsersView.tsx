@@ -62,16 +62,6 @@ export default function UsersView() {
     else { toast.success('Usuario rechazado'); loadUsers(); }
   };
 
-  const setPassword = async (u: any) => {
-    const pass = window.prompt(`🔑 Contraseña nueva para ${u.name || u.email} (${u.email})\nMínimo 6 caracteres. Después pasásela al usuario.`);
-    if (pass === null) return;
-    if (pass.trim().length < 6) { toast.error('Mínimo 6 caracteres'); return; }
-    const { data, error } = await supabase.functions.invoke('admin-set-password', { body: { user_id: u.user_id, password: pass.trim() } });
-    const msg = (data as any)?.error || error?.message;
-    if (msg) { toast.error(msg); return; }
-    toast.success(`🔑 Contraseña cambiada para ${u.email}. Ya puede entrar con la nueva.`, { duration: 8000 });
-  };
-
   const revokeUser = async (userId: string) => {
     if (!confirm('¿Revocar acceso a este usuario?')) return;
     const { error } = await supabase.from('user_roles').update({ approved: false }).eq('user_id', userId);
@@ -182,9 +172,6 @@ export default function UsersView() {
                         ❌ Rechazar
                       </button>
                     )}
-                    <button className="nav-btn text-xs !py-1 !px-2" title="Poner contraseña nueva" onClick={() => void setPassword(u)}>
-                      🔑 Contraseña
-                    </button>
                     {u.approved && (
                       <button className="nav-btn text-xs !py-1 !px-2" onClick={() => revokeUser(u.user_id)}>
                         Revocar acceso

@@ -67,7 +67,7 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
       return;
     }
     toast.success(
-      `📧 Si ${email} está registrado, te llega un email con un link para crear una contraseña nueva. Si no llega en unos minutos (revisá spam), pedile al administrador que te la cambie.`,
+      `📧 Si ${email} está registrado, te llega un email con un link para crear una contraseña nueva. Si no llega en unos minutos, revisá la carpeta de spam.`,
       { duration: 12000 },
     );
   };
