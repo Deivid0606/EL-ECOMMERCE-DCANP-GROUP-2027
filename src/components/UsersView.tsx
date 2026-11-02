@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import DispatcherProvidersPanel from '@/components/DispatcherProvidersPanel';
 
 export default function UsersView() {
   const [users, setUsers] = useState<any[]>([]);
@@ -9,6 +10,7 @@ export default function UsersView() {
   const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [providersFor, setProvidersFor] = useState<any | null>(null);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -154,6 +156,21 @@ export default function UsersView() {
         </div>
       </div>
 
+      {providersFor && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-3" onClick={() => setProvidersFor(null)}>
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-border bg-background p-4" onClick={e => e.stopPropagation()}>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div>
+                <div className="text-lg font-black">🚚 {providersFor.name || providersFor.email}</div>
+                <div className="text-xs text-muted-foreground">{providersFor.email} · Marcá los proveedores que puede despachar. Se guarda al tocar.</div>
+              </div>
+              <button className="nav-btn !px-2 !py-1 text-xs" onClick={() => setProvidersFor(null)}>✕</button>
+            </div>
+            <DispatcherProvidersPanel dispatcherEmail={providersFor.email} />
+          </div>
+        </div>
+      )}
+
       <div className="overflow-auto">
         <table className="app-table min-w-[1300px]">
           <thead>
@@ -218,6 +235,11 @@ export default function UsersView() {
                     {!u.approved && (
                       <button className="nav-btn text-xs !py-1 !px-2 !bg-destructive/20 hover:!bg-destructive/40 text-destructive" onClick={() => rejectUser(u.user_id)}>
                         ❌ Rechazar
+                      </button>
+                    )}
+                    {u.role === 'DESPACHANTE' && u.approved && (
+                      <button className="nav-btn text-xs !py-1 !px-2 whitespace-nowrap" onClick={() => setProvidersFor(u)} title="Qué proveedores puede despachar">
+                        🚚 Proveedores
                       </button>
                     )}
                     {u.approved && (
