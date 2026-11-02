@@ -1787,7 +1787,7 @@ export default function WithGuidesView() {
         </button>
       )}
 
-      {role === 'ADMIN' && (
+      {(role === 'ADMIN' || role === 'PROVEEDOR') && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-rose-500/30 bg-rose-500/5 p-3 text-xs">
           <b className="text-rose-200">🗑️ Eliminar pedidos de un vendedor</b>
           <select
@@ -1815,7 +1815,7 @@ export default function WithGuidesView() {
               >
                 {deletingBulk ? 'Eliminando…' : `🗑️ Eliminar ${sellerSelected.length} seleccionado(s)`}
               </button>
-              <span className="text-slate-400">Sólo se eliminan los de este vendedor. Entregados, rendidos, en cierre o con comisión pagada no se borran.</span>
+              <span className="text-slate-400">Sólo se eliminan los de este vendedor{role === 'PROVEEDOR' ? ' y de tus productos' : ''}. Entregados, rendidos, en cierre o con comisión pagada no se borran.</span>
             </>
           )}
         </div>
