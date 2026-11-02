@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import ViewErrorBoundary from '@/components/ViewErrorBoundary';
 import { useAuth } from '@/hooks/useAuth';
 import { useLayoutMode } from '@/hooks/useLayoutMode';
 
@@ -484,9 +485,11 @@ export default function Index() {
       </Suspense>
 
       {/* Todas las secciones originales */}
-      <Suspense fallback={<ViewFallback />}>
-        {renderView()}
-      </Suspense>
+      <ViewErrorBoundary resetKey={currentView}>
+        <Suspense fallback={<ViewFallback />}>
+          {renderView()}
+        </Suspense>
+      </ViewErrorBoundary>
 
     </div>
   );
