@@ -736,6 +736,25 @@ export default function WithGuidesView() {
 
   const getSelectedOrders = () => visibleOrders.filter(o => selectedIds.has(o.id));
   // ✏️ Editar productos / 🔗 fusionar pedidos del mismo cliente.
+  const viewPaymentProof = async (o: any) => {
+    if (!o.payment_proof_path) { toast.error('Sin comprobante'); return; }
+    const { data, error } = await supabase.storage.from('payment-proofs').createSignedUrl(o.payment_proof_path, 600);
+    if (error || !data?.signedUrl) { toast.error(error?.message || 'No se pudo abrir el comprobante'); return; }
+    window.open(data.signedUrl, '_blank', 'noopener');
+  };
+
+  const reviewPayment = async (o: any, approve: boolean) => {
+    let note: string | null = null;
+    if (!approve) {
+      note = window.prompt(`❌ Rechazar comprobante de ${o.order_number}\nMotivo (lo ve el vendedor):`);
+      if (!note || !note.trim()) return;
+    } else if (!window.confirm(`✅ Aprobar el comprobante de pago de ${o.order_number} (${o.customer_name})?`)) return;
+    const { error } = await (supabase as any).rpc('review_order_payment', { p_order_id: o.id, p_approve: approve, p_note: note });
+    if (error) { toast.error(error.message); return; }
+    toast.success(approve ? '✅ Pago aprobado: ya se puede generar la guía' : '❌ Comprobante rechazado');
+    void load();
+  };
+
   const orderTools = useOrderEditTools(() => {
     setSelectedIds(new Set());
     void load();
@@ -1765,7 +1784,29 @@ export default function WithGuidesView() {
                   <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
                  </td>
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
-                <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
+                <td className="text-xs font-bold">
+                  {o.order_number || o.id.slice(0, 8)}
+                  {o.shipping_type === 'ENCOMIENDA' && (
+                    <div className="mt-1 space-y-1 font-normal">
+                      <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                        o.payment_status === 'APROBADO' ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-300'
+                          : o.payment_status === 'RECHAZADO' ? 'border-rose-400/40 bg-rose-500/15 text-rose-300'
+                          : 'border-amber-400/40 bg-amber-500/15 text-amber-300'}`}
+                        title={o.payment_review_note || ''}>
+                        📮 {o.payment_status === 'APROBADO' ? 'Pago aprobado' : o.payment_status === 'RECHAZADO' ? 'Pago rechazado' : 'Pago por aprobar'}
+                      </span>
+                      <div className="flex gap-1">
+                        <button className="nav-btn !px-2 !py-0.5 !text-[10px]" onClick={() => void viewPaymentProof(o)} title="Ver comprobante">🧾 Ver</button>
+                        {o.payment_status !== 'APROBADO' && (
+                          <button className="nav-btn !px-2 !py-0.5 !text-[10px] !bg-emerald-500/20 !text-emerald-200" onClick={() => void reviewPayment(o, true)}>✅</button>
+                        )}
+                        {o.payment_status === 'PENDIENTE' && (
+                          <button className="nav-btn !px-2 !py-0.5 !text-[10px] !bg-rose-500/20 !text-rose-200" onClick={() => void reviewPayment(o, false)}>❌</button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </td>
                 <td className="text-xs">{o.departamento || '—'}</td>
                 <td className="text-xs">{o.city || '—'}</td>
                 <td className="text-xs font-bold">{o.customer_name}</td>
