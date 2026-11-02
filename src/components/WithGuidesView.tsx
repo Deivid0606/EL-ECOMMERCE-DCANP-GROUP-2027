@@ -135,6 +135,9 @@ export default function WithGuidesView() {
   const [deliveryStock, setDeliveryStock] = useState<Map<string, number>>(new Map());
   const [stockLedger, setStockLedger] = useState<Map<string, StockLedgerRow[]>>(new Map());
   const [applyingStockId, setApplyingStockId] = useState<string | null>(null);
+  // Guías generadas hoy (para «Stock del día»): producto → { unidades, pedidos }.
+  const [guidesToday, setGuidesToday] = useState<any[]>([]);
+  const [showStockDay, setShowStockDay] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [guidesTodayCount, setGuidesTodayCount] = useState(0);
@@ -361,6 +364,15 @@ export default function WithGuidesView() {
       }
     }
     setStockLedger(ledger);
+
+    const today = pyToday();
+    const { data: g } = await supabase
+      .from('orders')
+      .select('id, items_json, provider_email, provider_emails_list, guide_generated_at')
+      .eq('status2', 'GUIA GENERADA')
+      .gte('guide_generated_at' as any, pyStart(today))
+      .lte('guide_generated_at' as any, pyEnd(today));
+    setGuidesToday((g || []) as any[]);
   };
 
   const applyStock = async (o: any) => {
@@ -685,6 +697,7 @@ export default function WithGuidesView() {
     else {
       toast.success('Estado 2 actualizado');
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
+      void loadStock(orders);
       if (val === 'GUIA GENERADA') {
         setSelectedIds(prev => {
           const next = new Set(prev);
@@ -766,6 +779,46 @@ export default function WithGuidesView() {
   };
 
   const getSelectedOrders = () => visibleOrders.filter(o => selectedIds.has(o.id));
+
+  // 📦 Stock del día: stock real y cuánto se usó hoy en guías.
+  const usedToday = useMemo(() => {
+    const m = new Map<string, { units: number; orders: number }>();
+    for (const o of guidesToday) {
+      for (const it of getOrderItems(o)) {
+        const p = findItemProduct(it, stockProducts);
+        if (!p) continue;
+        const cur = m.get(p.id) || { units: 0, orders: 0 };
+        cur.units += Number(it.qty || it.quantity || 1);
+        cur.orders += 1;
+        m.set(p.id, cur);
+      }
+    }
+    return m;
+  }, [guidesToday, stockProducts]);
+  const remainingReal = (productId: string) => {
+    const p = stockProducts.find(x => x.id === productId);
+    return Number(p?.real_stock || 0) - (usedToday.get(productId)?.units || 0);
+  };
+  // Sin guía todavía y algún producto sin stock real suficiente → no se puede seleccionar para imprimir.
+  const noRealStock = (o: any): string => {
+    if (o.status2 === 'GUIA GENERADA') return '';
+    for (const it of getOrderItems(o)) {
+      const p = findItemProduct(it, stockProducts);
+      if (!p) continue;
+      const qty = Number(it.qty || it.quantity || 1);
+      if (Number(p.real_stock || 0) < qty || remainingReal(p.id) < qty) {
+        return `${p.title || p.sku}: stock real ${Number(p.real_stock || 0)}, usado hoy ${usedToday.get(p.id)?.units || 0}`;
+      }
+    }
+    return '';
+  };
+  const stockDayRows = useMemo(() => {
+    const mine = role === 'PROVEEDOR' ? stockProducts.filter(p => lc(p.provider_email) === lc(myEmail)) : stockProducts;
+    return mine
+      .map(p => ({ p, used: usedToday.get(p.id) || { units: 0, orders: 0 } }))
+      .filter(r => Number(r.p.real_stock || 0) > 0 || r.used.units > 0)
+      .sort((a, b) => b.used.units - a.used.units || (a.p.title || '').localeCompare(b.p.title || ''));
+  }, [stockProducts, usedToday, role, myEmail]);
 
   // 🗑️ Admin: eliminar en lote pedidos de UN vendedor.
   const [deleteSeller, setDeleteSeller] = useState('');
@@ -849,6 +902,25 @@ export default function WithGuidesView() {
       toast.error('Seleccioná pedidos primero');
       return;
     }
+    const blocked = selected.filter(o => noRealStock(o));
+    if (blocked.length) {
+      toast.error(`Sin stock real: ${blocked.map(o => o.order_number).slice(0, 5).join(', ')}. Sacalos de la selección.`);
+      return;
+    }
+    // Entre todos los seleccionados no pueden pasar el stock real que queda.
+    const need = new Map<string, number>();
+    selected.filter(o => o.status2 !== 'GUIA GENERADA').forEach(o => getOrderItems(o).forEach((it: any) => {
+      const p = findItemProduct(it, stockProducts);
+      if (p) need.set(p.id, (need.get(p.id) || 0) + Number(it.qty || it.quantity || 1));
+    }));
+    const over = [...need].filter(([id, q]) => q > remainingReal(id));
+    if (over.length) {
+      toast.error('No alcanza el stock real: ' + over.map(([id, q]) => {
+        const p = stockProducts.find(x => x.id === id);
+        return `${p?.title || p?.sku} (pedís ${q}, quedan ${Math.max(0, remainingReal(id))})`;
+      }).join('; '), { duration: 10000 });
+      return;
+    }
 
     const toastId = toast.loading(`Actualizando ${selected.length} pedido${selected.length > 1 ? 's' : ''}...`);
     
@@ -874,6 +946,7 @@ export default function WithGuidesView() {
         
         setSelectedIds(new Set());
       }
+      void loadStock(orders);
     } catch (error) {
       toast.error('Error al actualizar los pedidos', { id: toastId });
     }
@@ -1821,6 +1894,51 @@ export default function WithGuidesView() {
         </div>
       )}
 
+      <div className="mb-3 flex flex-wrap gap-2">
+        <button
+          className={`rounded-full border px-4 py-1.5 text-xs font-black ${showStockDay ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200' : 'border-slate-600 text-slate-200'}`}
+          onClick={() => setShowStockDay(v => !v)}
+        >
+          📦 Stock del día {showStockDay ? '▲' : '▼'}
+        </button>
+      </div>
+      {showStockDay && (
+        <div className="mb-4 overflow-auto rounded-2xl border border-emerald-500/30 bg-[#0b1220] p-3">
+          <div className="mb-2 text-xs text-slate-400">
+            Stock real de cada producto y cuántas unidades salieron hoy en guías. El stock se descuenta al quedar ENTREGADO / ENCOMIENDA ENTREGADA.
+            Si no queda stock real, sus pedidos no se pueden seleccionar para imprimir (⛔).
+          </div>
+          <table className="w-full min-w-[560px] text-xs">
+            <thead>
+              <tr className="text-left uppercase tracking-wider text-slate-500">
+                <th className="py-1.5">Producto</th>
+                <th className="py-1.5 text-right">Stock real</th>
+                <th className="py-1.5 text-right">Usados hoy</th>
+                <th className="py-1.5 text-right">Quedan</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {stockDayRows.map(({ p, used }) => {
+                const left = Number(p.real_stock || 0) - used.units;
+                return (
+                  <tr key={p.id}>
+                    <td className="py-1.5"><b className="text-slate-100">{p.title || p.sku}</b> <span className="text-slate-500">{p.sku}</span></td>
+                    <td className="py-1.5 text-right font-black text-slate-100">{Number(p.real_stock || 0)}</td>
+                    <td className="py-1.5 text-right text-sky-300">{used.units ? `${used.units} (${used.orders} pedido${used.orders === 1 ? '' : 's'})` : '—'}</td>
+                    <td className={`py-1.5 text-right font-black ${left <= 0 ? 'text-rose-400' : left <= 3 ? 'text-amber-300' : 'text-emerald-300'}`}>
+                      {left <= 0 ? '⛔ 0' : left}
+                    </td>
+                  </tr>
+                );
+              })}
+              {stockDayRows.length === 0 && (
+                <tr><td colSpan={4} className="py-6 text-center text-slate-500">Sin productos con stock real ni guías hoy.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* Acciones masivas */}
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap gap-2 mb-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl shadow-xl">
@@ -1904,7 +2022,7 @@ export default function WithGuidesView() {
             <tr className="text-left text-[11px] uppercase tracking-widest text-slate-400 border-b border-slate-700/80">
               <th className="w-[40px] text-center">
                 <input type="checkbox" checked={selectedIds.size === visibleOrders.length && visibleOrders.length > 0}
-                  onChange={() => selectedIds.size === visibleOrders.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(visibleOrders.map(o => o.id)))} />
+                  onChange={() => selectedIds.size > 0 ? setSelectedIds(new Set()) : setSelectedIds(new Set(visibleOrders.filter(o => !noRealStock(o)).map(o => o.id)))} />
               </th>
               <th>Fecha</th>
               <th>ID</th>
@@ -1925,7 +2043,11 @@ export default function WithGuidesView() {
             {visibleOrders.map(o => (
               <tr key={o.id} className="hover:bg-slate-800/45 transition-colors">
                 <td className="text-center">
-                  <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
+                  {noRealStock(o) ? (
+                    <span title={`Sin stock real · ${noRealStock(o)}`} className="cursor-help text-[13px]">⛔</span>
+                  ) : (
+                    <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
+                  )}
                  </td>
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">
@@ -1989,16 +2111,8 @@ export default function WithGuidesView() {
                           <span className="inline-flex rounded-full border border-emerald-400/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
                             ✅ Descontado ({applied.reduce((n, r) => n + r.qty_delivery + r.qty_global, 0)})
                           </span>
-                        ) : canApplyStock ? (
-                          <button
-                            className="nav-btn !px-2 !py-1 !text-[11px] !bg-orange-500/20 !text-orange-200 border border-orange-400/40"
-                            disabled={applyingStockId === o.id}
-                            onClick={() => void applyStock(o)}
-                          >
-                            {applyingStockId === o.id ? 'Bajando...' : '📦 Bajar stock'}
-                          </button>
                         ) : (
-                          <span className="text-[10px] text-amber-300">Stock sin descontar</span>
+                          <span className="text-[10px] text-slate-400">Se descuenta al entregar</span>
                         ))}
                       </div>
                     );
