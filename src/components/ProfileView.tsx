@@ -12,6 +12,31 @@ const DOCS: { key: DocKey; label: string; hint: string }[] = [
   { key: 'selfie_path', label: 'Selfie con tu cédula', hint: 'Tu cara y la cédula en la mano, bien visibles.' },
 ];
 
+// Bancos que operan en Paraguay (regulados por el BCP).
+const PY_BANKS = [
+  'Banco Nacional de Fomento (BNF)',
+  'Banco Itaú Paraguay',
+  'Banco Continental',
+  'ueno bank',
+  'Sudameris Bank',
+  'Banco Basa',
+  'Banco GNB Paraguay',
+  'Banco Familiar',
+  'Banco Atlas',
+  'Interfisa Banco',
+  'Banco Río',
+  'Zeta Banco',
+  'Bancop',
+  'Visión Banco',
+  'Banco do Brasil',
+  'Banco de la Nación Argentina',
+  'Citibank Paraguay',
+  'Financiera Paraguayo Japonesa (FPJ)',
+  'Tu Financiera',
+  'Financiera FIC',
+];
+const OTHER_BANK = '__otro__';
+
 export default function ProfileView() {
   const { user, profile, refreshProfile } = useAuth();
   const role = String(profile?.role || '').toUpperCase();
@@ -63,7 +88,7 @@ export default function ProfileView() {
   const save = async () => {
     if (!user) return;
     setSaving(true);
-    const { error } = await supabase.from('profiles').update(form as any).eq('user_id', user.id);
+    const { error } = await supabase.from('profiles').update({ ...form, bank_name: form.bank_name.trim() } as any).eq('user_id', user.id);
     setSaving(false);
     if (error) toast.error(error.message);
     else {
@@ -184,7 +209,23 @@ export default function ProfileView() {
           ) : (
             <>
               <label className="app-label">Banco *</label>
-              <input className="app-input" value={form.bank_name} onChange={e => set('bank_name', e.target.value)} />
+              <select
+                className="app-input"
+                value={PY_BANKS.includes(form.bank_name) || !form.bank_name ? form.bank_name : OTHER_BANK}
+                onChange={e => set('bank_name', e.target.value === OTHER_BANK ? ' ' : e.target.value)}
+              >
+                <option value="">(seleccionar banco)</option>
+                {PY_BANKS.map(b => <option key={b} value={b}>{b}</option>)}
+                <option value={OTHER_BANK}>Otro (cooperativa / financiera)…</option>
+              </select>
+              {form.bank_name && !PY_BANKS.includes(form.bank_name) && (
+                <input
+                  className="app-input mt-2"
+                  placeholder="Nombre de la cooperativa o financiera"
+                  value={form.bank_name.trim()}
+                  onChange={e => set('bank_name', e.target.value || ' ')}
+                />
+              )}
               <label className="app-label">Tipo de cuenta *</label>
               <select className="app-input" value={form.bank_type} onChange={e => set('bank_type', e.target.value)}>
                 <option value="">(seleccionar)</option>
