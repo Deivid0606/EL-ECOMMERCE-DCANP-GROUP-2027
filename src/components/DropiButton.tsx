@@ -241,7 +241,7 @@ export default function DropiButton({ order, className }: { order: DropiOrder; c
                   </p>
                   <hr className="border-orange-500/30" />
                   <p className="text-muted-foreground">
-                    Sin extensión: arrastrá <BookmarkletLink /> a la barra de favoritos (Ctrl+Shift+B) y tocalo en la pestaña de Dropi que se abre.
+                    Sin extensión: arrastrá <BookmarkletLink /> a la barra de favoritos (Ctrl+Shift+B) y tocalo en la pestaña de Dropi que se abre. El cartel naranja de Dropi tiene que decir <b>«versión 3»</b>; si no lo dice, borrá el favorito o la extensión vieja e instalá la nueva.
                   </p>
                 </div>
               )}

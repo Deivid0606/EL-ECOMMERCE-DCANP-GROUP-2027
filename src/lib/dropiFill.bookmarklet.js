@@ -9,7 +9,7 @@
     const b = document.createElement('div');
     b.id = 'dcanp-dropi-msg';
     b.style.cssText = 'position:fixed;z-index:2147483647;right:16px;bottom:16px;max-width:360px;background:#111827;color:#fff;padding:14px 16px;border-radius:14px;font:13px/1.45 system-ui,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.4);border:2px solid #f97316';
-    b.innerHTML = html + '<div style="margin-top:6px;opacity:.6;font-size:11px">DCANP · tocá para cerrar</div>';
+    b.innerHTML = html + '<div style="margin-top:6px;opacity:.6;font-size:11px">DCANP · versión 3 · tocá para cerrar</div>';
     b.onclick = () => b.remove();
     document.body.appendChild(b);
     if (ms) setTimeout(() => b.remove(), ms);
