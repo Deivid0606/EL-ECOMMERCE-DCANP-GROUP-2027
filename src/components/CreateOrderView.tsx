@@ -213,6 +213,11 @@ const CreateOrderView = ({
   const [obs, setObs] = useState("");
   const [shippingType, setShippingType] = useState<"DELIVERY" | "ENCOMIENDA">("DELIVERY");
   const [proofFile, setProofFile] = useState<File | null>(null);
+  // "INTERIOR PAGO ANTICIPADO" siempre es encomienda con comprobante obligatorio.
+  const isPrepaidCity = /pago\s*anticipado/i.test(city);
+  useEffect(() => {
+    if (isPrepaidCity) setShippingType("ENCOMIENDA");
+  }, [isPrepaidCity]);
   const [items, setItems] = useState<
     { sku: string; sale_gs: number; qty: number }[]
   >([{ sku: "", sale_gs: 0, qty: 1 }]);
@@ -893,7 +898,7 @@ const CreateOrderView = ({
       return;
     }
 
-    if (shippingType === "ENCOMIENDA" && !proofFile) {
+    if ((shippingType === "ENCOMIENDA" || isPrepaidCity) && !proofFile) {
       toast.error("📮 Pedido por encomienda: cargá la foto del comprobante de pago");
       return;
     }
@@ -913,7 +918,7 @@ const CreateOrderView = ({
 
     try {
       let paymentProofPath: string | null = null;
-      if (shippingType === "ENCOMIENDA" && proofFile) {
+      if ((shippingType === "ENCOMIENDA" || isPrepaidCity) && proofFile) {
         const ext = (proofFile.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
         const path = `${user?.id}/${Date.now()}.${ext}`;
         const { error: upErr } = await supabase.storage
@@ -956,7 +961,7 @@ const CreateOrderView = ({
         delivery_gs: Number(deliveryPrice),
         commission_gs: commission,
         provider_emails_list: providerEmails.join(","),
-        shipping_type: shippingType,
+        shipping_type: isPrepaidCity ? "ENCOMIENDA" : shippingType,
         payment_proof_path: paymentProofPath,
       };
 
@@ -1158,12 +1163,16 @@ const CreateOrderView = ({
                   key={v}
                   type="button"
                   onClick={() => setShippingType(v)}
-                  className={`rounded-xl border p-2 text-xs font-bold ${shippingType === v ? "border-primary bg-primary/10" : "border-border"}`}
+                  disabled={isPrepaidCity && v === "DELIVERY"}
+                  className={`rounded-xl border p-2 text-xs font-bold disabled:opacity-40 ${shippingType === v ? "border-primary bg-primary/10" : "border-border"}`}
                 >
                   {label}
                 </button>
               ))}
             </div>
+            {isPrepaidCity && (
+              <div className="mt-1 text-[11px] font-bold text-amber-300">📮 Interior pago anticipado: el comprobante es obligatorio.</div>
+            )}
             {shippingType === "ENCOMIENDA" && (
               <div className="mt-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
                 <b className="text-amber-300">Comprobante de pago * (obligatorio)</b>
