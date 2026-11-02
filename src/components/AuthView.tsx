@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { lovable } from '@/integrations/lovable/index';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 import AnimatedStars from './AnimatedStars';
 
 interface AuthViewProps {
@@ -48,6 +49,27 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
 
     toast.success('¡Bienvenido!');
     redirectAfterLogin(onSuccess);
+  };
+
+  const handleForgot = async () => {
+    const email = loginEmail.trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+      toast.error('Escribí tu email arriba y tocá de nuevo "¿Olvidaste tu contraseña?"');
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/?reset=1`,
+    });
+    setLoading(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success(
+      `📧 Si ${email} está registrado, te llega un email con un link para crear una contraseña nueva. Si no llega en unos minutos (revisá spam), pedile al administrador que te la cambie.`,
+      { duration: 12000 },
+    );
   };
 
   const handleRegister = async () => {
@@ -134,7 +156,7 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
                     <input
                       type="email"
                       className="w-full rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-white placeholder:text-white/40 transition-all focus:border-orange-400 focus:outline-none focus:ring-1 focus:ring-orange-400"
-                      placeholder="deividaguilar06@gmail.com"
+                      placeholder="tu@email.com"
                       value={loginEmail}
                       onChange={(e) => setLoginEmail(e.target.value)}
                     />
@@ -161,6 +183,15 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
                   className="mt-6 w-full rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 py-3 font-bold text-white shadow-lg transition-all hover:from-orange-600 hover:to-orange-700 disabled:opacity-50"
                 >
                   {loading ? 'Ingresando...' : 'Iniciar sesión'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void handleForgot()}
+                  disabled={loading}
+                  className="mt-3 w-full text-center text-sm font-semibold text-orange-400 hover:underline disabled:opacity-50"
+                >
+                  ¿Olvidaste tu contraseña?
                 </button>
 
                 <div className="relative my-6">
