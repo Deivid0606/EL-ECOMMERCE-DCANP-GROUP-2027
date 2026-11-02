@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { dayLabel, useRescheduleDialog } from '@/components/RescheduleDialog';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchAllRows } from '@/lib/fetchAllRows';
@@ -567,6 +568,8 @@ export default function OrdersView() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   
+  const loadOrdersRef = useRef<() => Promise<void> | void>(() => {});
+  const reschedule = useRescheduleDialog(() => void loadOrdersRef.current());
   const [statusChangeModal, setStatusChangeModal] = useState<{
     isOpen: boolean;
     orderId: string;
@@ -834,6 +837,10 @@ export default function OrdersView() {
   };
 
   const handleStatusChangeWithValidation = async (orderId: string, newStatus: string) => {
+    if (newStatus === 'REAGENDADO') {
+      reschedule.ask([orderId]);
+      return;
+    }
     console.log('handleStatusChangeWithValidation:', { orderId, newStatus, role });
     
     if (role === 'DELIVERY' && (newStatus === 'NO CONTESTA' || newStatus === 'CANCELADO')) {
@@ -1275,6 +1282,8 @@ export default function OrdersView() {
   const canDeletePermanently = ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'].includes(role);
   const canAssignProvider = role === 'ADMIN' || role === 'DESPACHANTE';
 
+  loadOrdersRef.current = loadOrders;
+
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Pedidos</h3>
@@ -1400,6 +1409,9 @@ export default function OrdersView() {
                       </select>
                     ) : (
                       <span className={`badge-status ${statusClass(o.status || '')}`}>{o.status || 'PENDIENTE'}</span>
+                    )}
+                    {String(o.status || '').toUpperCase() === 'REAGENDADO' && o.rescheduled_for && (
+                      <div className="mt-1 whitespace-nowrap text-[10px] font-bold text-sky-300">📅 {dayLabel(String(o.rescheduled_for))}</div>
                     )}
                   </td>
                   {role !== 'DELIVERY' && (
@@ -1534,6 +1546,9 @@ export default function OrdersView() {
                   ) : (
                     <span className={`inline-block badge-status ${statusClass(o.status || '')}`}>{o.status || 'PENDIENTE'}</span>
                   )}
+                  {String(o.status || '').toUpperCase() === 'REAGENDADO' && o.rescheduled_for && (
+                      <div className="mt-1 whitespace-nowrap text-[10px] font-bold text-sky-300">📅 {dayLabel(String(o.rescheduled_for))}</div>
+                    )}
                 </div>
 
                 <div className="flex gap-2 pt-2">
@@ -1618,6 +1633,7 @@ export default function OrdersView() {
         document.body
       )}
 
+      {reschedule.modal}
       <StatusChangeModal
         isOpen={statusChangeModal.isOpen}
         onClose={() => setStatusChangeModal({ isOpen: false, orderId: '', newStatus: '', oldStatus: '' })}
