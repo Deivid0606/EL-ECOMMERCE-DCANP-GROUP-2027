@@ -14,12 +14,21 @@
     document.body.appendChild(b);
     if (ms) setTimeout(() => b.remove(), ms);
   };
-  let txt = '';
-  try { txt = await navigator.clipboard.readText(); } catch (e) {}
-  if (!txt || txt.indexOf(MARK) !== 0) txt = prompt('Pegá acá los datos copiados desde DCANP (Ctrl+V):') || '';
-  if (txt.indexOf(MARK) !== 0) { toast('⚠️ No encontré datos de DCANP. En la app tocá <b>🟠 Cargar a Dropi</b> y después volvé a tocar este botón.', 9000); return; }
-  let d;
-  try { d = JSON.parse(txt.slice(MARK.length)); } catch (e) { toast('⚠️ Los datos copiados están incompletos. Copialos otra vez desde la app.', 8000); return; }
+  // Datos: 1) la extensión, 2) el link (#dcanp=...), 3) el portapapeles.
+  const fromB64 = (b) => JSON.parse(decodeURIComponent(escape(atob(b.replace(/-/g, '+').replace(/_/g, '/')))));
+  let d = window.__DCANP_DATA || null;
+  if (!d) {
+    const m = location.hash.match(/dcanp=([^&]+)/);
+    if (m) { try { d = fromB64(m[1]); } catch (e) {} }
+  }
+  if (!d) {
+    let txt = '';
+    try { txt = await navigator.clipboard.readText(); } catch (e) {}
+    if (!txt || txt.indexOf(MARK) !== 0) txt = prompt('Pegá acá los datos copiados desde DCANP (Ctrl+V):') || '';
+    if (txt.indexOf(MARK) !== 0) { toast('⚠️ No encontré datos de DCANP. En la app tocá <b>🟠 Cargar a Dropi</b> y después volvé a tocar este botón.', 9000); return; }
+    try { d = JSON.parse(txt.slice(MARK.length)); } catch (e) { toast('⚠️ Los datos copiados están incompletos. Copialos otra vez desde la app.', 8000); return; }
+  }
+  if (location.hash.indexOf('dcanp=') >= 0) { try { history.replaceState(history.state, '', location.pathname + location.search); } catch (e) {} }
 
   const setVal = (el, v) => {
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -79,7 +88,9 @@
         return { b, score };
       });
       scored.sort((x, y) => y.score - x.score);
-      return scored[0].score > 0 ? scored[0].b : null;
+      if (scored[0].score > 0) return scored[0].b;
+      // Página de detalle de un producto: hay un solo botón para enviar.
+      return btns.length === 1 || /product-details/.test(location.pathname) ? btns[0] : null;
     };
 
     let btn = findCardButton();
@@ -132,18 +143,33 @@
       await sleep(700);
       return true;
     }
-    const trig = [...document.querySelectorAll('input,div,span,button')].filter(vis).find((e) => (e.placeholder && norm(e.placeholder) === norm(ph)) || (e.children.length === 0 && norm(e.textContent) === norm(ph)));
+    const fire = (el) => {
+      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((t) =>
+        el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })),
+      );
+    };
+    const leafText = (e) => norm([...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ') || (e.children.length === 0 ? e.textContent : ''));
+    const trig = [...document.querySelectorAll('input,div,span,button,label,p')].filter(vis).find((e) => (e.placeholder && norm(e.placeholder) === norm(ph)) || leafText(e) === norm(ph));
     if (!trig) return false;
-    trig.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    trig.click();
-    if (trig.focus) trig.focus();
-    await sleep(500);
+    const before = new Set([...document.querySelectorAll('body *')].filter(vis));
+    // Se prueba el elemento y sus contenedores hasta que se abra la lista.
+    let el = trig;
+    let opened = false;
+    for (let i = 0; i < 4 && el && !opened; i++, el = el.parentElement) {
+      fire(el);
+      if (el.focus) el.focus();
+      await sleep(450);
+      opened = [...document.querySelectorAll('body *')].some((x) => vis(x) && !before.has(x));
+    }
     const a = document.activeElement;
-    if (a && a.tagName === 'INPUT') { setVal(a, value); await sleep(700); }
-    const opts = [...document.querySelectorAll('[role=option],li,.ng-option,mat-option,.dropdown-item,.option')].filter(vis);
-    const o = match(opts);
-    if (o) { o.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); o.click(); await sleep(800); return true; }
-    document.body.click();
+    if (a && a.tagName === 'INPUT' && a !== byPh('Nombres')) { setVal(a, value); await sleep(800); }
+    const fresh = [...document.querySelectorAll('body *')].filter((x) => vis(x) && !before.has(x));
+    const pool = fresh.length ? fresh : [...document.querySelectorAll('[role=option],li,.ng-option,mat-option,.dropdown-item,.option,.p-dropdown-item')].filter(vis);
+    const cands = pool.filter((x) => leafText(x) && !x.querySelector('input'));
+    const exact = cands.find((x) => leafText(x) === want);
+    const o = exact || cands.find((x) => leafText(x).includes(want)) || cands.find((x) => { const t = leafText(x); return t.length > 3 && want.includes(t); });
+    if (o) { fire(o); await sleep(900); return true; }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     return false;
   };
   (await pick('Departamento', d.department)) ? ok.push('Departamento') : d.department && miss.push('Departamento (' + d.department + ')');
