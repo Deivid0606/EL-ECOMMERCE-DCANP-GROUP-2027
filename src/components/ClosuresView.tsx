@@ -1,4 +1,5 @@
 import './closures-premium.css';
+import { useProviderScope } from '@/lib/providerScope';
 import ClosurePaymentsPanel from './ClosurePaymentsPanel';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { dayLabel, useRescheduleDialog } from '@/components/RescheduleDialog';
@@ -612,7 +613,9 @@ export default function ClosuresView() {
   const canMarkContacted = isAdmin || isDelivery || isSupplier;
   const canBulkStatus = isAdmin || isSupplier || isDelivery;
   
-  const [orders, setOrders] = useState<any[]>([]);
+  const { orderInScope, productInScope } = useProviderScope();
+const [ordersRaw, setOrders] = useState<any[]>([]);
+  const orders = useMemo(() => ordersRaw.filter(orderInScope), [ordersRaw, orderInScope]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [fees, setFees] = useState<any[]>([]);

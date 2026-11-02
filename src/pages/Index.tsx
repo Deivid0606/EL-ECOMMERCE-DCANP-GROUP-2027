@@ -1,5 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import ViewErrorBoundary from '@/components/ViewErrorBoundary';
+import ProviderScopeBar from '@/components/ProviderScopeBar';
 import { useAuth } from '@/hooks/useAuth';
 import { useLayoutMode } from '@/hooks/useLayoutMode';
 
@@ -485,6 +486,7 @@ export default function Index() {
       </Suspense>
 
       {/* Todas las secciones originales */}
+      {['orders', 'closures', 'withGuides', 'dashboard', 'products', 'commissions', 'earnings', 'mapa'].includes(String(currentView)) && <ProviderScopeBar />}
       <ViewErrorBoundary resetKey={currentView}>
         <Suspense fallback={<ViewFallback />}>
           {renderView()}

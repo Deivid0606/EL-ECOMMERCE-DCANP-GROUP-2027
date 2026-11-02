@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useProviderScope } from '@/lib/providerScope';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { pyToday, pyStart, pyEnd, pyDateKey } from '@/lib/pyTime';
@@ -7,8 +8,11 @@ const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
 export default function EarningsView() {
   const { profile } = useAuth();
-  const [orders, setOrders] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
+  const { orderInScope, productInScope } = useProviderScope();
+const [ordersRaw, setOrders] = useState<any[]>([]);
+  const orders = useMemo(() => ordersRaw.filter(orderInScope), [ordersRaw, orderInScope]);
+  const [productsRaw, setProducts] = useState<any[]>([]);
+  const products = useMemo(() => productsRaw.filter(productInScope), [productsRaw, productInScope]);
   const [dateFrom, setDateFrom] = useState(() => pyToday());
   const [dateTo, setDateTo] = useState(() => pyToday());
 
