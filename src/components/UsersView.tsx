@@ -7,6 +7,8 @@ export default function UsersView() {
   const [search, setSearch] = useState('');
   const [filterRole, setFilterRole] = useState('');
   const [loading, setLoading] = useState(true);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -16,11 +18,12 @@ export default function UsersView() {
     const { data: overview } = await (supabase as any).rpc('admin_users_overview');
     const ov = new Map<string, any>(((overview || []) as any[]).map((o) => [o.user_id, o]));
 
-    const merged = (profiles || []).map(p => {
+    const merged = (profiles || []).filter((p: any) => !p.deleted_at).map(p => {
       const r = (roles || []).find(r => r.user_id === p.user_id);
       return { ...p, role: r?.role || 'PENDIENTE', approved: r?.approved || false, role_id: r?.id, overview: ov.get(p.user_id) };
     });
     setUsers(merged);
+    setSel(new Set());
     setLoading(false);
   };
 
@@ -69,6 +72,37 @@ export default function UsersView() {
     else { toast.success('Acceso revocado'); loadUsers(); }
   };
 
+  const toggleSel = (id: string) => setSel(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const selectedUsers = () => users.filter(u => sel.has(u.user_id));
+
+  const bulkRevoke = async () => {
+    const list = selectedUsers().filter(u => u.role !== 'ADMIN');
+    if (!list.length) { toast.error('Seleccioná usuarios (los ADMIN no se tocan)'); return; }
+    if (!confirm(`🚫 ¿Revocar acceso a ${list.length} usuario(s)?\n\n${list.map(u => u.name || u.email).join('\n')}`)) return;
+    setBusy(true);
+    const { error } = await supabase.from('user_roles').update({ approved: false }).in('user_id', list.map(u => u.user_id));
+    setBusy(false);
+    if (error) { toast.error(error.message); return; }
+    toast.success(`🚫 Acceso revocado a ${list.length} usuario(s)`);
+    loadUsers();
+  };
+
+  const bulkDelete = async () => {
+    const list = selectedUsers().filter(u => u.role !== 'ADMIN');
+    if (!list.length) { toast.error('Seleccioná usuarios (los ADMIN no se pueden eliminar)'); return; }
+    const withCommission = list.filter(u => Number(u.overview?.pending_commission || 0) > 0);
+    const warn = withCommission.length ? `\n\n⚠️ ${withCommission.length} tiene(n) comisión pendiente.` : '';
+    if (!confirm(`🗑️ ¿ELIMINAR ${list.length} usuario(s)? No se puede deshacer.\n\n${list.map(u => `${u.name || ''} ${u.email}`).join('\n')}${warn}\n\nSus pedidos e historial quedan guardados.`)) return;
+    if (prompt('Para confirmar escribí ELIMINAR') !== 'ELIMINAR') { toast.info('Cancelado'); return; }
+    setBusy(true);
+    const { data, error } = await (supabase as any).rpc('admin_delete_users', { p_user_ids: list.map(u => u.user_id) });
+    setBusy(false);
+    if (error) { toast.error(error.message); return; }
+    const d = data || {};
+    toast.success(`🗑️ Eliminados: ${Number(d.deleted || 0) + Number(d.blocked || 0)}${d.skipped ? ` · omitidos ${d.skipped} (admin)` : ''}`, { duration: 8000 });
+    loadUsers();
+  };
+
   const changeRole = async (userId: string, newRole: string) => {
     const { error } = await supabase.from('user_roles').update({ role: newRole as any }).eq('user_id', userId);
     if (error) toast.error(error.message);
@@ -107,16 +141,30 @@ export default function UsersView() {
         <button className="nav-btn active" onClick={loadUsers}>Filtrar</button>
       </div>
 
+      <div className="sticky top-0 z-10 mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-background/95 p-2 text-sm backdrop-blur">
+        <label className="flex cursor-pointer items-center gap-2 font-bold">
+          <input type="checkbox" checked={sel.size > 0 && filtered.filter(u => u.role !== 'ADMIN').every(u => sel.has(u.user_id))}
+            onChange={e => setSel(e.target.checked ? new Set(filtered.filter(u => u.role !== 'ADMIN').map(u => u.user_id)) : new Set())} />
+          Seleccionar todos ({filtered.length})
+        </label>
+        <span className="text-xs text-muted-foreground">{sel.size} seleccionado(s)</span>
+        <div className="ml-auto flex gap-2">
+          <button className="nav-btn text-xs" disabled={busy || !sel.size} onClick={() => void bulkRevoke()}>🚫 Revocar acceso</button>
+          <button className="nav-btn text-xs !bg-destructive/20 hover:!bg-destructive/40 text-destructive" disabled={busy || !sel.size} onClick={() => void bulkDelete()}>🗑️ Eliminar</button>
+        </div>
+      </div>
+
       <div className="overflow-auto">
         <table className="app-table min-w-[1300px]">
           <thead>
             <tr>
-              <th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th><th>Última conexión</th><th className="text-right">Ventas</th><th className="text-right">Comisión pendiente</th><th>Perfil de cobro</th><th>Acciones</th>
+              <th></th><th>Nombre</th><th>Email</th><th>Rol</th><th>Estado</th><th>Última conexión</th><th className="text-right">Ventas</th><th className="text-right">Comisión pendiente</th><th>Perfil de cobro</th><th>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map(u => (
-              <tr key={u.id}>
+              <tr key={u.id} className={sel.has(u.user_id) ? 'bg-primary/10' : ''}>
+                <td><input type="checkbox" checked={sel.has(u.user_id)} onChange={() => toggleSel(u.user_id)} disabled={u.role === 'ADMIN'} title={u.role === 'ADMIN' ? 'Los admin no se pueden seleccionar' : 'Seleccionar'} /></td>
                 <td className="text-sm">{u.name}</td>
                 <td className="text-sm">{u.email}</td>
                 <td>

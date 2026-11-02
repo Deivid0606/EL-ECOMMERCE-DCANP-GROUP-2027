@@ -194,7 +194,7 @@ const CreateOrderView = ({
   } | null;
   onPrefillConsumed?: () => void;
 }) => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
 
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
@@ -211,6 +211,8 @@ const CreateOrderView = ({
   const [district, setDistrict] = useState("");
   const [email, setEmail] = useState("");
   const [obs, setObs] = useState("");
+  const [shippingType, setShippingType] = useState<"DELIVERY" | "ENCOMIENDA">("DELIVERY");
+  const [proofFile, setProofFile] = useState<File | null>(null);
   const [items, setItems] = useState<
     { sku: string; sale_gs: number; qty: number }[]
   >([{ sku: "", sale_gs: 0, qty: 1 }]);
@@ -865,6 +867,8 @@ const CreateOrderView = ({
     setDistrict("");
     setEmail("");
     setObs("");
+    setShippingType("DELIVERY");
+    setProofFile(null);
     setItems([{ sku: "", sale_gs: 0, qty: 1 }]);
   };
 
@@ -889,6 +893,11 @@ const CreateOrderView = ({
       return;
     }
 
+    if (shippingType === "ENCOMIENDA" && !proofFile) {
+      toast.error("📮 Pedido por encomienda: cargá la foto del comprobante de pago");
+      return;
+    }
+
     const needBySku = new Map<string, number>();
     validItems.forEach((i) => needBySku.set(i.sku, (needBySku.get(i.sku) || 0) + Number(i.qty)));
     const sinStock = [...needBySku].filter(([sku, q]) => Number(catalogMap[sku]?.stock || 0) < q);
@@ -903,6 +912,17 @@ const CreateOrderView = ({
     setSaving(true);
 
     try {
+      let paymentProofPath: string | null = null;
+      if (shippingType === "ENCOMIENDA" && proofFile) {
+        const ext = (proofFile.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+        const path = `${user?.id}/${Date.now()}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from("payment-proofs")
+          .upload(path, proofFile, { contentType: proofFile.type || undefined, upsert: false });
+        if (upErr) throw upErr;
+        paymentProofPath = path;
+      }
+
       const orderNumber = await generateNormalOrderId();
 
       const providerEmails = [
@@ -936,6 +956,8 @@ const CreateOrderView = ({
         delivery_gs: Number(deliveryPrice),
         commission_gs: commission,
         provider_emails_list: providerEmails.join(","),
+        shipping_type: shippingType,
+        payment_proof_path: paymentProofPath,
       };
 
       const { data: insertedOrder, error: insertError } = await supabase
@@ -1125,6 +1147,44 @@ const CreateOrderView = ({
               value={obs}
               onChange={(e) => setObs(e.target.value)}
             />
+
+            <label className="app-label">Tipo de envío</label>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                ["DELIVERY", "🛵 Delivery (paga al recibir)"],
+                ["ENCOMIENDA", "📮 Encomienda (pago anticipado)"],
+              ] as const).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setShippingType(v)}
+                  className={`rounded-xl border p-2 text-xs font-bold ${shippingType === v ? "border-primary bg-primary/10" : "border-border"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {shippingType === "ENCOMIENDA" && (
+              <div className="mt-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
+                <b className="text-amber-300">Comprobante de pago * (obligatorio)</b>
+                <p className="mb-2 text-muted-foreground">Foto o captura de la transferencia del cliente. Despacho la revisa y aprueba antes de enviar.</p>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  className="w-full text-xs"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    if (f && f.size > 10 * 1024 * 1024) {
+                      toast.error("El archivo pesa más de 10 MB");
+                      e.target.value = "";
+                      return;
+                    }
+                    setProofFile(f);
+                  }}
+                />
+                {proofFile && <div className="mt-1 text-emerald-400">✅ {proofFile.name}</div>}
+              </div>
+            )}
           </div>
 
           <div className="w-full min-w-0 md:col-span-2">
@@ -1153,17 +1213,23 @@ const CreateOrderView = ({
                           ? "Cargando productos…"
                           : "Seleccionar producto…"}
                       </option>
-                      {products.map((p) => (
-                        <option key={p.id} value={p.sku} disabled={Number(p.stock || 0) <= 0}>
-                          {Number(p.stock || 0) <= 0 ? "⛔ SIN STOCK · " : ""}
-                          {p.title} — {p.sku}
-                          {userFavorites.has(p.id) ? " ⭐" : ""}
-                          {p.is_private ? " 🔒" : ""}
-                          {` (Stock: ${p.stock || 0})`}
-                          {` (Prov ${nf(Number(p.provider_price_gs || 0))})`}
-                          {p.provider_email ? ` [${p.provider_email}]` : ""}
-                        </option>
-                      ))}
+                      {products.map((p) => {
+                        const t = String(p.title || "").trim();
+                        const k = String(p.sku || "").trim();
+                        const sameName = t.toLowerCase().replace(/[^a-z0-9]/g, "") === k.toLowerCase().replace(/[^a-z0-9]/g, "");
+                        const stock = Number(p.stock || 0);
+                        return (
+                          <option key={p.id} value={p.sku} disabled={stock <= 0}>
+                            {stock <= 0 ? "⛔ " : ""}
+                            {t.length > 45 ? `${t.slice(0, 45)}…` : t}
+                            {!sameName && k ? ` (${k.length > 20 ? `${k.slice(0, 20)}…` : k})` : ""}
+                            {userFavorites.has(p.id) ? " ⭐" : ""}
+                            {p.is_private ? " 🔒" : ""}
+                            {stock <= 0 ? " · SIN STOCK" : ` · Stock ${stock}`}
+                            {` · Prov ${nf(Number(p.provider_price_gs || 0))}`}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 
