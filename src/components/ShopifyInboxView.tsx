@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import DropiButton from "@/components/DropiButton";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -2395,6 +2396,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                             {canLoad && <button className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-3 py-2 text-xs font-black text-white shadow-lg shadow-blue-950/30 transition hover:-translate-y-0.5" onClick={() => handleDirectSave(order, rowKey)}>Cargar</button>}
                             <button className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-black text-slate-200 ring-1 ring-slate-700 transition hover:text-white" onClick={() => { setSelectedOrder({ order, rowKey }); setShowGuideModal(true); }}>📄 Guía</button>
                             <button className="rounded-xl bg-violet-600/90 px-3 py-2 text-xs font-black text-white transition hover:bg-violet-600" onClick={() => handleOpenForm(order, rowKey)}>Formulario</button>
+                            <DropiButton
+                              order={{
+                                customer: order[colKeys.name] || "",
+                                phone: order[colKeys.phone] || "",
+                                department: departamento || "",
+                                city: getCityDisplayName(city) || city,
+                                address: order[colKeys.street] || "",
+                                product: getProductDisplayName(order[colKeys.product] || ""),
+                                qty: parseQuantity(order[colKeys.qty]),
+                                total: salePrice,
+                              }}
+                            />
                           </div>
                         </td>
                       </tr>

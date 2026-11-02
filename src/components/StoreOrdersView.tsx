@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import DropiButton from "@/components/DropiButton";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -1958,6 +1959,19 @@ export default function StoreOrdersView({
                           >
                             📦 {saved ? "Ya cargado" : "Abrir formulario ↗"}
                           </button>
+                          <DropiButton
+                            className="nav-btn !px-4 !py-2.5 !bg-orange-500/90 !text-white"
+                            order={{
+                              customer: order.customer_name,
+                              phone: order.phone,
+                              department: order.department || "",
+                              city: order.city || "",
+                              address: [order.address, order.reference].filter(Boolean).join(" · "),
+                              product: order.product_title,
+                              qty: Number(order.quantity || 1),
+                              total: Number(order.total_gs || 0),
+                            }}
+                          />
                           <button
                             type="button"
                             className="nav-btn !px-4 !py-2.5 !text-rose-300"
