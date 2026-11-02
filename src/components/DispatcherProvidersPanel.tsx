@@ -8,11 +8,11 @@ type Person = { user_id: string; email: string; name: string };
  * Admin: qué proveedores puede despachar cada despachante. Un despachante sin
  * proveedores marcados ve todos los pedidos (como antes).
  */
-export default function DispatcherProvidersPanel() {
+export default function DispatcherProvidersPanel({ dispatcherEmail }: { dispatcherEmail?: string } = {}) {
   const [dispatchers, setDispatchers] = useState<Person[]>([]);
   const [providers, setProviders] = useState<Person[]>([]);
   const [links, setLinks] = useState<{ dispatcher_email: string; provider_email: string }[]>([]);
-  const [selected, setSelected] = useState('');
+  const [selected, setSelected] = useState(String(dispatcherEmail || '').toLowerCase());
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
@@ -82,13 +82,13 @@ export default function DispatcherProvidersPanel() {
         <div className="text-sm text-muted-foreground">No hay despachantes aprobados.</div>
       ) : (
         <>
-          <select className="app-input mb-3 max-w-md" value={selected} onChange={(e) => setSelected(e.target.value)}>
+          {!dispatcherEmail && <select className="app-input mb-3 max-w-md" value={selected} onChange={(e) => setSelected(e.target.value)}>
             {dispatchers.map((d) => (
               <option key={d.email} value={d.email}>
                 {d.name} — {d.email}
               </option>
             ))}
-          </select>
+          </select>}
           <div className="mb-2 text-xs font-bold">
             {assigned.size ? `Despacha ${assigned.size} proveedor(es)` : 'Sin restricción: ve todos los proveedores'}
           </div>
