@@ -53,7 +53,7 @@ type AttemptPayment = {
   orders?: { order_number: string | null; customer_name: string | null; city: string | null } | null;
 };
 
-type StatusPayRule = { status: string; mode: 'fixed' | 'percent'; value: number; active: boolean };
+type StatusPayRule = { status: string; mode: 'fixed' | 'percent'; value: number; active: boolean; delivery_email?: string; custom?: boolean };
 
 // Estados que pueden pagarse al delivery como intento (no entregados).
 const PAYABLE_STATUSES = [
@@ -66,6 +66,15 @@ const PAYABLE_STATUSES = [
   'CANCELÓ POR WHATSAPP',
   'DEVUELTO A DEPÓSITO',
 ];
+
+// Reglas para mostrar: generales ('') o las de un delivery (personalizadas o heredadas).
+const buildRules = (saved: StatusPayRule[], target: string): StatusPayRule[] =>
+  PAYABLE_STATUSES.map(st => {
+    const general = saved.find(r => r.status.toUpperCase() === st && !r.delivery_email);
+    const own = target ? saved.find(r => r.status.toUpperCase() === st && r.delivery_email === target) : undefined;
+    const base = own || general || { status: st, mode: 'percent' as const, value: 0, active: false };
+    return { ...base, status: st, custom: Boolean(own) };
+  });
 
 const accountKey = (b: any) => `${String(b?.bank_name || '').trim().toLowerCase()}|${String(b?.bank_account || '').replace(/\D/g, '')}`;
 
@@ -114,6 +123,10 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
   const [attempts, setAttempts] = useState<AttemptPayment[]>([]);
   const [payMode, setPayMode] = useState<'single' | 'group'>('single');
   const [statusRules, setStatusRules] = useState<StatusPayRule[]>([]);
+  // Reglas guardadas de todos ('' = general) y a qué delivery se están editando.
+  const [savedRules, setSavedRules] = useState<StatusPayRule[]>([]);
+  const [ruleTarget, setRuleTarget] = useState('');
+  const [ruleDeliveries, setRuleDeliveries] = useState<{ email: string; name: string }[]>([]);
   const [savingRules, setSavingRules] = useState(false);
 
   const canOwnBank = role === 'ADMIN' || role === 'PROVEEDOR';
@@ -151,13 +164,21 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
     }
 
     if (role === 'ADMIN') {
-      const rules = await supabase.from('delivery_status_pay' as any).select('status,mode,value,active');
+      const rules = await supabase.from('delivery_status_pay' as any).select('status,mode,value,active,delivery_email');
       if (!rules.error) {
-        const saved = (rules.data || []) as unknown as StatusPayRule[];
-        setStatusRules(
-          PAYABLE_STATUSES.map(
-            st => saved.find(r => r.status.toUpperCase() === st) || { status: st, mode: 'percent', value: 0, active: false },
-          ),
+        const saved = ((rules.data || []) as unknown as StatusPayRule[]).map(r => ({ ...r, delivery_email: String(r.delivery_email || '').toLowerCase() }));
+        setSavedRules(saved);
+        setStatusRules(buildRules(saved, ruleTarget));
+      }
+      const { data: dr } = await supabase.from('user_roles').select('user_id').eq('role', 'DELIVERY').eq('approved', true);
+      const ids = (dr || []).map((r: any) => r.user_id);
+      if (ids.length) {
+        const { data: people } = await supabase.from('profiles').select('email,name').in('user_id', ids);
+        setRuleDeliveries(
+          (people || [])
+            .filter((p: any) => p.email)
+            .map((p: any) => ({ email: String(p.email).toLowerCase(), name: p.name || p.email }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
         );
       }
     }
@@ -461,19 +482,37 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
   };
 
   const saveStatusRules = async () => {
-    const invalid = statusRules.find(r => r.active && (!(r.value > 0) || (r.mode === 'percent' && r.value > 100)));
+    const target = ruleTarget;
+    const rows = statusRules.filter(r => !target || r.custom);
+    const invalid = rows.find(r => r.active && (!(r.value > 0) || (r.mode === 'percent' && r.value > 100)));
     if (invalid) {
       toast.error(`Revisá el valor de ${invalid.status}: monto mayor a 0 o porcentaje entre 1 y 100`);
       return;
     }
     setSavingRules(true);
-    const { error } = await supabase.from('delivery_status_pay' as any).upsert(
-      statusRules.map(r => ({ ...r, value: Number(r.value || 0), updated_by: email, updated_at: new Date().toISOString() })) as any,
-      { onConflict: 'status' },
-    );
+    // Para un delivery: sólo se guardan los estados personalizados; el resto usa la regla general.
+    if (target) {
+      const drop = statusRules.filter(r => !r.custom).map(r => r.status);
+      if (drop.length) {
+        const del = await supabase.from('delivery_status_pay' as any).delete().eq('delivery_email', target).in('status', drop);
+        if (del.error) { setSavingRules(false); toast.error(del.error.message); return; }
+      }
+    }
+    const { error } = rows.length
+      ? await supabase.from('delivery_status_pay' as any).upsert(
+          rows.map(r => ({ status: r.status, mode: r.mode, active: r.active, delivery_email: target, value: Number(r.value || 0), updated_by: email, updated_at: new Date().toISOString() })) as any,
+          { onConflict: 'status,delivery_email' },
+        )
+      : { error: null };
     setSavingRules(false);
-    if (error) toast.error(error.message);
-    else toast.success('Pagos por estado guardados. Se aplican desde ahora a los nuevos reportes.');
+    if (error) { toast.error(error.message); return; }
+    toast.success(target ? `Pagos por estado de ${target} guardados.` : 'Pagos por estado generales guardados. Se aplican desde ahora a los nuevos reportes.');
+    const fresh = await supabase.from('delivery_status_pay' as any).select('status,mode,value,active,delivery_email');
+    if (!fresh.error) {
+      const saved = ((fresh.data || []) as unknown as StatusPayRule[]).map(r => ({ ...r, delivery_email: String(r.delivery_email || '').toLowerCase() }));
+      setSavedRules(saved);
+      setStatusRules(buildRules(saved, target));
+    }
   };
 
   const upload = async (folder: string, id: string, file: File) => {
@@ -746,6 +785,27 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
               </p>
             </div>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-sm font-bold">🛵 ¿A qué delivery?</label>
+            <select
+              className="app-input !w-auto !py-2 min-w-[240px]"
+              value={ruleTarget}
+              onChange={e => {
+                setRuleTarget(e.target.value);
+                setStatusRules(buildRules(savedRules, e.target.value));
+              }}
+            >
+              <option value="">Todos los deliverys (regla general)</option>
+              {ruleDeliveries.map(d => (
+                <option key={d.email} value={d.email}>
+                  {d.name} — {d.email}{savedRules.some(r => r.delivery_email === d.email) ? ' ✏️' : ''}
+                </option>
+              ))}
+            </select>
+            {ruleTarget && (
+              <span className="text-xs text-muted-foreground">Marcá «Personalizar» en los estados que querés distintos para este delivery; el resto usa la regla general.</span>
+            )}
+          </div>
           <div className="space-y-2">
             {statusRules.map((rule, i) => {
               const update = (patch: Partial<StatusPayRule>) =>
@@ -755,11 +815,26 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                   key={rule.status}
                   className={`grid grid-cols-1 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-2 rounded-xl border p-3 ${rule.active ? 'border-orange-500/40 bg-orange-500/5' : 'border-border bg-background/30'}`}
                 >
-                  <label className="flex items-center gap-2 text-sm font-bold">
-                    <input type="checkbox" checked={rule.active} onChange={e => update({ active: e.target.checked })} />
-                    {rule.status}
-                  </label>
-                  <select className="app-input !py-2" value={rule.mode} disabled={!rule.active} onChange={e => update({ mode: e.target.value as StatusPayRule['mode'] })}>
+                  <div>
+                    <label className="flex items-center gap-2 text-sm font-bold">
+                      <input type="checkbox" disabled={Boolean(ruleTarget) && !rule.custom} checked={rule.active} onChange={e => update({ active: e.target.checked })} />
+                      {rule.status}
+                    </label>
+                    {ruleTarget && (
+                      <label className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(rule.custom)}
+                          onChange={e => {
+                            const general = buildRules(savedRules, '')[i];
+                            update(e.target.checked ? { custom: true } : { ...general, custom: false });
+                          }}
+                        />
+                        {rule.custom ? 'Personalizado para este delivery' : 'Usa la regla general · Personalizar'}
+                      </label>
+                    )}
+                  </div>
+                  <select className="app-input !py-2" value={rule.mode} disabled={!rule.active || (Boolean(ruleTarget) && !rule.custom)} onChange={e => update({ mode: e.target.value as StatusPayRule['mode'] })}>
                     <option value="fixed">Monto fijo (Gs)</option>
                     <option value="percent">% de la tarifa de la ciudad</option>
                   </select>
@@ -768,7 +843,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                     type="number"
                     min={0}
                     max={rule.mode === 'percent' ? 100 : undefined}
-                    disabled={!rule.active}
+                    disabled={!rule.active || (Boolean(ruleTarget) && !rule.custom)}
                     value={rule.value || ''}
                     placeholder={rule.mode === 'percent' ? 'Ej. 50' : 'Ej. 15000'}
                     onChange={e => update({ value: Number(e.target.value) })}
@@ -785,7 +860,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
             })}
           </div>
           <button className="nav-btn active" disabled={savingRules} onClick={() => void saveStatusRules()}>
-            {savingRules ? 'Guardando...' : 'Guardar pagos por estado'}
+            {savingRules ? 'Guardando...' : ruleTarget ? 'Guardar pagos de este delivery' : 'Guardar pagos por estado (general)'}
           </button>
         </section>
       )}

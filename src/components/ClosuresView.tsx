@@ -1,6 +1,7 @@
 import './closures-premium.css';
 import ClosurePaymentsPanel from './ClosurePaymentsPanel';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { dayLabel, useRescheduleDialog } from '@/components/RescheduleDialog';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { generateTrackingLink } from '@/lib/tracking';
@@ -663,6 +664,8 @@ export default function ClosuresView() {
   const [selectedTeamOwnerEmail, setSelectedTeamOwnerEmail] = useState<string>('');
   
   // Estados para el modal de cambio de estado
+  const loadClosuresRef = useRef<() => Promise<void> | void>(() => {});
+  const reschedule = useRescheduleDialog(() => void loadClosuresRef.current());
   const [statusChangeModal, setStatusChangeModal] = useState<{
     isOpen: boolean;
     orderIds: string[];
@@ -2307,6 +2310,10 @@ export default function ClosuresView() {
 
   // Cambio de estado individual o masivo con la misma validación
   const handleStatusChangeWithValidation = async (orderId: string, newStatus: string) => {
+    if (newStatus === 'REAGENDADO') {
+      reschedule.ask([orderId]);
+      return;
+    }
     if (isDelivery && newStatus === 'DEVUELTO A DEPÓSITO') {
       toast.error('Los repartidores no pueden cambiar a DEVUELTO A DEPÓSITO');
       return;
@@ -2400,6 +2407,11 @@ export default function ClosuresView() {
 
     if (isDelivery && bulkStatus === 'DEVUELTO A DEPÓSITO') {
       toast.error('Los repartidores no pueden cambiar a DEVUELTO A DEPÓSITO');
+      return;
+    }
+
+    if (bulkStatus === 'REAGENDADO') {
+      reschedule.ask(ids);
       return;
     }
 
@@ -3058,6 +3070,8 @@ export default function ClosuresView() {
       String(delivery.email || '').toLowerCase().includes(q)
     );
   });
+
+  loadClosuresRef.current = loadClosures;
 
   return (
     <div className="app-card">
@@ -4590,6 +4604,9 @@ export default function ClosuresView() {
                     ) : (
                       <span className={`badge-status ${getStatusBadgeClass(o.status)}`}>{o.status}</span>
                     )}
+                    {String(o.status || '').toUpperCase() === 'REAGENDADO' && o.rescheduled_for && (
+                      <div className="mt-1 whitespace-nowrap text-[10px] font-bold text-sky-300">📅 {dayLabel(String(o.rescheduled_for))}</div>
+                    )}
                   </td>
                   <td>
                     {canEditFull ? (
@@ -4662,6 +4679,7 @@ export default function ClosuresView() {
       </div>
 
       {/* Modal para solicitar comentario y captura */}
+      {reschedule.modal}
       <StatusChangeModal
         isOpen={statusChangeModal.isOpen}
         onClose={() => setStatusChangeModal({ isOpen: false, orderIds: [], newStatus: '' })}

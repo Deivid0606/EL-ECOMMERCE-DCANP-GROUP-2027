@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { pyToday, pyStart, pyEnd } from '@/lib/pyTime';
 import { useOrderEditTools } from '@/components/OrderEditTools';
+import { dayLabel, nextBusinessDay } from '@/components/RescheduleDialog';
 
 declare global {
   interface Window {
@@ -461,8 +462,37 @@ export default function WithGuidesView() {
   // Pedidos que cumplen TODOS los filtros actuales, excepto el filtro de producto.
   // Esto hace que el desplegable de Productos muestre solamente productos
   // que realmente tienen pedidos dentro del filtro actual.
+  // Reagendados: los que ya no tienen delivery aparecen recién en su fecha.
+  const todayKey = pyToday();
+  const isWaitingDate = (o: any) =>
+    Boolean(o.rescheduled_for) && String(o.rescheduled_for) > todayKey && !o.assigned_delivery && (!o.status2 || o.status2 === '--');
+  const waitingDateCount = orders.filter(isWaitingDate).length;
+  const [showWaiting, setShowWaiting] = useState(false);
+  // Reagendados lejos (no es el próximo día hábil) que todavía tiene el delivery: el proveedor los desasigna.
+  const toRelease = useMemo(() => {
+    const nbd = nextBusinessDay(todayKey);
+    return orders.filter(o => {
+      if (String(o.status || '').toUpperCase() !== 'REAGENDADO' || !o.assigned_delivery || !o.rescheduled_for) return false;
+      if (String(o.rescheduled_for) <= nbd) return false;
+      if (role === 'PROVEEDOR') return String(o.provider_emails_list || o.provider_email || '').toLowerCase().includes(myEmail.toLowerCase());
+      return true;
+    });
+  }, [orders, role, myEmail, todayKey]);
+  const [releasingId, setReleasingId] = useState<string | null>(null);
+  const releaseOrder = async (o: any) => {
+    if (!window.confirm(`↩️ Desasignar ${o.order_number} de ${o.assigned_delivery}?\n\nVuelve a Despacho el ${dayLabel(String(o.rescheduled_for))} para aprobar el despacho de nuevo.`)) return;
+    setReleasingId(o.id);
+    const { error } = await (supabase as any).rpc('release_rescheduled_order', { p_order_id: o.id });
+    setReleasingId(null);
+    if (error) { toast.error(error.message); return; }
+    toast.success(`↩️ ${o.order_number} desasignado. Aparece en Despacho el ${dayLabel(String(o.rescheduled_for))}.`);
+    void load();
+  };
+
   const productFilterBaseOrders = useMemo(() => {
     return orders.filter(o => {
+      if (!showWaiting && isWaitingDate(o)) return false;
+      if (showWaiting && !isWaitingDate(o)) return false;
       if (role === 'PROVEEDOR') {
         const providerList = o.provider_emails_list || '';
         const myEmailLower = myEmail.toLowerCase();
@@ -619,6 +649,7 @@ export default function WithGuidesView() {
       return orderProducts.some(product => selectedProducts.has(product.key));
     });
   }, [productFilterBaseOrders, selectedProducts]);
+
 
   const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
   const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
@@ -1677,6 +1708,42 @@ export default function WithGuidesView() {
 
       {orderTools.modal}
 
+      {toRelease.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3">
+          <div className="mb-2 text-sm font-black text-amber-200">
+            ↩️ Reagendados para desasignar ({toRelease.length})
+            <span className="ml-2 text-xs font-normal text-amber-100/80">No son para el próximo día hábil: desasignalos del delivery y vuelven a Despacho en su fecha.</span>
+          </div>
+          <div className="space-y-1.5">
+            {toRelease.map(o => (
+              <div key={o.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-black/20 px-3 py-2 text-xs">
+                <b>{o.order_number}</b>
+                <span>{o.customer_name}</span>
+                <span className="text-slate-400">· {o.city}</span>
+                <span className="text-sky-300">📅 {dayLabel(String(o.rescheduled_for))}</span>
+                <span className="text-slate-400">· 🛵 {o.assigned_delivery}</span>
+                <button
+                  className="nav-btn ml-auto !px-3 !py-1 !text-[11px] !bg-amber-500/30 !text-amber-100"
+                  disabled={releasingId === o.id}
+                  onClick={() => void releaseOrder(o)}
+                >
+                  {releasingId === o.id ? 'Desasignando…' : '↩️ Desasignar'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {waitingDateCount > 0 && (
+        <button
+          className={`mb-3 rounded-full border px-3 py-1 text-xs font-bold ${showWaiting ? 'border-sky-400 bg-sky-500/20 text-sky-200' : 'border-slate-600 text-slate-300'}`}
+          onClick={() => setShowWaiting(v => !v)}
+        >
+          {showWaiting ? '← Volver a los pedidos de hoy' : `📅 ${waitingDateCount} reagendado(s) esperando su fecha`}
+        </button>
+      )}
+
       {/* Acciones masivas */}
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap gap-2 mb-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl shadow-xl">
@@ -1786,6 +1853,9 @@ export default function WithGuidesView() {
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">
                   {o.order_number || o.id.slice(0, 8)}
+                  {o.rescheduled_for && (!o.status2 || o.status2 === '--') && !o.assigned_delivery && (
+                    <div className="mt-1 whitespace-nowrap text-[10px] font-bold text-sky-300">📅 Reagendado {dayLabel(String(o.rescheduled_for))} · aprobar despacho</div>
+                  )}
                   {o.shipping_type === 'ENCOMIENDA' && (
                     <div className="mt-1 space-y-1 font-normal">
                       <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold ${
