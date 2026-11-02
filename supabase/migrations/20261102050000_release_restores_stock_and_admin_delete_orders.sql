@@ -54,3 +54,37 @@ BEGIN
 END; $$;
 REVOKE ALL ON FUNCTION public.admin_delete_seller_orders(text, uuid[]) FROM public, anon;
 GRANT EXECUTE ON FUNCTION public.admin_delete_seller_orders(text, uuid[]) TO authenticated;
+
+-- Proveedor también puede (sólo pedidos de sus productos); despachante no.
+CREATE OR REPLACE FUNCTION public.admin_delete_seller_orders(p_seller_email text, p_order_ids uuid[])
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE o public.orders; seller text := lower(trim(coalesce(p_seller_email, ''))); deleted int := 0; skipped jsonb := '[]'::jsonb; why text;
+  is_admin boolean := public.has_role(auth.uid(), 'ADMIN');
+  is_provider boolean := public.has_role(auth.uid(), 'PROVEEDOR');
+  me text;
+BEGIN
+  IF NOT (is_admin OR is_provider) THEN RAISE EXCEPTION 'Sólo admin o proveedor pueden eliminar pedidos en lote'; END IF;
+  SELECT lower(email) INTO me FROM public.profiles WHERE user_id = auth.uid();
+  IF seller = '' THEN RAISE EXCEPTION 'Elegí el vendedor'; END IF;
+  IF coalesce(array_length(p_order_ids, 1), 0) = 0 OR array_length(p_order_ids, 1) > 2000 THEN RAISE EXCEPTION 'Seleccioná entre 1 y 2000 pedidos'; END IF;
+
+  FOR o IN SELECT * FROM public.orders WHERE id = ANY(p_order_ids) FOR UPDATE LOOP
+    why := NULL;
+    IF lower(coalesce(o.created_by, '')) <> seller THEN why := 'es de otro vendedor';
+    ELSIF NOT is_admin AND NOT (lower(coalesce(o.provider_email, '')) = me
+          OR me = ANY(regexp_split_to_array(lower(coalesce(o.provider_emails_list, '')), '[,;[:space:]]+'))) THEN why := 'no es de tus productos';
+    ELSIF upper(coalesce(o.status, '')) IN ('ENTREGADO', 'ENCOMIENDA ENTREGADA') THEN why := 'ya fue entregado';
+    ELSIF coalesce(o.commission_paid, false) THEN why := 'comisión ya pagada';
+    ELSIF coalesce(o.delivery_settled, false) OR upper(coalesce(o.status2, '')) = 'RENDIDO' THEN why := 'ya fue rendido';
+    ELSIF EXISTS (SELECT 1 FROM public.delivery_closure_orders c WHERE c.order_id = o.id) THEN why := 'está en un cierre';
+    END IF;
+    IF why IS NOT NULL THEN
+      skipped := skipped || jsonb_build_object('order_number', o.order_number, 'why', why);
+      CONTINUE;
+    END IF;
+    PERFORM public.revert_order_stock_internal(o.id, 'Pedido eliminado por ' || CASE WHEN is_admin THEN 'admin' ELSE 'proveedor' END);
+    DELETE FROM public.orders WHERE id = o.id;
+    deleted := deleted + 1;
+  END LOOP;
+  RETURN jsonb_build_object('deleted', deleted, 'skipped', skipped);
+END; $$;
