@@ -45,15 +45,70 @@
     if (el) { setVal(el, v); ok.push(name); } else miss.push(name);
   };
 
-  if (!byPh('Nombres')) {
-    const search = inputs().find((i) => /buscar|search|producto|nombre o id/.test(norm(i.placeholder)));
-    if (d.dropiId && search) {
-      setVal(search, d.dropiId);
-      search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-      search.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+  const waitFor = async (fn, ms) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      const r = fn();
+      if (r) return r;
+      await sleep(300);
     }
-    toast('🔎 Busqué el producto <b>' + (d.dropiId || d.product || '') + '</b>.<br>Abrí <b>Enviar a cliente / Crear Orden</b> de ese producto y volvé a tocar <b>Llenar Dropi</b>.', 12000);
-    return;
+    return null;
+  };
+  const sendButtons = () =>
+    [...document.querySelectorAll('button,a,[role=button]')].filter((b) => vis(b) && /enviar a(l)? cliente|crear orden/.test(norm(b.textContent)));
+
+  if (!byPh('Nombres')) {
+    const term = String(d.dropiSearch || d.dropiId || d.product || '').trim();
+    const termN = norm(term);
+    const isId = /^\d+$/.test(term);
+    // Tarjeta del producto: la que menciona el ID o el nombre buscado.
+    const findCardButton = () => {
+      const btns = sendButtons();
+      if (!btns.length) return null;
+      const scored = btns.map((b) => {
+        let card = b;
+        for (let i = 0; i < 6 && card.parentElement; i++) {
+          card = card.parentElement;
+          if (norm(card.textContent).length > 40) break;
+        }
+        const t = norm(card.textContent);
+        let score = 0;
+        if (isId && new RegExp('(id|#)\\W*' + term + '\\b').test(t)) score = 3;
+        else if (termN && t.includes(termN)) score = 2;
+        else if (termN) score = termN.split(' ').filter((w) => w.length > 3 && t.includes(w)).length / 10;
+        return { b, score };
+      });
+      scored.sort((x, y) => y.score - x.score);
+      return scored[0].score > 0 ? scored[0].b : null;
+    };
+
+    let btn = findCardButton();
+    if (!btn && term) {
+      const search = inputs().find((i) => /buscar|busca|search|producto|que estas buscando|nombre o id/.test(norm(i.placeholder)));
+      if (search) {
+        search.focus();
+        setVal(search, term);
+        ['keydown', 'keypress', 'keyup'].forEach((t) => search.dispatchEvent(new KeyboardEvent(t, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true })));
+        if (search.form && search.form.requestSubmit) { try { search.form.requestSubmit(); } catch (e) {} }
+        const near = search.parentElement && [...search.parentElement.parentElement.querySelectorAll('button')].find(vis);
+        if (near && !/enviar/.test(norm(near.textContent))) near.click();
+        toast('🔎 Buscando <b>' + term.replace(/</g, '&lt;') + '</b> en Dropi…', 0);
+        btn = await waitFor(findCardButton, 10000);
+      }
+    }
+    if (!btn) {
+      toast('⚠️ No encontré el producto <b>' + (term || '').replace(/</g, '&lt;') + '</b> en esta página.<br>Buscalo vos en Dropi, tocá <b>Enviar a cliente</b> y volvé a tocar <b>Llenar Dropi</b>.<br><small>Tip: en la app poné el <b>nombre exacto</b> del producto como aparece en Dropi.</small>', 0);
+      return;
+    }
+    btn.scrollIntoView({ block: 'center' });
+    btn.click();
+    toast('📦 Abriendo el formulario…', 0);
+    const ok = await waitFor(() => byPh('Nombres'), 10000);
+    if (!ok) {
+      toast('⚠️ Se tocó <b>Enviar a cliente</b> pero no apareció el formulario. Abrilo vos y volvé a tocar <b>Llenar Dropi</b>.', 0);
+      return;
+    }
+    await sleep(600);
   }
 
   fill('Nombres', byPh('Nombres'), d.firstName);
