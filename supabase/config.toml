@@ -10,6 +10,3 @@ verify_jwt = true
 
 [functions.shopify-autoload]
 verify_jwt = false
-
-[functions.admin-set-password]
-verify_jwt = true
