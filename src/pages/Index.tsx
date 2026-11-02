@@ -62,6 +62,9 @@ export interface SheetPrefill {
   totalGs?: number;
   qty?: number;
   obs?: string;
+  sku?: string;
+  departamento?: string;
+  sheetRow?: { sheetUrl: string; rowIndex: number };
 }
 
 function isBotSkyImportLink() {

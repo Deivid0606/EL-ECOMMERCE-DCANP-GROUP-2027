@@ -352,6 +352,7 @@ interface ShopifyInboxProps {
   onSheetConfirm?: (prefill: {
     customer?: string; phone?: string; city?: string; street?: string;
     district?: string; productTitle?: string; totalGs?: number; qty?: number;
+    sku?: string; departamento?: string; sheetRow?: { sheetUrl: string; rowIndex: number };
   }) => void;
 }
 
@@ -861,6 +862,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (!cityMatch || !deliveryPrice) { if (!quiet) toast.warning(`⚠️ Ciudad "${rawCity}" sin cobertura`); return false; }
     // Se guarda el nombre oficial de la ciudad: así la tarifa del delivery y la comisión salen bien.
     const city = cityMatch.city.trim();
+    if (/pago\s*anticipado/i.test(city)) {
+      if (!quiet) toast.info("📮 Interior pago anticipado: tocá «📮 Formulario» y subí el comprobante de pago.");
+      return false;
+    }
 
     const departamento = getCityDepartmentForCity(rawCity);
     if (!departamento && !quiet) toast.warning(`⚠️ No se pudo determinar el departamento para "${rawCity}"`);
@@ -975,10 +980,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const handleDirectSave = (order: SheetOrder, rowKey: string) => loadOrder(order, rowKey, "auto");
 
   const handleOpenForm = (order: SheetOrder, rowKey: string) => {
+    const rawCity = order[colKeys.city] || "";
+    const cm = matchCity(rawCity);
+    const prod = matchProductInfo(order[colKeys.product] || "")?.product;
     if (onSheetConfirm) onSheetConfirm({
       customer: order[colKeys.name] || "",
       phone: extractPhoneNumber(order[colKeys.phone] || ""),
-      city: order[colKeys.city] || "",
+      city: cm?.city.trim() || rawCity,
+      departamento: getCityDepartmentForCity(rawCity) || "",
+      sku: prod?.sku || "",
+      sheetRow: sheetUrl && Number.isFinite(Number(rowKey)) ? { sheetUrl, rowIndex: Number(rowKey) } : undefined,
       street: order[colKeys.street] || "",
       productTitle: order[colKeys.product] || "",
       totalGs: getAmountFromRow(order, colKeys.amount),
@@ -2336,7 +2347,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     const covered = deliveryPrice !== null;
                     const salePrice = getDisplayAmount(order);
                     const orderDate = getOrderDate(order);
-                    const canLoad = status === "CARGAR" && covered && salePrice > 0;
+                    const isPrepaid = /pago\s*anticipado/i.test(getCityDisplayName(city));
+                    const canLoad = status === "CARGAR" && covered && salePrice > 0 && !isPrepaid;
                     const orderNumber = getRowOrderNumber(rowKey);
                     const departamento = getCityDepartmentForCity(city);
                     const rowDisplay = order.__row || String(idx + 1);
@@ -2395,8 +2407,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                           <div className="flex justify-end gap-2">
                             {canLoad && <button className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-3 py-2 text-xs font-black text-white shadow-lg shadow-blue-950/30 transition hover:-translate-y-0.5" onClick={() => handleDirectSave(order, rowKey)}>Cargar</button>}
                             <button className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-black text-slate-200 ring-1 ring-slate-700 transition hover:text-white" onClick={() => { setSelectedOrder({ order, rowKey }); setShowGuideModal(true); }}>📄 Guía</button>
-                            <button className="rounded-xl bg-violet-600/90 px-3 py-2 text-xs font-black text-white transition hover:bg-violet-600" onClick={() => handleOpenForm(order, rowKey)}>Formulario</button>
-                            <DropiButton
+                            <button className="rounded-xl bg-violet-600/90 px-3 py-2 text-xs font-black text-white transition hover:bg-violet-600" onClick={() => handleOpenForm(order, rowKey)}>{isPrepaid ? "📮 Formulario + comprobante" : "Formulario"}</button>
+                            {!isPrepaid && <DropiButton
                               order={{
                                 customer: order[colKeys.name] || "",
                                 phone: order[colKeys.phone] || "",
@@ -2407,7 +2419,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                                 qty: parseQuantity(order[colKeys.qty]),
                                 total: salePrice,
                               }}
-                            />
+                            />}
                           </div>
                         </td>
                       </tr>
