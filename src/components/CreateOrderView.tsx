@@ -191,6 +191,9 @@ const CreateOrderView = ({
     totalGs?: number;
     qty?: number;
     obs?: string;
+    sku?: string;
+    departamento?: string;
+    sheetRow?: { sheetUrl: string; rowIndex: number };
   } | null;
   onPrefillConsumed?: () => void;
 }) => {
@@ -213,6 +216,8 @@ const CreateOrderView = ({
   const [obs, setObs] = useState("");
   const [shippingType, setShippingType] = useState<"DELIVERY" | "ENCOMIENDA">("DELIVERY");
   const [proofFile, setProofFile] = useState<File | null>(null);
+  // Fila de Pedidos Shopify que se está cargando con el formulario.
+  const [sheetRow, setSheetRow] = useState<{ sheetUrl: string; rowIndex: number } | null>(null);
   // "INTERIOR PAGO ANTICIPADO" siempre es encomienda con comprobante obligatorio.
   const isPrepaidCity = /pago\s*anticipado/i.test(city);
   useEffect(() => {
@@ -690,6 +695,7 @@ const CreateOrderView = ({
         }
 
         if (sheetPrefill) {
+          setSheetRow(sheetPrefill.sheetRow || null);
           if (sheetPrefill.customer) setCustomer(sheetPrefill.customer);
           if (sheetPrefill.phone) setPhone(sheetPrefill.phone);
           if (sheetPrefill.street) setStreet(sheetPrefill.street);
@@ -735,7 +741,10 @@ const CreateOrderView = ({
           };
 
           const cityMatch = findCity(pricesConDepto || []);
-          if (cityMatch) {
+          if (cityMatch && sheetPrefill.departamento && !cityMatch.departamento && !ciudadDepartamentoMap[cityMatch.city]) {
+            setCity(cityMatch.city);
+            setDepartamento(sheetPrefill.departamento);
+          } else if (cityMatch) {
             setCity(cityMatch.city);
             // Auto-select department
             const depto =
@@ -745,7 +754,17 @@ const CreateOrderView = ({
             setCity(sheetPrefill.city);
           }
 
-          if (sheetPrefill.productTitle) {
+          const skuMatch = sheetPrefill.sku
+            ? filteredProducts.find((p: any) => String(p.sku || "").trim().toLowerCase() === String(sheetPrefill.sku).trim().toLowerCase())
+            : null;
+          if (/pago\s*anticipado/i.test(String(cityMatch?.city || sheetPrefill.city || ""))) {
+            toast.info("📮 Interior pago anticipado: subí el comprobante de pago y guardá.", { duration: 8000 });
+          }
+
+          if (skuMatch) {
+            setItems([{ sku: skuMatch.sku, sale_gs: sheetPrefill.totalGs || 0, qty: sheetPrefill.qty || 1 }]);
+            toast.success(`🎯 Producto: ${skuMatch.title}`);
+          } else if (sheetPrefill.productTitle) {
             const titleLower = sheetPrefill.productTitle.toLowerCase().trim();
             const cleanTitle = titleLower
               .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
@@ -874,6 +893,7 @@ const CreateOrderView = ({
     setObs("");
     setShippingType("DELIVERY");
     setProofFile(null);
+    setSheetRow(null);
     setItems([{ sku: "", sale_gs: 0, qty: 1 }]);
   };
 
@@ -974,6 +994,22 @@ const CreateOrderView = ({
       if (insertError) throw insertError;
 
       const generatedOrderNumber = insertedOrder?.order_number || orderNumber;
+
+      if (sheetRow && profile?.email) {
+        // Marca la fila de Pedidos Shopify como cargada (no se vuelve a cargar).
+        await (supabase as any).from("sheet_row_statuses").upsert(
+          {
+            user_email: profile.email,
+            sheet_url: sheetRow.sheetUrl,
+            row_index: sheetRow.rowIndex,
+            status: "CARGADO_MANUAL",
+            order_number: generatedOrderNumber,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_email,sheet_url,row_index" },
+        );
+        setSheetRow(null);
+      }
 
       const { error: newsError } = await supabase.from("news").insert({
         order_id: String(generatedOrderNumber),

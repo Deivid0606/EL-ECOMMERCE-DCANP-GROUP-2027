@@ -190,6 +190,8 @@ Deno.serve(async (req) => {
         const city = resolveCity(order[col.city] || '', cities, cityAliases);
         const product = findProduct(order[col.product] || '');
         const sale = amountOf(order, col.amount);
+        // Interior pago anticipado: se carga a mano con comprobante (formulario).
+        if (city && /pago\s*anticipado/i.test(city.city)) { result.skipped++; continue; }
         if (!city || !product || !sale) {
           result.skipped++;
           if (dryRun && result.skippedRows.length < 15) {
