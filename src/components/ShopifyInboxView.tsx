@@ -2414,7 +2414,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                                 phone: order[colKeys.phone] || "",
                                 department: departamento || "",
                                 city: getCityDisplayName(city) || city,
-                                address: order[colKeys.street] || "",
+                                address: [order[colKeys.street], order[Object.keys(order).find((k) => /referencia/i.test(k)) || ""]]
+                                  .map((v) => String(v || "").trim())
+                                  .filter(Boolean)
+                                  .join(" · "),
                                 product: getProductDisplayName(order[colKeys.product] || ""),
                                 qty: parseQuantity(order[colKeys.qty]),
                                 total: salePrice,

@@ -58,13 +58,39 @@ export const splitName = (full: string) => {
   return { firstName: parts.slice(0, half).join(' '), lastName: parts.slice(half).join(' ') };
 };
 
+// Departamento de las ciudades más comunes (para Dropi, que cubre todo el país aunque
+// la ciudad no esté en nuestras tarifas).
+const PY_DEPTS: Record<string, string[]> = {
+  Central: ['Luque', 'San Lorenzo', 'Capiatá', 'Lambaré', 'Fernando de la Mora', 'Limpio', 'Ñemby', 'Mariano Roque Alonso', 'Itauguá', 'Villa Elisa', 'San Antonio', 'Areguá', 'Ypané', 'Itá', 'Guarambaré', 'J. Augusto Saldívar', 'Villeta', 'Nueva Italia', 'Ypacaraí'],
+  Amambay: ['Pedro Juan Caballero', 'Bella Vista Norte', 'Capitán Bado', 'Zanja Pytã', 'Karapaí'],
+  'Alto Paraná': ['Ciudad del Este', 'Hernandarias', 'Presidente Franco', 'Minga Guazú', 'Santa Rita', 'Naranjal', 'Juan León Mallorquín', 'Itakyry', 'Los Cedrales', 'Colonia Yguazú'],
+  Itapúa: ['Encarnación', 'Hohenau', 'Obligado', 'Bella Vista', 'Coronel Bogado', 'Cambyretá', 'Capitán Miranda', 'María Auxiliadora', 'Natalio', 'Fram', 'Carmen del Paraná', 'Trinidad', 'Edelira'],
+  Caaguazú: ['Coronel Oviedo', 'Caaguazú', 'Campo 9', 'Doctor Juan Eulogio Estigarribia', 'Repatriación', 'Yhú', 'Mauricio José Troche', 'Natalicio Talavera'],
+  Concepción: ['Concepción', 'Horqueta', 'Yby Yaú', 'Belén', 'Loreto'],
+  'San Pedro': ['San Pedro del Ycuamandiyú', 'Santa Rosa del Aguaray', 'San Estanislao', 'Choré', 'Guayaibí', 'Lima', 'Nueva Germania'],
+  Cordillera: ['Caacupé', 'Tobatí', 'Piribebuy', 'Eusebio Ayala', 'San Bernardino', 'Altos', 'Atyrá', 'Emboscada', 'Arroyos y Esteros'],
+  Guairá: ['Villarrica', 'Independencia', 'Paso Yobái', 'Mbocayaty'],
+  Caazapá: ['Caazapá', 'San Juan Nepomuceno', 'Yuty'],
+  Misiones: ['San Juan Bautista', 'San Ignacio', 'Santa Rosa', 'Ayolas', 'Santiago'],
+  Paraguarí: ['Paraguarí', 'Carapeguá', 'Yaguarón', 'Quiindy', 'Ybycuí', 'Acahay', 'Pirayú'],
+  Ñeembucú: ['Pilar', 'Alberdi'],
+  Canindeyú: ['Salto del Guairá', 'Curuguaty', 'Katueté', 'La Paloma', 'Ypejhú', 'Corpus Christi', 'Nueva Esperanza'],
+  'Presidente Hayes': ['Villa Hayes', 'Benjamín Aceval', 'Pozo Colorado'],
+  Boquerón: ['Filadelfia', 'Loma Plata', 'Mariscal Estigarribia', 'Neuland'],
+  'Alto Paraguay': ['Fuerte Olimpo'],
+};
+const DEPT_BY_CITY = new Map<string, string>(
+  Object.entries(PY_DEPTS).flatMap(([dept, cities]) => cities.map((c) => [prodKey(c), dept] as [string, string])),
+);
+export const departmentForCity = (city: string) => DEPT_BY_CITY.get(prodKey(city)) || '';
+
 export const buildDropiPayload = (o: DropiOrder, dropiId: string) => {
   const qty = Math.max(1, Math.round(Number(o.qty) || 1));
   const total = Math.round(Number(o.total) || 0);
   return {
     ...splitName(o.customer),
     phone: dropiPhone(o.phone),
-    department: o.department || '',
+    department: o.department || departmentForCity(o.city || ''),
     city: o.city || '',
     address: o.address || '',
     email: o.email || '',
