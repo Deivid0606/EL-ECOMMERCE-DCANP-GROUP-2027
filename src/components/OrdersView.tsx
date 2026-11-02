@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useProviderScope, useScopeReload } from '@/lib/providerScope';
 import { dayLabel, useRescheduleDialog } from '@/components/RescheduleDialog';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -569,6 +570,8 @@ export default function OrdersView() {
   const [uploadingFile, setUploadingFile] = useState(false);
   
   const loadOrdersRef = useRef<() => Promise<void> | void>(() => {});
+  const { orderInScope } = useProviderScope();
+  useScopeReload(() => void loadOrdersRef.current());
   const reschedule = useRescheduleDialog(() => void loadOrdersRef.current());
   const [statusChangeModal, setStatusChangeModal] = useState<{
     isOpen: boolean;
@@ -708,11 +711,12 @@ export default function OrdersView() {
       console.warn('⚠️ No se pudieron cargar proveedores:', providersRes.error);
     }
 
-    setAllOrders(allOrdersData || []);
+    const scopedOrders = (allOrdersData || []).filter(orderInScope);
+    setAllOrders(scopedOrders);
 
     const { from, to } = getSafeDateRange(dateFrom, dateTo);
 
-    const filteredByDate = (allOrdersData || []).filter(order => {
+    const filteredByDate = scopedOrders.filter(order => {
       const orderDate = getLocalDate(order.created_at);
       if (!orderDate) return false;
       return orderDate >= from && orderDate <= to;

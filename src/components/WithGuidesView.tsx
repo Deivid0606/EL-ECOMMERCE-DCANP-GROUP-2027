@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useProviderScope } from '@/lib/providerScope';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useAuth } from '@/hooks/useAuth';
@@ -45,7 +46,7 @@ const displayClientName = (value: any): string => {
   return String(value || '').replace(/\s+/g, ' ').trim() || 'SIN NOMBRE';
 };
 
-type StockProduct = { id: string; sku: string | null; title: string | null; stock: number | null; real_stock: number | null; provider_email: string | null; created_at: string };
+type StockProduct = { id: string; sku: string | null; title: string | null; stock: number | null; real_stock: number | null; provider_email: string | null; created_at: string; image_url?: string | null };
 type StockLedgerRow = { order_id: string; qty_delivery: number; qty_global: number };
 
 const lc = (v: unknown) => String(v ?? '').trim().toLowerCase();
@@ -115,7 +116,9 @@ export default function WithGuidesView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
   const myEmail = profile?.email || '';
-  const [orders, setOrders] = useState<any[]>([]);
+  const { orderInScope, productInScope } = useProviderScope();
+const [ordersRaw, setOrders] = useState<any[]>([]);
+  const orders = useMemo(() => ordersRaw.filter(orderInScope), [ordersRaw, orderInScope]);
   const [search, setSearch] = useState('');
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
   const [providerSearch, setProviderSearch] = useState('');
@@ -342,7 +345,7 @@ export default function WithGuidesView() {
 
   const loadStock = async (rows: any[]) => {
     const [productsRes, deliveryRes] = await Promise.all([
-      supabase.from('products').select('id, sku, title, stock, real_stock, provider_email, created_at'),
+      supabase.from('products').select('id, sku, title, stock, real_stock, provider_email, created_at, image_url'),
       supabase.from('delivery_stock' as any).select('delivery_email, product_id, quantity'),
     ]);
     if (!productsRes.error) setStockProducts((productsRes.data || []) as StockProduct[]);
@@ -812,13 +815,39 @@ export default function WithGuidesView() {
     }
     return '';
   };
+  const [stockSearch, setStockSearch] = useState('');
+  const [stockView, setStockView] = useState<'todos' | 'usados' | 'bajos' | 'agotados'>('todos');
+  const stockDayBase = useMemo(() => {
+    let list = stockProducts.filter(productInScope);
+    if (role === 'PROVEEDOR') list = list.filter(p => lc(p.provider_email) === lc(myEmail));
+    // Filtro de proveedor de Despacho: sólo los productos del proveedor filtrado.
+    else if (selectedProviders.size > 0) {
+      const sel = new Set(Array.from(selectedProviders).map(lc));
+      list = list.filter(p => sel.has(lc(p.provider_email)));
+    }
+    return list
+      .map(p => {
+        const used = usedToday.get(p.id) || { units: 0, orders: 0 };
+        const real = Number(p.real_stock || 0);
+        return { p, used, real, left: real - used.units };
+      })
+      .filter(r => r.real > 0 || r.used.units > 0);
+  }, [stockProducts, productInScope, usedToday, role, myEmail, selectedProviders]);
   const stockDayRows = useMemo(() => {
-    const mine = role === 'PROVEEDOR' ? stockProducts.filter(p => lc(p.provider_email) === lc(myEmail)) : stockProducts;
-    return mine
-      .map(p => ({ p, used: usedToday.get(p.id) || { units: 0, orders: 0 } }))
-      .filter(r => Number(r.p.real_stock || 0) > 0 || r.used.units > 0)
-      .sort((a, b) => b.used.units - a.used.units || (a.p.title || '').localeCompare(b.p.title || ''));
-  }, [stockProducts, usedToday, role, myEmail]);
+    const t = stockSearch.trim().toLowerCase();
+    return stockDayBase
+      .filter(r => !t || `${r.p.title || ''} ${r.p.sku || ''} ${r.p.provider_email || ''}`.toLowerCase().includes(t))
+      .filter(r => stockView === 'todos' || (stockView === 'usados' ? r.used.units > 0 : stockView === 'bajos' ? r.left > 0 && r.left <= 3 : r.left <= 0))
+      .sort((a, b) => b.used.units - a.used.units || a.left - b.left || (a.p.title || '').localeCompare(b.p.title || ''));
+  }, [stockDayBase, stockSearch, stockView]);
+  const stockKpis = useMemo(() => ({
+    products: stockDayBase.length,
+    real: stockDayBase.reduce((n, r) => n + Math.max(0, r.real), 0),
+    usedUnits: stockDayBase.reduce((n, r) => n + r.used.units, 0),
+    usedOrders: new Set(guidesToday.filter(o => stockDayBase.some(r => getOrderItems(o).some((it: any) => findItemProduct(it, stockProducts)?.id === r.p.id))).map(o => o.id)).size,
+    low: stockDayBase.filter(r => r.left > 0 && r.left <= 3).length,
+    out: stockDayBase.filter(r => r.left <= 0).length,
+  }), [stockDayBase, guidesToday, stockProducts]);
 
   // 🗑️ Admin: eliminar en lote pedidos de UN vendedor.
   const [deleteSeller, setDeleteSeller] = useState('');
@@ -1903,39 +1932,83 @@ export default function WithGuidesView() {
         </button>
       </div>
       {showStockDay && (
-        <div className="mb-4 overflow-auto rounded-2xl border border-emerald-500/30 bg-[#0b1220] p-3">
-          <div className="mb-2 text-xs text-slate-400">
-            Stock real de cada producto y cuántas unidades salieron hoy en guías. El stock se descuenta al quedar ENTREGADO / ENCOMIENDA ENTREGADA.
-            Si no queda stock real, sus pedidos no se pueden seleccionar para imprimir (⛔).
+        <div className="mb-4 rounded-3xl border border-emerald-500/25 bg-gradient-to-b from-[#0d1626] to-[#080d18] p-4 shadow-2xl">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-black text-white">📦 Stock del día</h3>
+              <p className="text-xs text-slate-400">
+                {pyToday().split('-').reverse().join('/')} · stock real y lo que salió hoy en guías
+                {role !== 'PROVEEDOR' && selectedProviders.size > 0 ? ` · ${selectedProviders.size} proveedor(es) filtrado(s)` : ''}
+              </p>
+            </div>
+            <input
+              className="w-full max-w-xs rounded-xl border border-slate-700 bg-[#070b18] px-3 py-2 text-xs text-white outline-none focus:border-emerald-400"
+              placeholder="🔎 Buscar producto o SKU…"
+              value={stockSearch}
+              onChange={e => setStockSearch(e.target.value)}
+            />
           </div>
-          <table className="w-full min-w-[560px] text-xs">
-            <thead>
-              <tr className="text-left uppercase tracking-wider text-slate-500">
-                <th className="py-1.5">Producto</th>
-                <th className="py-1.5 text-right">Stock real</th>
-                <th className="py-1.5 text-right">Usados hoy</th>
-                <th className="py-1.5 text-right">Quedan</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {stockDayRows.map(({ p, used }) => {
-                const left = Number(p.real_stock || 0) - used.units;
-                return (
-                  <tr key={p.id}>
-                    <td className="py-1.5"><b className="text-slate-100">{p.title || p.sku}</b> <span className="text-slate-500">{p.sku}</span></td>
-                    <td className="py-1.5 text-right font-black text-slate-100">{Number(p.real_stock || 0)}</td>
-                    <td className="py-1.5 text-right text-sky-300">{used.units ? `${used.units} (${used.orders} pedido${used.orders === 1 ? '' : 's'})` : '—'}</td>
-                    <td className={`py-1.5 text-right font-black ${left <= 0 ? 'text-rose-400' : left <= 3 ? 'text-amber-300' : 'text-emerald-300'}`}>
-                      {left <= 0 ? '⛔ 0' : left}
-                    </td>
-                  </tr>
-                );
-              })}
-              {stockDayRows.length === 0 && (
-                <tr><td colSpan={4} className="py-6 text-center text-slate-500">Sin productos con stock real ni guías hoy.</td></tr>
-              )}
-            </tbody>
-          </table>
+
+          <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {[
+              { k: 'todos', label: 'Productos', value: stockKpis.products, sub: `${stockKpis.real} u. reales`, tone: 'text-white' },
+              { k: 'usados', label: 'Usados hoy', value: stockKpis.usedUnits, sub: `${stockKpis.usedOrders} pedido(s)`, tone: 'text-sky-300' },
+              { k: 'bajos', label: 'Quedan pocos', value: stockKpis.low, sub: '3 o menos', tone: 'text-amber-300' },
+              { k: 'agotados', label: 'Agotados', value: stockKpis.out, sub: 'no se imprimen', tone: 'text-rose-400' },
+            ].map(c => (
+              <button
+                key={c.k}
+                onClick={() => setStockView(c.k as typeof stockView)}
+                className={`rounded-2xl border p-3 text-left transition ${stockView === c.k ? 'border-emerald-400/60 bg-emerald-500/10' : 'border-slate-800 bg-slate-900/50 hover:border-slate-600'}`}
+              >
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{c.label}</div>
+                <div className={`text-2xl font-black ${c.tone}`}>{c.value}</div>
+                <div className="text-[10px] text-slate-500">{c.sub}</div>
+              </button>
+            ))}
+            <div className="col-span-2 rounded-2xl border border-slate-800 bg-slate-900/50 p-3 sm:col-span-1">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Uso del stock hoy</div>
+              <div className="text-2xl font-black text-emerald-300">
+                {stockKpis.real ? Math.round((stockKpis.usedUnits / stockKpis.real) * 100) : 0}%
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                <div className="h-full rounded-full bg-emerald-400" style={{ width: `${Math.min(100, stockKpis.real ? (stockKpis.usedUnits / stockKpis.real) * 100 : 0)}%` }} />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {stockDayRows.map(({ p, used, real, left }) => {
+              const pct = real > 0 ? Math.min(100, (used.units / real) * 100) : 100;
+              const tone = left <= 0 ? 'rose' : left <= 3 ? 'amber' : 'emerald';
+              return (
+                <div key={p.id} className={`flex gap-3 rounded-2xl border p-3 ${left <= 0 ? 'border-rose-500/40 bg-rose-500/5' : 'border-slate-800 bg-slate-900/40'}`}>
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-800">
+                    {p.image_url ? <img src={p.image_url} alt="" className="h-full w-full object-cover" /> : <span className="text-lg">📦</span>}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-bold text-white" title={p.title || ''}>{p.title || p.sku}</div>
+                    <div className="truncate text-[10px] text-slate-500">{p.sku}{role !== 'PROVEEDOR' && p.provider_email ? ` · ${p.provider_email}` : ''}</div>
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                      <div className={`h-full rounded-full ${tone === 'rose' ? 'bg-rose-500' : tone === 'amber' ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">Real <b className="text-white">{real}</b> · Hoy <b className="text-sky-300">{used.units}</b>{used.orders ? <span className="text-slate-500"> ({used.orders} ped.)</span> : null}</span>
+                      <span className={`rounded-full px-2 py-0.5 font-black ${tone === 'rose' ? 'bg-rose-500/20 text-rose-300' : tone === 'amber' ? 'bg-amber-500/20 text-amber-200' : 'bg-emerald-500/15 text-emerald-300'}`}>
+                        {left <= 0 ? '⛔ Agotado' : `Quedan ${left}`}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {stockDayRows.length === 0 && (
+              <div className="col-span-full py-8 text-center text-sm text-slate-500">Sin productos para mostrar con estos filtros.</div>
+            )}
+          </div>
+          <p className="mt-3 text-[10px] text-slate-500">
+            El stock se descuenta al quedar ENTREGADO / ENCOMIENDA ENTREGADA. Los pedidos de productos agotados no se pueden seleccionar para imprimir (⛔).
+          </p>
         </div>
       )}
 

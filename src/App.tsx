@@ -9,6 +9,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/useAuth";
+import { ProviderScopeProvider } from "@/lib/providerScope";
 import NewPasswordModal from "./components/NewPasswordModal.tsx";
 import ViewErrorBoundary from "./components/ViewErrorBoundary.tsx";
 
@@ -73,6 +74,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <AuthProvider>
+        <ProviderScopeProvider>
         <Toaster />
         <Sonner />
         <NewPasswordModal />
@@ -111,6 +113,7 @@ const App = () => (
           </Routes>
         </HashRouter>
         </ViewErrorBoundary>
+              </ProviderScopeProvider>
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>

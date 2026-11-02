@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useProviderScope } from '@/lib/providerScope';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useAuth } from '@/hooks/useAuth';
@@ -367,8 +368,11 @@ export default function Dashboard() {
   const [dateFrom, setDateFrom] = useState(firstDayOfMonth());
   const [dateTo, setDateTo] = useState(todayPY());
   const cached = dashboardCache?.email === email ? dashboardCache : null;
-  const [allOrders, setAllOrders] = useState<OrderRow[]>(cached?.allOrders || []);
-  const [products, setProducts] = useState<ProductRow[]>(cached?.products || []);
+  const { orderInScope, productInScope } = useProviderScope();
+const [allOrdersRaw, setAllOrders] = useState<OrderRow[]>(cached?.allOrders || []);
+  const allOrders = useMemo(() => allOrdersRaw.filter(orderInScope), [allOrdersRaw, orderInScope]);
+  const [productsRaw, setProducts] = useState<ProductRow[]>(cached?.products || []);
+  const products = useMemo(() => productsRaw.filter(productInScope), [productsRaw, productInScope]);
   const [profiles, setProfiles] = useState<ProfileRow[]>(cached?.profiles || []);
   const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStockRow[]>(cached?.deliveryStocks || []);
   const [deliveryRates, setDeliveryRates] = useState<Record<string, number>>(cached?.deliveryRates || {});

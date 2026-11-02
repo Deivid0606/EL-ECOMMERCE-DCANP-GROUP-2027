@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useProviderScope } from '@/lib/providerScope';
 import ImageUploadField from "./ImageUploadField";
 import WebPageBuilder from "./WebPageBuilder";
 import { createPortal } from "react-dom";
@@ -977,7 +978,9 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const myEmail = normalizeEmail(profile?.email);
   const [mainView, setMainView] = useState<"productos" | "paginas">("productos");
 
-  const [products, setProducts] = useState<Product[]>([]);
+  const { orderInScope, productInScope } = useProviderScope();
+const [productsRaw, setProducts] = useState<Product[]>([]);
+  const products = useMemo(() => productsRaw.filter(productInScope), [productsRaw, productInScope]);
   const [profiles, setProfiles] = useState<{ email: string; name: string | null; logo_url: string | null; phone: string | null }[]>([]);
   const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStock[]>([]);
   const [deliveryUsers, setDeliveryUsers] = useState<{ email: string; name: string }[]>([]);

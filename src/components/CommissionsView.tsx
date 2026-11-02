@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useProviderScope } from '@/lib/providerScope';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -57,14 +58,17 @@ export default function CommissionsView() {
   const role = profile?.role;
   const myEmail = profile?.email || '';
   
-  const [orders, setOrders] = useState<any[]>([]);
+  const { orderInScope, productInScope } = useProviderScope();
+const [ordersRaw, setOrders] = useState<any[]>([]);
+  const orders = useMemo(() => ordersRaw.filter(orderInScope), [ordersRaw, orderInScope]);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('PENDIENTE');
   const [filterVendor, setFilterVendor] = useState('');
   const [filterProvider, setFilterProvider] = useState('');
   const [vendors, setVendors] = useState<any[]>([]);
   const [providers, setProviders] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
+  const [productsRaw, setProducts] = useState<any[]>([]);
+  const products = useMemo(() => productsRaw.filter(productInScope), [productsRaw, productInScope]);
   const [commissionRequests, setCommissionRequests] = useState<any[]>([]);
   const [dateFrom, setDateFrom] = useState(() => pyDaysAgo(30));
   const [dateTo, setDateTo] = useState(() => pyToday());
