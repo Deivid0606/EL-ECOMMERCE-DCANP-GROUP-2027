@@ -485,7 +485,7 @@ export default function WithGuidesView() {
     const { error } = await (supabase as any).rpc('release_rescheduled_order', { p_order_id: o.id });
     setReleasingId(null);
     if (error) { toast.error(error.message); return; }
-    toast.success(`↩️ ${o.order_number} desasignado. Aparece en Despacho el ${dayLabel(String(o.rescheduled_for))}.`);
+    toast.success(`↩️ ${o.order_number} desasignado: el stock volvió y aparece en Despacho el ${dayLabel(String(o.rescheduled_for))}.`);
     void load();
   };
 
@@ -766,6 +766,49 @@ export default function WithGuidesView() {
   };
 
   const getSelectedOrders = () => visibleOrders.filter(o => selectedIds.has(o.id));
+
+  // 🗑️ Admin: eliminar en lote pedidos de UN vendedor.
+  const [deleteSeller, setDeleteSeller] = useState('');
+  const [deletingBulk, setDeletingBulk] = useState(false);
+  const sellerOptions = useMemo(() => {
+    const m = new Map<string, number>();
+    visibleOrders.forEach(o => {
+      const e = String(o.created_by || '').toLowerCase().trim();
+      if (e) m.set(e, (m.get(e) || 0) + 1);
+    });
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [visibleOrders]);
+  const sellerOrders = useMemo(
+    () => (deleteSeller ? visibleOrders.filter(o => String(o.created_by || '').toLowerCase().trim() === deleteSeller) : []),
+    [visibleOrders, deleteSeller],
+  );
+  const sellerSelected = sellerOrders.filter(o => selectedIds.has(o.id));
+  const deleteSellerOrders = async () => {
+    if (!deleteSeller || !sellerSelected.length) { toast.error('Elegí el vendedor y seleccioná sus pedidos'); return; }
+    const other = selectedIds.size - sellerSelected.length;
+    if (!window.confirm(
+      `🗑️ ELIMINAR ${sellerSelected.length} pedido(s) de ${deleteSeller}?\n\n` +
+      sellerSelected.slice(0, 15).map(o => `${o.order_number} · ${o.customer_name}`).join('\n') +
+      (sellerSelected.length > 15 ? `\n… y ${sellerSelected.length - 15} más` : '') +
+      (other > 0 ? `\n\n(${other} seleccionado(s) de otros vendedores NO se tocan)` : '') +
+      '\n\nNo se puede deshacer. Si alguno bajó stock, vuelve al stock.'
+    )) return;
+    if (window.prompt('Para confirmar escribí ELIMINAR') !== 'ELIMINAR') { toast.info('Cancelado'); return; }
+    setDeletingBulk(true);
+    const { data, error } = await (supabase as any).rpc('admin_delete_seller_orders', {
+      p_seller_email: deleteSeller,
+      p_order_ids: sellerSelected.map(o => o.id),
+    });
+    setDeletingBulk(false);
+    if (error) { toast.error(error.message); return; }
+    const skipped = (data?.skipped || []) as { order_number: string; why: string }[];
+    toast.success(`🗑️ ${data?.deleted || 0} pedido(s) eliminados de ${deleteSeller}`, { duration: 8000 });
+    if (skipped.length) {
+      toast.warning(`No se eliminaron ${skipped.length}: ` + skipped.slice(0, 6).map(x => `${x.order_number} (${x.why})`).join(', '), { duration: 12000 });
+    }
+    setSelectedIds(new Set());
+    void load();
+  };
   // ✏️ Editar productos / 🔗 fusionar pedidos del mismo cliente.
   const viewPaymentProof = async (o: any) => {
     if (!o.payment_proof_path) { toast.error('Sin comprobante'); return; }
@@ -1742,6 +1785,40 @@ export default function WithGuidesView() {
         >
           {showWaiting ? '← Volver a los pedidos de hoy' : `📅 ${waitingDateCount} reagendado(s) esperando su fecha`}
         </button>
+      )}
+
+      {role === 'ADMIN' && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-rose-500/30 bg-rose-500/5 p-3 text-xs">
+          <b className="text-rose-200">🗑️ Eliminar pedidos de un vendedor</b>
+          <select
+            className="rounded-lg border border-slate-700 bg-[#070b18] px-2 py-1.5 text-xs text-white"
+            value={deleteSeller}
+            onChange={e => setDeleteSeller(e.target.value)}
+          >
+            <option value="">Elegí el correo del vendedor…</option>
+            {sellerOptions.map(([email, n]) => (
+              <option key={email} value={email}>{email} ({n})</option>
+            ))}
+          </select>
+          {deleteSeller && (
+            <>
+              <button
+                className="nav-btn !px-3 !py-1.5 !text-xs"
+                onClick={() => setSelectedIds(new Set(sellerOrders.map(o => o.id)))}
+              >
+                ☑️ Seleccionar sus {sellerOrders.length} pedidos
+              </button>
+              <button
+                className="nav-btn !px-3 !py-1.5 !text-xs !bg-rose-600 !text-white disabled:opacity-40"
+                disabled={deletingBulk || !sellerSelected.length}
+                onClick={() => void deleteSellerOrders()}
+              >
+                {deletingBulk ? 'Eliminando…' : `🗑️ Eliminar ${sellerSelected.length} seleccionado(s)`}
+              </button>
+              <span className="text-slate-400">Sólo se eliminan los de este vendedor. Entregados, rendidos, en cierre o con comisión pagada no se borran.</span>
+            </>
+          )}
+        </div>
       )}
 
       {/* Acciones masivas */}
