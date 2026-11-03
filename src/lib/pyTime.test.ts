@@ -29,3 +29,11 @@ describe('installPyTimeZone', () => {
     expect(d.toLocaleTimeString('es-PY', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false })).toBe('01:30');
   });
 });
+
+describe('pyStart / pyEnd con fecha vacía', () => {
+  it('no arma una fecha inválida si el filtro quedó vacío', () => {
+    expect(pyEnd('')).toMatch(/^\d{4}-\d{2}-\d{2}T23:59:59\.999[+-]\d{2}:\d{2}$/);
+    expect(pyStart('')).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00[+-]\d{2}:\d{2}$/);
+    expect(pyEnd('2026-11-03')).toBe('2026-11-03T23:59:59.999-03:00');
+  });
+});
