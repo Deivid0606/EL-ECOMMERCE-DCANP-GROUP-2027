@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { customerMessageVariant } from '@/lib/waMessages';
+import { orderLocationText } from '@/lib/orderLocation';
 
 type QueueItem = {
   id: string;
@@ -10,6 +11,11 @@ type QueueItem = {
   phone: string;
   url: string;
   state: 'pending' | 'sent' | 'skipped';
+  /** Datos del pedido para rearmar el mensaje con el link de seguimiento. */
+  order?: any;
+  pos?: number;
+  /** Ya se intentó sumar el link de seguimiento. */
+  ready?: boolean;
 };
 type Queue = { items: QueueItem[]; index: number; nextAt: number; minutes: number; paused: boolean; lastSent?: number };
 
@@ -63,6 +69,8 @@ export function useWhatsAppQueue(opts: {
   normalizePhone: (p: string) => string;
   onSent: (orderId: string) => void;
   onUnsent?: (orderId: string) => void;
+  /** Link de seguimiento del pedido (se suma al mensaje si hay). */
+  getTrackingUrl?: (order: any) => Promise<string | null>;
 }) {
   const [queue, setQueue] = useState<Queue | null>(() => restore());
   const [setup, setSetup] = useState<any[] | null>(null);
@@ -80,8 +88,31 @@ export function useWhatsAppQueue(opts: {
   }, [queue]);
 
   const current = queue ? queue.items[queue.index] : null;
+
+  // Mientras corre la espera se prepara el link de seguimiento del siguiente cliente.
+  useEffect(() => {
+    if (!queue || !current || current.ready || !current.order || !optsRef.current.getTrackingUrl) return;
+    let cancelled = false;
+    const idx = queue.index;
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 12_000));
+    void Promise.race([optsRef.current.getTrackingUrl(current.order), timeout]).then((track) => {
+      if (cancelled) return;
+      setQueue((q) => {
+        if (!q || !q.items[idx]) return q;
+        const it = q.items[idx];
+        const digits = optsRef.current.normalizePhone(it.phone);
+        const text = customerMessageVariant(it.order, it.phone, it.pos ?? idx, track, Boolean(orderLocationText(it.order)));
+        const items = q.items.map((x, j) => (j === idx ? { ...x, url: `https://wa.me/${digits}?text=${encodeURIComponent(text)}`, ready: true } : x));
+        return { ...q, items };
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue?.index, current?.ready]);
   const wait = queue ? queue.nextAt - now : 0;
-  const due = Boolean(queue && !queue.paused && current && wait <= 0);
+  const due = Boolean(queue && !queue.paused && current && wait <= 0 && current.ready !== false);
 
   // Aviso (vibra / suena) cuando le toca al siguiente.
   useEffect(() => {
@@ -105,13 +136,21 @@ export function useWhatsAppQueue(opts: {
     const items: QueueItem[] = setup.map((o, i) => {
       const raw = getPhone(o);
       const phone = normalizePhone(raw);
+      const order = {
+        id: o.id, order_number: o.order_number, customer_name: o.customer_name, city: o.city, street: o.street,
+        district: o.district, obs: o.obs, total_gs: o.total_gs, items_json: o.items_json, status: o.status,
+        assigned_delivery: o.assigned_delivery,
+      };
       return {
         id: o.id,
         orderNumber: o.order_number || String(o.id).slice(0, 8),
         name: o.customer_name || '',
         phone: raw,
-        url: phone ? `https://wa.me/${phone}?text=${encodeURIComponent(customerMessageVariant(o, raw, i))}` : '',
+        url: phone ? `https://wa.me/${phone}?text=${encodeURIComponent(customerMessageVariant(o, raw, i, null, Boolean(orderLocationText(o))))}` : '',
         state: phone ? 'pending' : 'skipped',
+        order,
+        pos: i,
+        ready: !optsRef.current.getTrackingUrl,
       };
     });
     const first = items.findIndex((it) => it.state === 'pending');
@@ -229,6 +268,8 @@ export function useWhatsAppQueue(opts: {
             </div>
             {queue.paused ? (
               <div className="mt-1 text-xs text-amber-300">⏸ En pausa</div>
+            ) : wait <= 0 && current.ready === false ? (
+              <div className="mt-1 text-xs text-sky-300">🔗 Preparando el link de seguimiento…</div>
             ) : due ? (
               <div className="mt-1 text-xs text-emerald-300">✅ Ya podés enviar</div>
             ) : (

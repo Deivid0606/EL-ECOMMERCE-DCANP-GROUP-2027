@@ -30,3 +30,11 @@ describe('customerMessageVariant', () => {
     }
   });
 });
+
+describe('link de seguimiento en el mensaje', () => {
+  it('lo agrega cuando hay link y no cuando no hay', () => {
+    const url = 'https://app.test/?seguimiento=abc123';
+    expect(customerMessageVariant(order, '0971800315', 0, url)).toContain(url);
+    expect(customerMessageVariant(order, '0971800315', 0)).not.toContain('seguimiento');
+  });
+});

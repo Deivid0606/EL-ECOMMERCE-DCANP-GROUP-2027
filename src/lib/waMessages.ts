@@ -62,14 +62,29 @@ export function orderGuideText(order: any, phone: string) {
     .join('\n');
 }
 
+// Cuando el vendedor ya cargó la ubicación: sólo se confirma, no se vuelve a pedir.
+const CONFIRMS = [
+  '*Ya tengo su ubicación cargada 📍 ¿Me confirma que es ahí donde lo recibe?*',
+  '*Tengo su ubicación en el mapa. ¿Me confirma que la entrega es en ese lugar?*',
+  '*Ya cuento con su ubicación 👍 ¿Sigue siendo la misma para la entrega?*',
+];
+
+const TRACK_LINES = [
+  (u: string) => `📍 Seguí tu pedido en vivo acá: ${u}`,
+  (u: string) => `🛵 Podés ver cuándo llega tu pedido en este link: ${u}`,
+  (u: string) => `📲 Link de seguimiento de tu pedido: ${u}`,
+];
+
 /**
  * Mensaje número `index` de una tanda: mensajes seguidos nunca repiten el mismo
- * saludo, pedido de ubicación ni cierre.
+ * saludo, pedido de ubicación ni cierre. Con `trackUrl` suma el link de
+ * seguimiento; con `hasLocation` confirma la ubicación en vez de pedirla.
  */
-export function customerMessageVariant(order: any, phone: string, index: number) {
+export function customerMessageVariant(order: any, phone: string, index: number, trackUrl?: string | null, hasLocation = false) {
   const name = firstName(order?.customer_name) || '';
   const g = GREETINGS[index % GREETINGS.length](name);
-  const a = ASKS[(index * 2 + 1) % ASKS.length];
+  const a = hasLocation ? CONFIRMS[index % CONFIRMS.length] : ASKS[(index * 2 + 1) % ASKS.length];
   const c = CLOSINGS[(index * 3 + 2) % CLOSINGS.length];
-  return [g, '', a, '', orderGuideText(order, phone), '', c].join('\n');
+  const track = trackUrl ? ['', TRACK_LINES[index % TRACK_LINES.length](trackUrl)] : [];
+  return [g, '', a, '', orderGuideText(order, phone), ...track, '', c].join('\n');
 }

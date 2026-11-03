@@ -6,7 +6,8 @@ import { dayLabel, useRescheduleDialog } from '@/components/RescheduleDialog';
 import { useWhatsAppQueue } from '@/components/WhatsAppQueue';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { generateTrackingLink } from '@/lib/tracking';
+import { ensureTrackingUrl, generateTrackingLink, orderLocationText } from '@/lib/tracking';
+import { customerMessageVariant } from '@/lib/waMessages';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { pyToday, pyStart, pyEnd, pyDateKey } from '@/lib/pyTime';
@@ -2638,7 +2639,23 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     normalizePhone: normalizeWhatsAppPhone,
     onSent: (orderId: string) => setContacted(orderId, true),
     onUnsent: (orderId: string) => setContacted(orderId, false),
+    getTrackingUrl: ensureTrackingUrl,
   });
+
+  // 📱 Un cliente: abre WhatsApp con el mensaje, la guía y el link de seguimiento.
+  const openClientWhatsApp = async (o: any) => {
+    const raw = getOrderPhone(o);
+    const phone = normalizeWhatsAppPhone(raw);
+    if (!phone) return;
+    // La pestaña se abre ya (con el toque) para que el celular no la bloquee; el link se completa enseguida.
+    const tab = window.open('', '_blank');
+    if (!o.contacted) setContacted(o.id, true);
+    const track = await Promise.race([ensureTrackingUrl(o), new Promise<null>(r => setTimeout(() => r(null), 8000))]);
+    const text = customerMessageVariant(o, raw, Math.floor(Math.random() * 7), track, Boolean(orderLocationText(o)));
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+    if (tab) tab.location.href = url;
+    else window.location.href = url;
+  };
 
   const toggleGuideSelection = (orderId: string) => {
     setSelectedGuideIds(previous => {
@@ -4487,7 +4504,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                           href={getWhatsAppUrl(o)}
                           target="_blank"
                           rel="noopener noreferrer"
-                          onClick={() => { if (!o.contacted) setContacted(o.id, true); }}
+                          onClick={e => { e.preventDefault(); void openClientWhatsApp(o); }}
                           className="font-bold text-green-600 hover:underline"
                           title="Abrir WhatsApp con mensaje y guía"
                         >
