@@ -76,6 +76,55 @@ export async function resolveCoords(text: string): Promise<LatLng | null> {
 
 export const trackingUrl = (token: string) => `${window.location.origin}/?seguimiento=${token}`;
 
+import { orderLocationText } from '@/lib/orderLocation';
+export { orderLocationText };
+
+// Coordenadas sin preguntar nada (sólo coordenadas o links de Maps; no busca direcciones escritas).
+async function quietCoords(text: string | null): Promise<LatLng | null> {
+  if (!text) return null;
+  const direct = parseCoords(text);
+  if (direct) return direct;
+  const url = text.match(/https?:\/\/\S+/)?.[0];
+  if (!url) return null;
+  try {
+    const { data, error } = await supabase.functions.invoke('resolve-maps-link', { body: { url } });
+    if (error) return null;
+    if (data?.lat && data?.lng) return { lat: Number(data.lat), lng: Number(data.lng) };
+    return data?.url ? parseCoords(String(data.url)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Ubicación del pedido cargada por el vendedor (link de Maps o coordenadas), si hay. */
+export const orderCoordsFromText = (order: any) => quietCoords(orderLocationText(order));
+
+const FINISHED = ['ENTREGADO', 'ENCOMIENDA ENTREGADA', 'CANCELADO', 'CANCELÓ POR WHATSAPP', 'NO DESEA', 'RECHAZADO', 'RECHAZADO EN EL LUGAR', 'DEVUELTO A DEPÓSITO'];
+
+/**
+ * Link de seguimiento sin preguntar nada (para el mensaje de WhatsApp): usa la
+ * ubicación ya guardada o la que el vendedor pegó en el pedido. Null si el
+ * pedido no tiene delivery o ya terminó.
+ */
+export async function ensureTrackingUrl(order: any): Promise<string | null> {
+  if (!order?.id || !String(order?.assigned_delivery || '').trim()) return null;
+  if (FINISHED.includes(String(order?.status || '').toUpperCase())) return null;
+  try {
+    const { data: cur } = await (supabase as any).rpc('get_order_destination', { p_order_id: order.id });
+    const dest = cur?.lat ? null : await orderCoordsFromText(order);
+    const { data, error } = await (supabase as any).rpc('create_tracking_link', {
+      p_order_id: order.id,
+      p_dest_lat: dest?.lat ?? null,
+      p_dest_lng: dest?.lng ?? null,
+      p_self_tracker: false,
+    });
+    if (error || !data) return null;
+    return trackingUrl(String(data));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Genera el link de seguimiento de un pedido, lo copia y ofrece enviarlo por
  * WhatsApp al cliente. Pide (opcional) la ubicación del cliente para calcular
@@ -83,10 +132,14 @@ export const trackingUrl = (token: string) => `${window.location.origin}/?seguim
  */
 export async function generateTrackingLink(order: { id: string; phone?: string | null; customer_name?: string | null; order_number?: string | null; status?: string | null; assigned_delivery?: string | null }) {
   const { data: currentDest } = await (supabase as any).rpc('get_order_destination', { p_order_id: order.id });
-  const choice = await askCustomerLocation({ current: currentDest?.lat ? { lat: Number(currentDest.lat), lng: Number(currentDest.lng) } : null });
+  // Si todavía no hay ubicación guardada, se usa la que cargó el vendedor en el pedido.
+  const fromSeller = currentDest?.lat ? null : await orderCoordsFromText(order);
+  const choice = await askCustomerLocation({
+    current: currentDest?.lat ? { lat: Number(currentDest.lat), lng: Number(currentDest.lng) } : fromSeller,
+  });
   if (choice.action === 'cancel') return null;
 
-  let dest: LatLng | null = null;
+  let dest: LatLng | null = choice.action === 'keep' ? fromSeller : null;
   if (choice.action === 'set') {
     const loading = toast.loading('Buscando la ubicación…');
     dest = await resolveCoords(choice.text);
