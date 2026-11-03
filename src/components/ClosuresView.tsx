@@ -64,6 +64,10 @@ const STATUS_1_OPTIONS = [
   'DEVUELTO A DEPÓSITO',
   'REAGENDADO',
   'NO CONTESTA',
+  'NO DESEA',
+  'RECHAZADO',
+  'RECHAZADO EN EL LUGAR',
+  'CANCELÓ POR WHATSAPP',
 ] as const;
 
 
@@ -4350,7 +4354,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
               
               const getStatusBadgeClass = (status: string) => {
                 if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') return 'badge-entregado';
-                if (status === 'CANCELADO' || status === 'NO CONTESTA') return 'badge-cancelado';
+                if (['CANCELADO', 'NO CONTESTA', 'NO DESEA', 'RECHAZADO', 'RECHAZADO EN EL LUGAR', 'CANCELÓ POR WHATSAPP'].includes(status)) return 'badge-cancelado';
                 if (status === 'DEVUELTO A DEPÓSITO') return 'badge-warning';
                 if (status === 'REAGENDADO') return 'badge-info';
                 return 'badge-pendiente';
