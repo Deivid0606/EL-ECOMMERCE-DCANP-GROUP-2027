@@ -148,10 +148,11 @@ export default function Index() {
       }
 
       const defaultView =
-        profile.role === 'DESPACHANTE' ||
         profile.role === 'DELIVERY'
-          ? 'orders'
-          : 'dashboard';
+          ? 'closures'
+          : profile.role === 'DESPACHANTE'
+            ? 'orders'
+            : 'dashboard';
 
       setCurrentView(defaultView as ViewName);
     }
@@ -343,6 +344,7 @@ export default function Index() {
         return <DashboardView />;
 
       case 'orders':
+        if (String(profile?.role || '') === 'DELIVERY') return <ClosuresView />;
         return <OrdersView />;
 
       case 'news':
