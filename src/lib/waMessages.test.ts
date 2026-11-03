@@ -22,10 +22,13 @@ describe('customerMessageVariant', () => {
       const m = customerMessageVariant(order, '0971800315', i);
       expect(m).toContain('Norma');
       expect(m).toContain('SHOPIFY123');
-      expect(m).toContain('Cepillo 9 en 1 x2');
+      expect(m).toContain('Cepillo 9 en 1 *x2*');
       expect(m).toContain('Concepción');
       expect(m).toContain('Cnel Martínez casi PJC');
-      expect(m).toContain('Total: Gs 199.000');
+      expect(m).toContain('TOTAL A PAGAR: Gs 199.000');
+      expect(m).toContain('*Teléfono:* 0971 800 315');
+      // Sin emojis de 4 bytes (WhatsApp los rompe en los links)
+      expect(/[\u{1F000}-\u{1FFFF}]/u.test(m)).toBe(false);
       expect(m.match(/Gs/g)?.length).toBe(1);
     }
   });
