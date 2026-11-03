@@ -28,8 +28,15 @@ export const localPhone = (phone: string) => {
   return d.length === 10 ? `${d.slice(0, 4)} ${d.slice(4, 7)} ${d.slice(7)}` : d;
 };
 
-const LINE = '━━━━━━━━━━━━━━━━';
-const section = (title: string, lines: string[]) => [LINE, title, LINE, ...lines].join('\n');
+const LINE = '━━━━━━━━━━━━━━━━━━━━';
+// WhatsApp no centra: se agregan espacios «de cifra» (no se borran) delante del texto.
+const PAD = '\u2007';
+const WIDTH = 30;
+export const centered = (text: string) => {
+  const visible = text.replace(/\*/g, '').replace(/[\uFE0F]/g, '').length;
+  return PAD.repeat(Math.max(0, Math.round((WIDTH - visible) / 2.4))) + text;
+};
+const section = (title: string, lines: string[]) => [LINE, centered(title), LINE, ...lines].join('\n');
 
 const GREETINGS = [
   (n: string) => `*¡Buenas ${n}!* ✨\nLe escribo para coordinar la entrega de su pedido.`,
@@ -77,7 +84,7 @@ export function orderGuideText(order: any, phone: string) {
     `*Pedido:* ${order?.order_number || String(order?.id || '').slice(0, 8) || '-'}`,
     ...products,
     '',
-    `*TOTAL A PAGAR: Gs ${nf(Number(order?.total_gs || 0))}*`,
+    centered(`*TOTAL A PAGAR: Gs ${nf(Number(order?.total_gs || 0))}*`),
   ]);
   const delivery = section(
     '☎️ *DATOS DE ENTREGA*',
@@ -98,12 +105,15 @@ export function orderGuideText(order: any, phone: string) {
  */
 export function customerMessageVariant(order: any, phone: string, index: number, trackUrl?: string | null, hasLocation = false) {
   const name = firstName(order?.customer_name);
-  const greeting = GREETINGS[index % GREETINGS.length](name);
+  const greeting = GREETINGS[index % GREETINGS.length](name)
+    .split('\n')
+    .map((l, i) => (i === 0 ? centered(l) : l))
+    .join('\n');
   const ask = hasLocation ? CONFIRMS[index % CONFIRMS.length] : ASKS[(index * 2 + 1) % ASKS.length];
   const closing = CLOSINGS[(index * 3 + 2) % CLOSINGS.length];
   const blocks = [greeting, orderGuideText(order, phone), ask];
   if (trackUrl) blocks.push(`${TRACK_TITLES[index % TRACK_TITLES.length]}\n${trackUrl}`);
-  blocks.push(`${LINE}\n${closing}`);
+  blocks.push(`${LINE}\n${centered(closing)}`);
   // Una línea en blanco entre cada bloque para que se lea ordenado.
   return blocks.join('\n\n');
 }
