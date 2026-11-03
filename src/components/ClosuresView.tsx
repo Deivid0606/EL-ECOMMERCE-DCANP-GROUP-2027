@@ -3,6 +3,7 @@ import { useProviderScope } from '@/lib/providerScope';
 import ClosurePaymentsPanel from './ClosurePaymentsPanel';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { dayLabel, useRescheduleDialog } from '@/components/RescheduleDialog';
+import { useWhatsAppQueue } from '@/components/WhatsAppQueue';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { generateTrackingLink } from '@/lib/tracking';
@@ -2617,6 +2618,17 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     [displayedOrders, selectedGuideIds]
   );
 
+  // 📲 Escribir a todos los clientes seleccionados (uno cada X minutos).
+  const waQueue = useWhatsAppQueue({
+    getPhone: getOrderPhone,
+    normalizePhone: normalizeWhatsAppPhone,
+    onSent: (orderId: string) => {
+      const now = new Date().toISOString();
+      setOrders(prev => prev.map(o => (o.id === orderId ? { ...o, contacted: true, contacted_at: now, contacted_by: myEmail } : o)));
+      void supabase.from('orders').update({ contacted: true, contacted_at: now, contacted_by: myEmail, updated_at: now } as any).eq('id', orderId);
+    },
+  });
+
   const toggleGuideSelection = (orderId: string) => {
     setSelectedGuideIds(previous => {
       const next = new Set(previous);
@@ -4111,6 +4123,17 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             <button
               type="button"
               className="nav-btn"
+              style={{ background: '#059669', color: 'white' }}
+              onClick={() => waQueue.start(selectedGuideOrders)}
+              disabled={selectedGuideOrders.length === 0 || waQueue.running}
+              title="Un WhatsApp distinto a cada cliente, con espera entre uno y otro"
+            >
+              📲 Escribir a todos ({selectedGuideOrders.length})
+            </button>
+
+            <button
+              type="button"
+              className="nav-btn"
               onClick={copySelectedGuides}
               disabled={selectedGuideOrders.length === 0}
             >
@@ -4687,6 +4710,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
       {/* Modal para solicitar comentario y captura */}
       {reschedule.modal}
+      {waQueue.ui}
       <StatusChangeModal
         isOpen={statusChangeModal.isOpen}
         onClose={() => setStatusChangeModal({ isOpen: false, orderIds: [], newStatus: '' })}
