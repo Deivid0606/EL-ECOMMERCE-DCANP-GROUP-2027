@@ -2618,15 +2618,26 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     [displayedOrders, selectedGuideIds]
   );
 
+  // Marca «Contactado» sola al abrir el WhatsApp del cliente (o la quita si no se envió).
+  const setContacted = (orderId: string, on: boolean) => {
+    const now = new Date().toISOString();
+    const patch = { contacted: on, contacted_at: on ? now : null, contacted_by: on ? myEmail : null };
+    setOrders(prev => prev.map(o => (o.id === orderId ? { ...o, ...patch } : o)));
+    void supabase
+      .from('orders')
+      .update({ ...patch, updated_at: now } as any)
+      .eq('id', orderId)
+      .then(({ error }) => {
+        if (error) toast.error(`No se pudo marcar Contactado: ${error.message}`);
+      });
+  };
+
   // 📲 Escribir a todos los clientes seleccionados (uno cada X minutos).
   const waQueue = useWhatsAppQueue({
     getPhone: getOrderPhone,
     normalizePhone: normalizeWhatsAppPhone,
-    onSent: (orderId: string) => {
-      const now = new Date().toISOString();
-      setOrders(prev => prev.map(o => (o.id === orderId ? { ...o, contacted: true, contacted_at: now, contacted_by: myEmail } : o)));
-      void supabase.from('orders').update({ contacted: true, contacted_at: now, contacted_by: myEmail, updated_at: now } as any).eq('id', orderId);
-    },
+    onSent: (orderId: string) => setContacted(orderId, true),
+    onUnsent: (orderId: string) => setContacted(orderId, false),
   });
 
   const toggleGuideSelection = (orderId: string) => {
@@ -4476,6 +4487,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                           href={getWhatsAppUrl(o)}
                           target="_blank"
                           rel="noopener noreferrer"
+                          onClick={() => { if (!o.contacted) setContacted(o.id, true); }}
                           className="font-bold text-green-600 hover:underline"
                           title="Abrir WhatsApp con mensaje y guía"
                         >
