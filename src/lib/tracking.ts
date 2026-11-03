@@ -76,7 +76,7 @@ export async function resolveCoords(text: string): Promise<LatLng | null> {
 
 export const trackingUrl = (token: string) => `${window.location.origin}/?seguimiento=${token}`;
 
-import { orderLocationText } from '@/lib/orderLocation';
+import { canSendTracking, orderLocationText } from '@/lib/orderLocation';
 export { orderLocationText };
 
 // Coordenadas sin preguntar nada (sólo coordenadas o links de Maps; no busca direcciones escritas).
@@ -111,6 +111,8 @@ export async function ensureTrackingUrl(order: any): Promise<string | null> {
   if (FINISHED.includes(String(order?.status || '').toUpperCase())) return null;
   try {
     const { data: cur } = await (supabase as any).rpc('get_order_destination', { p_order_id: order.id });
+    // Sólo si hay ubicación (guardada o cargada por el vendedor) o una dirección de calle real.
+    if (!cur?.lat && !canSendTracking(order)) return null;
     const dest = cur?.lat ? null : await orderCoordsFromText(order);
     const { data, error } = await (supabase as any).rpc('create_tracking_link', {
       p_order_id: order.id,

@@ -9,3 +9,25 @@ describe('orderLocationText', () => {
     expect(orderLocationText({ street: 'Mcal López 1234 casi Brasil' })).toBeNull();
   });
 });
+
+import { canSendTracking, hasStreetAddress } from './orderLocation';
+
+describe('hasStreetAddress / canSendTracking', () => {
+  it('acepta direcciones de calle reales', () => {
+    expect(hasStreetAddress({ street: 'Cnel Martínez casi Pedro Juan Caballero' })).toBe(true);
+    expect(hasStreetAddress({ street: 'Teresa Roa Caballero entre Lomas Valentinas y 15 de agosto' })).toBe(true);
+    expect(hasStreetAddress({ street: 'Mcal López 1234' })).toBe(true);
+    expect(hasStreetAddress({ street: 'Barrio San Miguel', district: 'calle 3' })).toBe(true);
+  });
+  it('rechaza lo que no es una dirección', () => {
+    expect(hasStreetAddress({ street: 'Ruc 1.250.945' })).toBe(false);
+    expect(hasStreetAddress({ street: '1234' })).toBe(false);
+    expect(hasStreetAddress({ street: '-' })).toBe(false);
+    expect(hasStreetAddress({ street: '' })).toBe(false);
+    expect(hasStreetAddress({ street: 'Luque' })).toBe(false);
+  });
+  it('con link de Maps siempre se puede', () => {
+    expect(canSendTracking({ street: 'Ruc 1.250.945', obs: 'https://maps.app.goo.gl/x1' })).toBe(true);
+    expect(canSendTracking({ street: 'Ruc 1.250.945' })).toBe(false);
+  });
+});
