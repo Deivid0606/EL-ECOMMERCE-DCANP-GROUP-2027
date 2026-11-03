@@ -78,7 +78,7 @@ const navItems: NavItem[] = [
     label: 'Cargar pedido',
     roles: ['VENDEDOR'],
   },
-  { id: 'orders', label: 'Pedidos' },
+  { id: 'orders', label: 'Pedidos', excludeRoles: ['DELIVERY'] },
   {
     id: 'shopifyInbox',
     label: 'Pedidos Shopify',
