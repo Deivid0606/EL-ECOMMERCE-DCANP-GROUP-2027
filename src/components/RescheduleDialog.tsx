@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { addDaysKey, pyToday } from '@/lib/pyTime';
+import { cleanLocationError } from '@/lib/requireLocation';
 
 const DAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 
@@ -49,7 +50,7 @@ export function useRescheduleDialog(onDone: () => void) {
     for (const id of orderIds) {
       const { data, error } = await (supabase as any).rpc('reschedule_order', { p_order_id: id, p_date: date, p_note: note.trim() || null });
       if (error) {
-        toast.error(error.message);
+        toast.error(cleanLocationError(error.message), { duration: 12000 });
         continue;
       }
       ok++;

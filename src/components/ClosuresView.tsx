@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { ensureTrackingUrl, generateTrackingLink, orderLocationText } from '@/lib/tracking';
 import { customerMessageVariant } from '@/lib/waMessages';
+import { cleanLocationError, requireDeliveryLocation } from '@/lib/requireLocation';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { pyToday, pyStart, pyEnd, pyDateKey } from '@/lib/pyTime';
@@ -2319,6 +2320,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
   // Cambio de estado individual o masivo con la misma validación
   const handleStatusChangeWithValidation = async (orderId: string, newStatus: string) => {
+    // 📍 El delivery reporta sólo con la ubicación prendida.
+    if (isDelivery && !(await requireDeliveryLocation())) return;
     if (newStatus === 'REAGENDADO') {
       reschedule.ask([orderId]);
       return;
@@ -2361,7 +2364,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     });
 
     if (error) {
-      toast.error(error.message);
+      toast.error(cleanLocationError(error.message), { duration: 12000 });
       return;
     }
 
@@ -2419,6 +2422,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       return;
     }
 
+    if (isDelivery && !(await requireDeliveryLocation())) return;
     if (bulkStatus === 'REAGENDADO') {
       reschedule.ask(ids);
       return;
