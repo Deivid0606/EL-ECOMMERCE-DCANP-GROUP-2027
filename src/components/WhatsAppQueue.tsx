@@ -11,7 +11,7 @@ type QueueItem = {
   url: string;
   state: 'pending' | 'sent' | 'skipped';
 };
-type Queue = { items: QueueItem[]; index: number; nextAt: number; minutes: number; paused: boolean };
+type Queue = { items: QueueItem[]; index: number; nextAt: number; minutes: number; paused: boolean; lastSent?: number };
 
 const KEY = 'dcanp_wa_queue';
 const save = (q: Queue | null) => {
@@ -62,6 +62,7 @@ export function useWhatsAppQueue(opts: {
   getPhone: (o: any) => string;
   normalizePhone: (p: string) => string;
   onSent: (orderId: string) => void;
+  onUnsent?: (orderId: string) => void;
 }) {
   const [queue, setQueue] = useState<Queue | null>(() => restore());
   const [setup, setSetup] = useState<any[] | null>(null);
@@ -132,7 +133,7 @@ export function useWhatsAppQueue(opts: {
       toast.success(`✅ Listo: escribiste a ${sent} cliente(s)`, { duration: 8000 });
       return null;
     }
-    return { ...q, items, index: next, nextAt: waitNext ? Date.now() + q.minutes * 60_000 : Date.now() };
+    return { ...q, items, index: next, nextAt: waitNext ? Date.now() + q.minutes * 60_000 : Date.now(), lastSent: state === 'sent' ? q.index : q.lastSent };
   };
 
   const openCurrent = () => {
@@ -142,6 +143,21 @@ export function useWhatsAppQueue(opts: {
     setQueue(advance(queue, 'sent', true));
   };
   const skipCurrent = () => queue && setQueue(advance(queue, 'skipped', false));
+  // «No lo envié»: quita Contactado y vuelve a ponerlo como el siguiente, sin esperar.
+  const undoLast = () => {
+    if (!queue || queue.lastSent === undefined) return;
+    const i = queue.lastSent;
+    const it = queue.items[i];
+    optsRef.current.onUnsent?.(it.id);
+    setQueue({
+      ...queue,
+      items: queue.items.map((x, j) => (j === i ? { ...x, state: 'pending' } : x)),
+      index: i,
+      nextAt: Date.now(),
+      lastSent: undefined,
+    });
+    toast.info(`${it.name}: se quitó «Contactado». Ya podés volver a abrir su WhatsApp.`);
+  };
   const togglePause = () =>
     queue && setQueue({ ...queue, paused: !queue.paused, nextAt: queue.paused ? Math.max(queue.nextAt, Date.now()) : queue.nextAt });
   const stop = () => {
@@ -236,6 +252,11 @@ export function useWhatsAppQueue(opts: {
                 ⏭ Saltar
               </button>
             </div>
+            {queue.lastSent !== undefined && queue.items[queue.lastSent] && (
+              <button type="button" className="mt-2 text-[11px] text-amber-300 underline" onClick={undoLast}>
+                ↩ No le llegó a {queue.items[queue.lastSent].name}: desmarcar Contactado y reintentar
+              </button>
+            )}
             <div className="mt-2 max-h-24 overflow-y-auto text-[11px] text-slate-400">
               {queue.items.map((it, i) => (
                 <div key={it.id} className={i === queue.index ? 'font-bold text-white' : ''}>
