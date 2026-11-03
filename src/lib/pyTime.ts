@@ -37,10 +37,18 @@ export function pyOffset(day: string): string {
   return '-03:00';
 }
 
+/** Día válido (AAAA-MM-DD); si la fecha quedó vacía o rota se usa hoy. */
+const safeDay = (day: string) => (/^\d{4}-\d{2}-\d{2}$/.test(String(day || '')) ? day : pyToday());
 /** Inicio del día en Paraguay, para filtrar fechas en la base. */
-export const pyStart = (day: string) => `${day}T00:00:00${pyOffset(day)}`;
+export const pyStart = (day: string) => {
+  const d = safeDay(day);
+  return `${d}T00:00:00${pyOffset(d)}`;
+};
 /** Fin del día en Paraguay, para filtrar fechas en la base. */
-export const pyEnd = (day: string) => `${day}T23:59:59.999${pyOffset(day)}`;
+export const pyEnd = (day: string) => {
+  const d = safeDay(day);
+  return `${d}T23:59:59.999${pyOffset(d)}`;
+};
 
 /**
  * Hace que todas las fechas/horas que muestra la app (toLocaleString,

@@ -3455,14 +3455,14 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           type="date"
           className="app-input !w-auto"
           value={dateFrom}
-          onChange={e => setDateFrom(e.target.value)}
+          onChange={e => e.target.value && setDateFrom(e.target.value)}
         />
         <label className="app-label !mt-0">Hasta</label>
         <input
           type="date"
           className="app-input !w-auto"
           value={dateTo}
-          onChange={e => setDateTo(e.target.value)}
+          onChange={e => e.target.value && setDateTo(e.target.value)}
         />
         <span
           className="self-center text-[10px] text-muted-foreground"
