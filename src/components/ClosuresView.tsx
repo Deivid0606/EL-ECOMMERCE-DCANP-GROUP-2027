@@ -67,7 +67,6 @@ const STATUS_1_OPTIONS = [
   'DEVUELTO A DEPÓSITO',
   'REAGENDADO',
   'NO CONTESTA',
-  'NO DESEA',
   'RECHAZADO',
   'RECHAZADO EN EL LUGAR',
   'CANCELÓ POR WHATSAPP',
@@ -371,7 +370,7 @@ function StatusChangeModal({
             </label>
             <textarea
               className="app-input w-full min-h-[100px]"
-              placeholder="Ej: Llamé 3 veces y no contestó..."
+              placeholder={newStatus === 'CANCELÓ POR WHATSAPP' ? 'Ej: El cliente escribió por WhatsApp que ya no quiere el pedido' : 'Ej: Llamé 3 veces y no contestó...'}
               value={message}
               onChange={e => setMessage(e.target.value)}
               autoFocus
@@ -380,7 +379,7 @@ function StatusChangeModal({
 
           <div>
             <label className="block text-sm font-medium mb-2">
-              Captura de pantalla <span className="text-red-500">*</span>
+              {newStatus === 'CANCELÓ POR WHATSAPP' ? 'Captura del chat de WhatsApp' : 'Captura de pantalla'} <span className="text-red-500">*</span>
             </label>
             <input
               type="file"
@@ -2331,7 +2330,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       return;
     }
 
-    if (isDelivery && (newStatus === 'NO CONTESTA' || newStatus === 'CANCELADO')) {
+    if (isDelivery && ['NO CONTESTA', 'CANCELADO', 'CANCELÓ POR WHATSAPP'].includes(newStatus)) {
       setStatusChangeModal({
         isOpen: true,
         orderIds: [orderId],
@@ -2430,7 +2429,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
     if (!confirm(`¿Cambiar ${ids.length} pedido(s) a ${bulkStatus}?`)) return;
 
-    if (isDelivery && (bulkStatus === 'NO CONTESTA' || bulkStatus === 'CANCELADO')) {
+    if (isDelivery && ['NO CONTESTA', 'CANCELADO', 'CANCELÓ POR WHATSAPP'].includes(bulkStatus)) {
       setStatusChangeModal({
         isOpen: true,
         orderIds: ids,
