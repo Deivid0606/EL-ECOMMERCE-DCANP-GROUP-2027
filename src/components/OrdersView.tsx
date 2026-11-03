@@ -37,7 +37,7 @@ const getLast3Days = () => {
 const STATUS1_ALL = [
   'PENDIENTE', 'EN RUTA', 'ENTREGADO', 'ENCOMIENDA ENTREGADA',
   'CANCELADO', 'REAGENDADO', 'NO CONTESTA', 'RECHAZADO',
-  'RECHAZADO EN EL LUGAR', 'NO DESEA', 'CANCELÓ POR WHATSAPP', 'DEVUELTO A DEPÓSITO'
+  'RECHAZADO EN EL LUGAR', 'CANCELÓ POR WHATSAPP', 'DEVUELTO A DEPÓSITO'
 ];
 const STATUS1_DELIVERY = STATUS1_ALL.filter(s => s !== 'DEVUELTO A DEPÓSITO');
 const STATUS2_ALL = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
@@ -847,7 +847,7 @@ export default function OrdersView() {
     }
     console.log('handleStatusChangeWithValidation:', { orderId, newStatus, role });
     
-    if (role === 'DELIVERY' && (newStatus === 'NO CONTESTA' || newStatus === 'CANCELADO')) {
+    if (role === 'DELIVERY' && ['NO CONTESTA', 'CANCELADO', 'CANCELÓ POR WHATSAPP'].includes(newStatus)) {
       const order = orders.find(o => o.id === orderId);
       console.log('Abriendo modal para delivery con estado requerido');
       setStatusChangeModal({

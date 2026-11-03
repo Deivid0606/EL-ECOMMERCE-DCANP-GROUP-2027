@@ -36,7 +36,6 @@ const ORDER_STATUSES: Array<[string, string]> = [
   ['ENCOMIENDA ENTREGADA', '📮'],
   ['REAGENDADO', '📅'],
   ['NO CONTESTA', '📵'],
-  ['NO DESEA', '🙅'],
   ['CANCELADO', '❌'],
   ['CANCELÓ POR WHATSAPP', '💬'],
   ['RECHAZADO', '⛔'],
