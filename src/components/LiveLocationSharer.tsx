@@ -24,15 +24,16 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
   const [asking, setAsking] = useState(false);
   const [mini, setMini] = useState(() => {
     try {
-      return localStorage.getItem('dcanp-geo-mini') === '1';
+      // Minimizado por defecto: sólo se abre si el usuario lo pide.
+      return localStorage.getItem('dcanp-geo-mini2') !== '0';
     } catch {
-      return false;
+      return true;
     }
   });
   const setMiniSaved = (v: boolean) => {
     setMini(v);
     try {
-      localStorage.setItem('dcanp-geo-mini', v ? '1' : '0');
+      localStorage.setItem('dcanp-geo-mini2', v ? '1' : '0');
     } catch {
       // ignorar
     }
@@ -269,15 +270,15 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
   return (
     <>
     {askCard}
-    {mini ? (
+    {mini && !error ? (
       <button
         type="button"
-        title="Compartiendo tu ubicación"
-        className="fixed bottom-3 left-3 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-emerald-500/40 bg-background/95 text-lg shadow-xl"
+        title="Compartiendo tu ubicación (tocá para ver)"
+        aria-label="Compartiendo tu ubicación"
+        className="fixed bottom-1.5 left-1.5 z-40 flex h-5 w-5 items-center justify-center rounded-full bg-background/70 opacity-50 transition-opacity hover:opacity-100"
         onClick={() => setMiniSaved(false)}
       >
-        🛵
-        <span className={`absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full ${error ? 'bg-amber-400' : 'animate-pulse bg-emerald-400'}`} />
+        <span className="h-2 w-2 rounded-full bg-emerald-400" />
       </button>
     ) : (
     <div className="fixed bottom-3 left-3 z-50 max-w-[calc(100vw-24px)] rounded-2xl border border-emerald-500/40 bg-background/95 px-3 py-2 text-xs shadow-xl backdrop-blur">
