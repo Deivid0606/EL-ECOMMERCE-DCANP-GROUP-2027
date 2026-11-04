@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
+import { useState, useEffect, useRef, createContext, useContext, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
@@ -23,116 +23,103 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-// El perfil se guarda en el dispositivo para mostrar la app al instante al
-// volver a abrirla, aunque la red tarde o falle (la sesión de Supabase ya
-// persiste en localStorage y se renueva sola).
-const PROFILE_CACHE_KEY = 'dcanp-profile-cache';
-
-const readCachedProfile = (userId?: string): UserProfile | null => {
-  try {
-    const cached = JSON.parse(localStorage.getItem(PROFILE_CACHE_KEY) || 'null') as UserProfile | null;
-    return cached && (!userId || cached.user_id === userId) ? cached : null;
-  } catch {
-    return null;
-  }
-};
-
-const writeCachedProfile = (profile: UserProfile | null) => {
-  try {
-    if (profile) localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile));
-    else localStorage.removeItem(PROFILE_CACHE_KEY);
-  } catch {
-    // Sin almacenamiento: sólo se pierde el arranque instantáneo.
-  }
-};
-
+// No confiar en perfiles persistidos: el rol/approved del usuario puede
+// haber sido revocado desde otro dispositivo mientras la sesión sigue activa.
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfileState] = useState<UserProfile | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const currentUserRef = useRef<string | null>(null);
+  const requestRef = useRef(0);
 
-  const setProfile = (next: UserProfile | null) => {
-    setProfileState(next);
-    writeCachedProfile(next);
-  };
-
-  // Reintenta ante errores de red: un corte momentáneo no debe mandar al login.
-  const fetchProfile = async (userId: string, attempt = 0): Promise<void> => {
-    const [profileRes, roleRes] = await Promise.all([
-      supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
-      supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle(),
-    ]);
-
-    if (profileRes.error || roleRes.error) {
-      if (attempt < 5) {
-        await new Promise((resolve) => setTimeout(resolve, Math.min(8000, 1000 * 2 ** attempt)));
-        return fetchProfile(userId, attempt + 1);
+  const fetchProfile = async (userId: string): Promise<void> => {
+    const request = ++requestRef.current;
+    try {
+      const [profileRes, roleRes] = await Promise.all([
+        supabase.from('profiles').select('user_id,email,name,sheet_url').eq('user_id', userId).maybeSingle(),
+        supabase.from('user_roles').select('role,approved').eq('user_id', userId).maybeSingle(),
+      ]);
+      if (request !== requestRef.current || currentUserRef.current !== userId) return;
+      if (profileRes.error || roleRes.error) {
+        console.warn('No fue posible verificar permisos del usuario:', profileRes.error || roleRes.error);
+        // Sin verificación vigente, no exponer ninguna pantalla con datos.
+        setProfile(null);
+        return;
       }
-      return;
-    }
-
-    const profileData = profileRes.data;
-    const roleData = roleRes.data;
-    if (profileData) {
+      const data = profileRes.data;
+      const role = roleRes.data;
+      if (!data || !role) {
+        setProfile(null);
+        return;
+      }
       setProfile({
-        email: profileData.email,
-        name: profileData.name,
-        role: roleData?.role || null,
-        approved: roleData?.approved || false,
+        email: data.email,
+        name: data.name,
+        role: role.role || null,
+        approved: role.approved === true,
         user_id: userId,
-        sheet_url: (profileData as any).sheet_url || null,
+        sheet_url: (data as any).sheet_url || null,
       });
+    } catch (error) {
+      if (request === requestRef.current && currentUserRef.current === userId) {
+        console.warn('Falló la validación de permisos:', error);
+        setProfile(null);
+      }
     }
   };
 
   const refreshProfile = async () => {
-    if (user) await fetchProfile(user.id);
+    if (currentUserRef.current) await fetchProfile(currentUserRef.current);
   };
 
   useEffect(() => {
     let active = true;
-
     const applySession = async (sessionUser: User | null) => {
       if (!active) return;
-      if (!sessionUser) {
-        setUser(null);
-        setProfile(null);
-        setLoading(false);
-        return;
+      const userId = sessionUser?.id || null;
+      if (currentUserRef.current !== userId) {
+        currentUserRef.current = userId;
+        requestRef.current++;
+        setProfile(null); // Cierra inmediatamente la vista anterior al cambiar usuario.
+        setLoading(Boolean(userId));
       }
       setUser(sessionUser);
-      const cached = readCachedProfile(sessionUser.id);
-      if (cached) {
-        // Arranque instantáneo con el perfil guardado; se actualiza en segundo plano.
-        setProfileState(cached);
-        setLoading(false);
-        void fetchProfile(sessionUser.id);
-      } else {
-        await fetchProfile(sessionUser.id);
-        if (active) setLoading(false);
-      }
+      if (!userId) { setLoading(false); return; }
+      await fetchProfile(userId);
+      if (active && currentUserRef.current === userId) setLoading(false);
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // Sólo un cierre de sesión real borra el perfil; los refrescos de token no.
       if (event === 'SIGNED_OUT') {
         void applySession(null);
-        return;
-      }
-      if (session?.user && (event === 'SIGNED_IN' || event === 'USER_UPDATED')) {
-        setTimeout(() => void applySession(session.user), 0);
-      } else if (session?.user) {
-        setUser(session.user);
+      } else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        // Ejecutar fuera del callback de Auth para no bloquear sus operaciones.
+        setTimeout(() => void applySession(session?.user || null), 0);
       }
     });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    void supabase.auth.getSession().then(({ data: { session } }) => {
       void applySession(session?.user || null);
     });
 
+    // Si el administrador desactiva la cuenta con la sesión abierta, el panel
+    // deja de mostrar datos al actualizar el estado de aprobación.
+    const checkAccess = () => {
+      if (document.visibilityState === 'visible' && currentUserRef.current) {
+        void fetchProfile(currentUserRef.current);
+      }
+    };
+    const interval = window.setInterval(checkAccess, 20000);
+    window.addEventListener('focus', checkAccess);
+    document.addEventListener('visibilitychange', checkAccess);
+
     return () => {
       active = false;
+      requestRef.current++;
       subscription.unsubscribe();
+      window.clearInterval(interval);
+      window.removeEventListener('focus', checkAccess);
+      document.removeEventListener('visibilitychange', checkAccess);
     };
   }, []);
 
@@ -163,9 +150,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
+    currentUserRef.current = null;
+    requestRef.current++;
     setProfile(null);
+    setUser(null);
+    await supabase.auth.signOut();
   };
 
   return (
