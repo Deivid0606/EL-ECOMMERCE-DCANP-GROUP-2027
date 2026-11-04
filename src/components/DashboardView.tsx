@@ -319,9 +319,22 @@ function Avatar({ name, logo }: { name: string; logo?: string | null }) {
 
 const SUPABASE_PAGE_SIZE = 1000;
 
-// Todos los pedidos visibles para el usuario, en páginas pedidas en paralelo.
+// El dashboard necesita el historial completo para sus métricas, pero no los
+// teléfonos, direcciones, comprobantes y demás campos ajenos a los cálculos.
+const DASHBOARD_ORDER_COLUMNS = [
+  'id', 'created_at', 'assigned_at', 'delivered_at',
+  'total_gs', 'delivery_gs', 'delivery_fee_gs', 'commission_gs',
+  'status', 'status2', 'city', 'created_by', 'assigned_delivery',
+  'provider_email', 'provider_emails_list', 'items_json',
+  'commission_paid', 'paid_at', 'sku', 'product_id', 'pack_qty',
+  'delivery_email',
+].join(', ');
+
 const fetchAllOrdersPaged = () =>
-  fetchAllRows<OrderRow>('orders', (q) => q.order('created_at', { ascending: true }));
+  fetchAllRows<OrderRow>('orders',
+    (q) => q.order('created_at', { ascending: true }),
+    DASHBOARD_ORDER_COLUMNS,
+  );
 
 const fetchCommissionRequestsPaged = async () => {
   const rows: CommissionRequestRow[] = [];
