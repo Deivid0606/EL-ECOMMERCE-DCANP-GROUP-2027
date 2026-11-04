@@ -478,15 +478,34 @@ export default function PublicLandingPage({
       return;
     }
     (async () => {
+      // La cobertura de la plataforma se define en client_prices.
+      // La antigua tabla platform_delivery_coverage no existe en este proyecto.
       const { data, error } = await supabase
-        .from("platform_delivery_coverage")
-        .select("department,city")
-        .eq("is_active", true);
+        .from("client_prices")
+        .select("departamento,city");
       if (error) {
         console.error("Error cobertura plataforma:", error);
         return;
       }
-      setPlatformCoverage((data || []).map((row: any) => locationKey(row.department, row.city)));
+      const normalizePlace = (value: unknown) => String(value ?? "")
+        .normalize("NFD").replace(/[\\u0300-\\u036f]/g, "")
+        .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const covered = new Set<string>();
+      for (const dep of PARAGUAY_LOCATIONS) {
+        for (const city of dep.cities) {
+          const cityName = normalizePlace(city);
+          const departmentName = normalizePlace(dep.department);
+          if ((data || []).some((row: any) => {
+            if (normalizePlace(row.city) !== cityName) return false;
+            // Asunción es Distrito Capital; en client_prices figura como Central.
+            if (cityName === "asuncion") return true;
+            return normalizePlace(row.departamento) === departmentName;
+          })) {
+            covered.add(locationKey(dep.department, city));
+          }
+        }
+      }
+      setPlatformCoverage([...covered]);
     })();
   }, [config?.coverageMode]);
   const products = config?.productSnapshots || [];
