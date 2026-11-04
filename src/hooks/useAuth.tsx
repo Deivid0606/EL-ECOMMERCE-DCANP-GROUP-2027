@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, createContext, useContext, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface UserProfile {
   email: string;
@@ -29,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const currentUserRef = useRef<string | null>(null);
   const requestRef = useRef(0);
 
@@ -43,15 +45,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (profileRes.error || roleRes.error) {
         console.warn('No fue posible verificar permisos del usuario:', profileRes.error || roleRes.error);
         // Sin verificación vigente, no exponer ninguna pantalla con datos.
+        queryClient.clear();
         setProfile(null);
         return;
       }
       const data = profileRes.data;
       const role = roleRes.data;
       if (!data || !role) {
+        queryClient.clear();
         setProfile(null);
         return;
       }
+      if (role.approved !== true) queryClient.clear();
       setProfile({
         email: data.email,
         name: data.name,
@@ -63,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       if (request === requestRef.current && currentUserRef.current === userId) {
         console.warn('Falló la validación de permisos:', error);
+        queryClient.clear();
         setProfile(null);
       }
     }
@@ -74,12 +80,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    try { localStorage.removeItem('dcanp-profile-cache'); } catch { /* storage disabled */ }
     const applySession = async (sessionUser: User | null) => {
       if (!active) return;
       const userId = sessionUser?.id || null;
       if (currentUserRef.current !== userId) {
         currentUserRef.current = userId;
         requestRef.current++;
+        queryClient.clear();
         setProfile(null); // Cierra inmediatamente la vista anterior al cambiar usuario.
         setLoading(Boolean(userId));
       }
@@ -152,6 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     currentUserRef.current = null;
     requestRef.current++;
+    queryClient.clear();
     setProfile(null);
     setUser(null);
     await supabase.auth.signOut();
