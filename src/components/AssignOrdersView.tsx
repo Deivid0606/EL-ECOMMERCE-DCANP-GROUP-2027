@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { orderProviderEmails, useProviderScope } from '@/lib/providerScope';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -9,11 +10,16 @@ const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 export default function AssignOrdersView() {
   const { profile } = useAuth();
   const role = profile?.role;
+  const { isAdmin, favorites, active, wantActive, setActive, toggleFavorite, orderInScope } = useProviderScope();
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assignDelivery, setAssignDelivery] = useState('');
   const [search, setSearch] = useState('');
+  const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
+  const [providerSearch, setProviderSearch] = useState('');
+  const [providersOpen, setProvidersOpen] = useState(false);
+  const [providerNames, setProviderNames] = useState<Record<string, string>>({});
   const [dateFrom, setDateFrom] = useState(() => pyFirstOfMonth());
   const [dateTo, setDateTo] = useState(() => pyToday());
   const [idsInput, setIdsInput] = useState('');
@@ -89,7 +95,7 @@ export default function AssignOrdersView() {
         console.log('🔍 Buscando por ID (UUID)...');
         const result = await supabase
           .from('orders')
-          .select('id, assigned_delivery, assigned_at, order_number, customer_name, phone')
+          .select('id, assigned_delivery, assigned_at, order_number, customer_name')
           .eq('id', pendingQrId)
           .maybeSingle();
         orderData = result.data;
@@ -98,7 +104,7 @@ export default function AssignOrdersView() {
         console.log('🔍 Buscando por order_number...');
         const result = await supabase
           .from('orders')
-          .select('id, assigned_delivery, assigned_at, order_number, customer_name, phone')
+          .select('id, assigned_delivery, assigned_at, order_number, customer_name')
           .eq('order_number', pendingQrId)
           .maybeSingle();
         orderData = result.data;
@@ -221,7 +227,8 @@ export default function AssignOrdersView() {
   }, [role]);
 
   const load = async () => {
-    let query = supabase.from('orders').select('*')
+    // Esta pantalla no solicita teléfonos ni datos de contacto innecesarios.
+    let query = supabase.from('orders').select('id, order_number, created_at, assigned_at, customer_name, city, status, assigned_delivery, provider_email, provider_emails_list, supplier_email, items_json')
       .gte(filterBy, pyStart(dateFrom))
       .lte(filterBy, pyEnd(dateTo))
       .order(filterBy, { ascending: false }).limit(500);
@@ -258,13 +265,46 @@ export default function AssignOrdersView() {
 
   useEffect(() => { load(); }, [filterBy, dateFrom, dateTo]);
 
+  // Combina proveedores de los pedidos de este período con los favoritos guardados.
+  const providerEmails = useMemo(() => {
+    const emails = new Set<string>(favorites);
+    orders.forEach(o => orderProviderEmails(o).forEach(email => emails.add(email)));
+    return [...emails].filter(Boolean).sort((a, b) =>
+      (providerNames[a] || a).localeCompare(providerNames[b] || b, 'es')
+    );
+  }, [orders, favorites, providerNames]);
+
+  useEffect(() => {
+    if (!isAdmin && role !== 'PROVEEDOR') return;
+    let canceled = false;
+    void (async () => {
+      const { data, error } = await supabase.from('profiles')
+        .select('email, name').eq('role', 'PROVEEDOR').eq('approved', true);
+      if (error || canceled) return;
+      const names: Record<string, string> = {};
+      (data || []).forEach((p: any) => {
+        const email = String(p.email || '').trim().toLowerCase();
+        if (email) names[email] = String(p.name || p.email);
+      });
+      setProviderNames(names);
+    })();
+    return () => { canceled = true; };
+  }, [isAdmin, role]);
+
+  const filteredProviders = providerEmails.filter(email => {
+    const q = providerSearch.trim().toLowerCase();
+    return !q || email.includes(q) || (providerNames[email] || '').toLowerCase().includes(q);
+  });
+
   const filtered = orders.filter(o => {
+    if (isAdmin && !orderInScope(o)) return false;
+    const emails = orderProviderEmails(o);
+    if (selectedProviders.size && !emails.some(email => selectedProviders.has(email))) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (o.customer_name || '').toLowerCase().includes(q) ||
       (o.order_number || '').toLowerCase().includes(q) ||
       (o.city || '').toLowerCase().includes(q) ||
-      (o.phone || '').includes(q) ||
       (o.id || '').toLowerCase().includes(q);
   });
 
@@ -557,9 +597,61 @@ export default function AssignOrdersView() {
           <option value="assigned_at">🚚 Fecha de asignación</option>
         </select>
 
-        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar cliente, ID, ciudad, teléfono..."
+        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar cliente, ID o ciudad..."
           value={search} onChange={e => setSearch(e.target.value)} />
         <button className="nav-btn active" onClick={load}>Filtrar</button>
+      </div>
+
+      <div className="mb-3 rounded-xl border border-border bg-secondary/20 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-bold text-sm">⭐ Proveedores</span>
+          <button type="button" className="nav-btn !px-3 !py-1 !text-xs"
+            onClick={() => setProvidersOpen(open => !open)}>
+            {providersOpen ? 'Cerrar' : 'Filtrar proveedores'}{selectedProviders.size ? ` (${selectedProviders.size})` : ''}
+          </button>
+          {selectedProviders.size > 0 && (
+            <button type="button" className="nav-btn !px-3 !py-1 !text-xs"
+              onClick={() => setSelectedProviders(new Set())}>Limpiar filtro</button>
+          )}
+          {isAdmin && (
+            <div className="flex flex-wrap items-center gap-1 text-xs">
+              <button type="button" className={`rounded-lg px-2 py-1 font-bold ${wantActive ? 'bg-amber-500 text-black' : 'bg-secondary'}`}
+                onClick={() => setActive(true)}>⭐ Solo favoritos ({favorites.length})</button>
+              <button type="button" className={`rounded-lg px-2 py-1 font-bold ${!wantActive ? 'bg-primary text-primary-foreground' : 'bg-secondary'}`}
+                onClick={() => setActive(false)}>Todos</button>
+            </div>
+          )}
+        </div>
+        {isAdmin && active && <p className="mt-1 text-xs text-amber-500">Filtro de favoritos activo. Se comparte con las demás pestañas.</p>}
+        {providersOpen && (
+          <div className="mt-3 space-y-2">
+            <input className="app-input w-full" placeholder="🔎 Buscar proveedor por nombre o email…"
+              value={providerSearch} onChange={e => setProviderSearch(e.target.value)} />
+            <div className="grid max-h-60 gap-1.5 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
+              {filteredProviders.map(email => {
+                const checked = selectedProviders.has(email);
+                const fav = favorites.includes(email);
+                return (
+                  <div key={email} className="flex min-w-0 items-center gap-2 rounded-lg border border-border px-2 py-2 text-sm">
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                      <input type="checkbox" checked={checked} onChange={() => setSelectedProviders(prev => {
+                        const next = new Set(prev);
+                        if (next.has(email)) next.delete(email);
+                        else next.add(email);
+                        return next;
+                      })} />
+                      <span className="min-w-0 truncate" title={email}>{providerNames[email] || email}</span>
+                    </label>
+                    {isAdmin && <button type="button" aria-label={fav ? `Quitar favorito ${email}` : `Marcar favorito ${email}`}
+                      title={fav ? 'Quitar favorito' : 'Marcar favorito'} className="text-lg"
+                      onClick={() => void toggleFavorite(email)}>{fav ? '⭐' : '☆'}</button>}
+                  </div>
+                );
+              })}
+              {!filteredProviders.length && <div className="text-xs text-muted-foreground p-2">No se encontraron proveedores.</div>}
+            </div>
+          </div>
+        )}
       </div>
 
       {(role === 'ADMIN' || role === 'PROVEEDOR') && (
@@ -627,7 +719,6 @@ export default function AssignOrdersView() {
               <th>ID</th>
               <th>Ciudad</th>
               <th>Cliente</th>
-              <th>Teléfono</th>
               <th>Estado</th>
               <th>Asignado a</th>
               {(role === 'ADMIN' || role === 'PROVEEDOR') && <th>Acción</th>}
@@ -663,7 +754,6 @@ export default function AssignOrdersView() {
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td className="text-xs">{o.city || '—'}</td>
                   <td className="text-xs">{o.customer_name || '—'}</td>
-                  <td className="text-xs">{o.phone || '—'}</td>
                   <td className="text-xs">
                     <span className={`badge-status ${o.status === 'ENTREGADO' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>
                       {o.status || 'PENDIENTE'}
@@ -701,7 +791,7 @@ export default function AssignOrdersView() {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={role === 'ADMIN' || role === 'PROVEEDOR' ? 9 : 8} className="text-center text-muted-foreground py-8">
+                <td colSpan={role === 'ADMIN' || role === 'PROVEEDOR' ? 8 : 7} className="text-center text-muted-foreground py-8">
                   {role === 'DELIVERY' ? 'No hay pedidos disponibles para asignarte' : 'Sin pedidos en este rango de fechas'}
                 </td>
               </tr>
