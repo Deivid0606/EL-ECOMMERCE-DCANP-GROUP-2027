@@ -5,6 +5,21 @@ import { supabase } from '@/integrations/supabase/client';
 
 type Line = { sku: string; qty: number; sale_gs: number };
 type CatalogProduct = { sku: string; title: string; provider_price_gs: number | null };
+type OrderDetails = {
+  customer_name: string; phone: string; email: string;
+  city: string; departamento: string; street: string; district: string;
+  obs: string; guide_number: string; shipping_type: string;
+};
+const DETAILS_FIELDS: { key: keyof OrderDetails; label: string; required?: boolean; wide?: boolean }[] = [
+  { key: 'customer_name', label: 'Cliente', required: true },
+  { key: 'phone', label: 'Teléfono', required: true },
+  { key: 'email', label: 'Correo electrónico' },
+  { key: 'city', label: 'Ciudad', required: true },
+  { key: 'departamento', label: 'Departamento' },
+  { key: 'street', label: 'Dirección / calle', wide: true },
+  { key: 'district', label: 'Barrio' },
+  { key: 'guide_number', label: 'Número de guía' },
+];
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(Math.round(Number(n) || 0));
 const digits = (v: unknown) => String(v || '').replace(/\D/g, '').replace(/^595/, '').replace(/^0+/, '');
@@ -35,6 +50,7 @@ export function useOrderEditTools(onDone: () => void) {
   const [editing, setEditing] = useState<any | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
   const [delivery, setDelivery] = useState(0);
+  const [details, setDetails] = useState<OrderDetails>({customer_name:'',phone:'',email:'',city:'',departamento:'',street:'',district:'',obs:'',guide_number:'',shipping_type:'DELIVERY'});
   const [catalog, setCatalog] = useState<CatalogProduct[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -57,6 +73,14 @@ export function useOrderEditTools(onDone: () => void) {
     setEditing(order);
     setLines(readItems(order));
     setDelivery(Number(order?.delivery_gs || 0));
+    setDetails({
+      customer_name: String(order?.customer_name || ''),
+      phone: String(order?.phone || ''), email: String(order?.email || ''),
+      city: String(order?.city || ''), departamento: String(order?.departamento || ''),
+      street: String(order?.street || ''), district: String(order?.district || ''),
+      obs: String(order?.obs || ''), guide_number: String(order?.guide_number || ''),
+      shipping_type: String(order?.shipping_type || 'DELIVERY'),
+    });
   };
 
   const preview = useMemo(() => {
@@ -77,13 +101,37 @@ export function useOrderEditTools(onDone: () => void) {
       toast.error(`No existe el SKU "${unknown.sku}"`);
       return;
     }
+    if (!details.customer_name.trim() || !details.phone.trim() || !details.city.trim()) {
+      toast.error('Nombre, teléfono y ciudad son obligatorios');
+      return;
+    }
+    if (details.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(details.email.trim())) {
+      toast.error('Ingresá un correo válido o dejalo vacío');
+      return;
+    }
+    if (clean.some(l => !Number.isFinite(l.qty) || l.qty < 1 || !Number.isInteger(l.qty)
+      || !Number.isFinite(l.sale_gs) || l.sale_gs < 0) || !Number.isFinite(delivery) || delivery < 0) {
+      toast.error('Revisá las cantidades, precios y costo de delivery');
+      return;
+    }
     setSaving(true);
-    const { data, error } = await (supabase as any).rpc('edit_order_items', {
-      p_order_id: editing.id,
-      p_items: clean.map((l) => ({ sku: l.sku.trim(), qty: Number(l.qty), sale_gs: Number(l.sale_gs) })),
-      p_delivery_gs: Number(delivery),
-    });
-    setSaving(false);
+    let data: any, error: any;
+    try {
+      const result = await (supabase as any).rpc('edit_dispatch_order', {
+        p_order_id: editing.id,
+        p_details: Object.fromEntries(
+          Object.entries(details).map(([key, value]) => [key, String(value).trim()])
+        ),
+        p_items: clean.map(l => ({ sku: l.sku.trim(), qty: Number(l.qty), sale_gs: Number(l.sale_gs) })),
+        p_delivery_gs: Number(delivery),
+      });
+      data = result.data;
+      error = result.error;
+    } catch (err: any) {
+      error = err;
+    } finally {
+      setSaving(false);
+    }
     if (error) {
       toast.error(error.message);
       return;
@@ -149,8 +197,39 @@ export function useOrderEditTools(onDone: () => void) {
             </button>
           </div>
           <p className="mb-3 text-xs text-muted-foreground">
-            {editing.customer_name} · {editing.city}. Cambiá cantidades, precios o agregá / quitá productos. <b>El precio es el total de la línea</b>{' '}
-            (ej. 2 unidades por Gs 129.000 → 129.000).
+            Editá los datos del cliente, la entrega, la guía y los productos del pedido.
+            Los cambios se guardan juntos y quedan registrados en el historial.
+          </p>
+          <section className="mb-4 rounded-xl border border-border p-3">
+            <h5 className="mb-3 text-sm font-bold">👤 Cliente y entrega</h5>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {DETAILS_FIELDS.map(field => (
+                <label key={field.key} className={field.wide ? 'sm:col-span-2' : ''}>
+                  <span className="mb-1 block text-xs font-semibold">
+                    {field.label}{field.required ? ' *' : ''}
+                  </span>
+                  <input className="app-input w-full" value={details[field.key]}
+                    onChange={e => setDetails(prev => ({...prev,[field.key]:e.target.value}))} />
+                </label>
+              ))}
+              <label>
+                <span className="mb-1 block text-xs font-semibold">Tipo de envío</span>
+                <select className="app-input w-full" value={details.shipping_type}
+                  onChange={e => setDetails(prev => ({...prev,shipping_type:e.target.value}))}>
+                  <option value="DELIVERY">Delivery</option>
+                  <option value="ENCOMIENDA">Encomienda</option>
+                </select>
+              </label>
+              <label className="sm:col-span-2">
+                <span className="mb-1 block text-xs font-semibold">Observaciones</span>
+                <textarea className="app-input w-full min-h-[80px]" value={details.obs}
+                  onChange={e => setDetails(prev => ({...prev,obs:e.target.value}))} />
+              </label>
+            </div>
+          </section>
+          <h5 className="mb-2 text-sm font-bold">📦 Productos, cantidades y precios</h5>
+          <p className="mb-3 text-xs text-muted-foreground">
+            El precio ingresado es el total de la línea, no el precio unitario.
           </p>
 
           <datalist id="dcanp-edit-skus">
@@ -250,7 +329,8 @@ export function useOrderEditTools(onDone: () => void) {
             </button>
           </div>
           <p className="mt-2 text-[10px] text-muted-foreground">
-            No se puede editar un pedido entregado, rendido, con comisión pagada o que ya bajó stock. Queda registrado en el historial.
+            No se editan pedidos entregados, rendidos, con comisión acreditada/pagada o stock descontado.
+            Los cambios de producto y delivery recalculan total y comisión de forma segura.
           </p>
         </div>
       </div>,

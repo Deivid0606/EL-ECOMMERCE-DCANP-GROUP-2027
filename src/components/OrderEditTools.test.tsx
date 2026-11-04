@@ -38,6 +38,7 @@ describe('Editar pedido', () => {
       id: 'o1',
       order_number: 'P-1',
       customer_name: 'Ana',
+      phone: '0981111111',
       city: 'Asunción',
       delivery_gs: 35000,
       items_json: [
@@ -62,8 +63,12 @@ describe('Editar pedido', () => {
     await act(async () => {
       fireEvent.click(screen.getByText('💾 Guardar cambios'));
     });
-    expect(rpc).toHaveBeenCalledWith('edit_order_items', {
+    expect(rpc).toHaveBeenCalledWith('edit_dispatch_order', {
       p_order_id: 'o1',
+      p_details: {
+        customer_name: 'Ana', phone: '0981111111', email: '', city: 'Asunción',
+        departamento: '', street: '', district: '', obs: '', guide_number: '', shipping_type: 'DELIVERY',
+      },
       p_items: [
         { sku: 'A1', qty: 1, sale_gs: 150000 },
         { sku: 'B2', qty: 3, sale_gs: 280000 },
