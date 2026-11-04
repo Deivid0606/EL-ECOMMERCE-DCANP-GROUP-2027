@@ -891,7 +891,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     setSelectedIds(new Set());
     void load();
   };
-  // ✏️ Editar productos / 🔗 fusionar pedidos del mismo cliente.
+  // ✏️ Editar pedido completo / 🔗 fusionar pedidos del mismo cliente.
   const viewPaymentProof = async (o: any) => {
     if (!o.payment_proof_path) { toast.error('Sin comprobante'); return; }
     const { data, error } = await supabase.storage.from('payment-proofs').createSignedUrl(o.payment_proof_path, 600);
@@ -2028,7 +2028,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           )}
           {selectedIds.size === 1 && (
             <button className="nav-btn" style={{ background: '#0ea5e9', color: 'white' }} onClick={() => orderTools.openEditor(getSelectedOrders()[0])}>
-              ✏️ Editar productos
+              ✏️ Editar pedido completo
             </button>
           )}
           <button className="nav-btn" onClick={bulkCopyGuides}>📋 Copiar guías</button>
@@ -2209,7 +2209,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                  </td>
                 <td className="text-xs">
                   <div className="flex gap-1">
-                    <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => orderTools.openEditor(o)} title="Editar productos, cantidades y precios">✏️</button>
+                    <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => orderTools.openEditor(o)} title="Editar cliente, dirección, guía, productos, cantidades y precios">✏️</button>
                     <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => openGuideModal(o)} title="Ver guía con QR">📄</button>
                     <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => {
                       const text = buildGuideText(o);
