@@ -3994,7 +3994,7 @@ export default function WebPageBuilder({
                 <button className={`nav-btn ${config.coverageMode==="platform"?"active":""}`} onClick={()=>setConfig((p)=>({...p,coverageMode:"platform"}))}>✅ Cobertura de la plataforma</button>
                 <button className={`nav-btn ${config.coverageMode==="custom"?"active":""}`} onClick={()=>setConfig((p)=>({...p,coverageMode:"custom"}))}>🎯 Elegir / ocultar manualmente</button>
               </div>
-              {config.coverageMode==="platform" && <div className="rounded-xl bg-primary/5 border border-primary/30 p-3 text-xs">Usará únicamente las ciudades activas de <b>platform_delivery_coverage</b>.</div>}
+              {config.coverageMode==="platform" && <div className="rounded-xl bg-primary/5 border border-primary/30 p-3 text-xs">Usará únicamente las ciudades activas de <b>client_prices (ciudades configuradas)</b>.</div>}
               {config.coverageMode==="custom" && (
                 <div className="space-y-2 max-h-[520px] overflow-auto">
                   <div className="flex gap-2 sticky top-0 bg-background py-2 z-10">
