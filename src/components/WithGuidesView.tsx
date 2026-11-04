@@ -314,13 +314,13 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       const [guidesTodayRes, deliveredTodayRes] = await Promise.all([
         supabase
           .from('orders')
-          .select('*')
+          .select('id, provider_emails_list, provider_email, assigned_delivery')
           .eq('status2', 'GUIA GENERADA')
           .gte('updated_at', pyStart(today))
           .lte('updated_at', pyEnd(today)),
         supabase
           .from('orders')
-          .select('*')
+          .select('id, provider_emails_list, provider_email, assigned_delivery')
           .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
           .gte('delivered_at', pyStart(today))
           .lte('delivered_at', pyEnd(today)),
