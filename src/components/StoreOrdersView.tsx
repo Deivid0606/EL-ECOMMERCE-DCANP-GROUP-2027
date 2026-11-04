@@ -986,7 +986,9 @@ export default function StoreOrdersView({
 
   const getCoverage = useCallback(
     (order: StoreOrder): CoverageResult => {
-      if (!checkCoverage || !order.city?.trim() || !order.department?.trim()) return "unknown";
+      // Un pedido de Asunción puede llegar sin departamento o con «Central»,
+      // aunque su ciudad sea inequívoca.
+      if (!checkCoverage || !order.city?.trim()) return "unknown";
       try {
         return checkCoverage(order.city, order.department);
       } catch {
