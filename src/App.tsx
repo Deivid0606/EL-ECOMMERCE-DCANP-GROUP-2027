@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   HashRouter,
@@ -72,7 +73,7 @@ function PreviewLandingRoute() {
 
 // Las rutas QR / productos son accesibles por URL directa. No pueden montar
 // componentes que consultan datos hasta verificar aprobación vigente.
-function PrivateRoute({ children }: { children: React.ReactNode }) {
+function PrivateRoute({ children }: { children: ReactNode }) {
   const { user, profile, loading, signOut } = useAuth();
   if (loading) return <div className="p-6 text-sm">Verificando acceso…</div>;
   if (!user) return <div className="p-6 text-sm">Iniciá sesión para continuar.</div>;
