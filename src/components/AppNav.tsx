@@ -43,7 +43,7 @@ const navItems: NavItem[] = [
     label: 'Dashboard',
     excludeRoles: ['DESPACHANTE', 'DELIVERY'],
   },
-  { id: 'news', label: 'Novedades' },
+  { id: 'news', label: 'Novedades', excludeRoles: ['DELIVERY'] },
   { id: 'chat', label: 'Chat' },
   {
     id: 'withGuides',
@@ -53,7 +53,7 @@ const navItems: NavItem[] = [
   {
     id: 'rankingDelivery',
     label: '🏆 Ranking Delivery',
-    roles: ['ADMIN', 'DESPACHANTE', 'PROVEEDOR', 'DELIVERY'],
+    roles: ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'],
   },
   {
     id: 'products',
@@ -97,12 +97,12 @@ const navItems: NavItem[] = [
   {
     id: 'mapa',
     label: 'Mapa',
-    roles: ['ADMIN', 'PROVEEDOR', 'DELIVERY'],
+    roles: ['ADMIN', 'PROVEEDOR'],
   },
   {
     id: 'qrScanner',
     label: '📷 QR Delivery',
-    roles: ['ADMIN', 'PROVEEDOR', 'DELIVERY'],
+    roles: ['ADMIN', 'PROVEEDOR'],
   },
   {
     id: 'rates',
