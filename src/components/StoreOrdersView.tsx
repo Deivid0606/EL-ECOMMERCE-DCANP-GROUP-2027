@@ -12,6 +12,7 @@ export type StoreOrderPrefill = {
   city?: string;
   street?: string;
   district?: string;
+  departamento?: string;
   email?: string;
   productTitle?: string;
   totalGs?: number;
@@ -129,7 +130,7 @@ export function makeStoreOrderPrefill(
     phone: order.phone || "",
     city: order.city || "",
     street: order.address || "",
-    district: order.department || "",
+    departamento: order.department || "",
     productTitle: order.product_title || "",
     totalGs: Number(order.total_gs || 0),
     qty: Number(order.quantity || 1),
