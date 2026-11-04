@@ -244,13 +244,16 @@ export default function AssignOrdersView() {
       const emails = [...new Set(data.map(o => o.assigned_delivery).filter(Boolean))];
       const deliveryNamesMap: Record<string, string> = {};
 
-      for (const email of emails) {
-        const { data: profileData } = await supabase
+      // Una consulta para todos los deliveries, en vez de una por cada email.
+      if (emails.length) {
+        const { data: deliveryProfiles, error: profilesError } = await supabase
           .from('profiles')
-          .select('name')
-          .eq('email', email)
-          .single();
-        deliveryNamesMap[email] = profileData?.name || email;
+          .select('email, name')
+          .in('email', emails);
+        if (profilesError) console.warn('No se pudieron cargar nombres de deliveries:', profilesError);
+        (deliveryProfiles || []).forEach(p => {
+          if (p.email) deliveryNamesMap[p.email] = p.name || p.email;
+        });
       }
 
       const enrichedData = data.map(order => ({
