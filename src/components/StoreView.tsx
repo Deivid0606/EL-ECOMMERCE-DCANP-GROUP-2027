@@ -130,10 +130,12 @@ export default function StoreView({
 
   const checkCoverage = useCallback(
     (city: string, department: string | null): CoverageResult => {
+      // Asunción corresponde al Distrito Capital y siempre está en cobertura.
+      // No depender de que el formulario envíe «Capital» o «Central».
+      if (CITY_WITHOUT_DEPARTMENT_CHECK.has(cityKey(city))) return "covered";
       if (!referenceReady || !cityKey(city) || !departmentKey(department)) return "unknown";
       const matchingCities = cities.filter((entry) => cityKey(entry.city) === cityKey(city));
       if (!matchingCities.length) return "uncovered";
-      if (CITY_WITHOUT_DEPARTMENT_CHECK.has(cityKey(city))) return "covered";
       return matchingCities.some(
         (entry) => departmentKey(entry.departamento) === departmentKey(department)
       )

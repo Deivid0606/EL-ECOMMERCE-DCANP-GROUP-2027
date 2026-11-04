@@ -12,6 +12,7 @@ export type StoreOrderPrefill = {
   city?: string;
   street?: string;
   district?: string;
+  departamento?: string;
   email?: string;
   productTitle?: string;
   totalGs?: number;
@@ -129,7 +130,7 @@ export function makeStoreOrderPrefill(
     phone: order.phone || "",
     city: order.city || "",
     street: order.address || "",
-    district: order.department || "",
+    departamento: order.department || "",
     productTitle: order.product_title || "",
     totalGs: Number(order.total_gs || 0),
     qty: Number(order.quantity || 1),
@@ -986,7 +987,9 @@ export default function StoreOrdersView({
 
   const getCoverage = useCallback(
     (order: StoreOrder): CoverageResult => {
-      if (!checkCoverage || !order.city?.trim() || !order.department?.trim()) return "unknown";
+      // Un pedido de Asunción puede llegar sin departamento o con «Central»,
+      // aunque su ciudad sea inequívoca.
+      if (!checkCoverage || !order.city?.trim()) return "unknown";
       try {
         return checkCoverage(order.city, order.department);
       } catch {
