@@ -478,17 +478,16 @@ export default function PublicLandingPage({
       return;
     }
     (async () => {
-      // La cobertura de la plataforma se define en client_prices.
-      // La antigua tabla platform_delivery_coverage no existe en este proyecto.
-      const { data, error } = await supabase
-        .from("client_prices")
-        .select("departamento,city");
+      // La cobertura pública se consulta mediante una función limitada a ciudades.
+      // No expone los precios de client_prices ni exige iniciar sesión.
+      const { data, error } = await (supabase as any)
+        .rpc("store_public_coverage");
       if (error) {
         console.error("Error cobertura plataforma:", error);
         return;
       }
       const normalizePlace = (value: unknown) => String(value ?? "")
-        .normalize("NFD").replace(/[\\u0300-\\u036f]/g, "")
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
         .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
       const covered = new Set<string>();
       for (const dep of PARAGUAY_LOCATIONS) {
