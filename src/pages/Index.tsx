@@ -94,6 +94,9 @@ function hasStoreOrderParams() {
 
 const NOTIFICATION_VIEWS = ['chat', 'store', 'orders', 'products', 'profile'];
 
+// Estas pantallas no se ofrecen ni se pueden abrir desde la interfaz DELIVERY.
+const DELIVERY_HIDDEN_VIEWS: ViewName[] = ['rankingDelivery', 'mapa', 'qrScanner', 'news'];
+
 function isSpecialOrderLink() {
   return isBotSkyImportLink() || isCreateOrderLink();
 }
@@ -136,10 +139,16 @@ export default function Index() {
       return;
     }
 
+    if (profile.role === 'DELIVERY' && DELIVERY_HIDDEN_VIEWS.includes(currentView)) {
+      setCurrentView('closures');
+      return;
+    }
+
     if (currentView === 'auth') {
       // Enlace desde una notificación push (?go=chat, ?go=store, ...).
       const go = new URLSearchParams(window.location.search).get('go');
-      if (go && NOTIFICATION_VIEWS.includes(go)) {
+      if (go && NOTIFICATION_VIEWS.includes(go)
+        && !(profile.role === 'DELIVERY' && DELIVERY_HIDDEN_VIEWS.includes(go as ViewName))) {
         const url = new URL(window.location.href);
         url.searchParams.delete('go');
         window.history.replaceState(null, '', url.toString());
@@ -339,6 +348,9 @@ export default function Index() {
   // ==========================================
 
   const renderView = () => {
+    if (profile.role === 'DELIVERY' && DELIVERY_HIDDEN_VIEWS.includes(currentView)) {
+      return <ClosuresView />;
+    }
     switch (currentView) {
       case 'dashboard':
         return <DashboardView />;
@@ -459,6 +471,7 @@ export default function Index() {
       <AppNav
         currentView={currentView}
         onNavigate={(view) => {
+          if (profile.role === 'DELIVERY' && DELIVERY_HIDDEN_VIEWS.includes(view)) return;
           setCurrentView(view);
           window.scrollTo({ top: 0 });
         }}
