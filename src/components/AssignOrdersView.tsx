@@ -270,7 +270,7 @@ export default function AssignOrdersView() {
 
   // Combina proveedores de los pedidos de este período con los favoritos guardados.
   const providerEmails = useMemo(() => {
-    const emails = new Set<string>(favorites);
+    const emails = new Set<string>([...favorites, ...Object.keys(providerNames)]);
     orders.forEach(o => orderProviderEmails(o).forEach(email => emails.add(email)));
     return [...emails].filter(Boolean).sort((a, b) =>
       (providerNames[a] || a).localeCompare(providerNames[b] || b, 'es')
