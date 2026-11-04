@@ -570,6 +570,8 @@ export default function OrdersView() {
   const [uploadingFile, setUploadingFile] = useState(false);
   
   const loadOrdersRef = useRef<() => Promise<void> | void>(() => {});
+  const loadRequestRef = useRef(0);
+  const [loadError, setLoadError] = useState('');
   const { orderInScope } = useProviderScope();
   useScopeReload(() => void loadOrdersRef.current());
   const reschedule = useRescheduleDialog(() => void loadOrdersRef.current());
@@ -586,7 +588,19 @@ export default function OrdersView() {
   });
 
   const fetchAllOrdersPaginated = async () => {
-    const { data, error } = await fetchAllRows('orders', (q) => q.order('created_at', { ascending: false }));
+    const { from, to } = getSafeDateRange(dateFrom, dateTo);
+    // Filtrar en la base de datos antes de paginar; no descargar todo el historial.
+    // Las fechas de la interfaz son días civiles de Paraguay (UTC-03).
+    const fromUtc = new Date(`${from}T00:00:00-03:00`).toISOString();
+    const toUtcExclusive = new Date(
+      new Date(`${to}T00:00:00-03:00`).getTime() + 24 * 60 * 60 * 1000
+    ).toISOString();
+
+    const { data, error } = await fetchAllRows('orders', (q) =>
+      q.gte('created_at', fromUtc)
+        .lt('created_at', toUtcExclusive)
+        .order('created_at', { ascending: false })
+    );
     if (error) throw error;
     return data;
   };
@@ -689,63 +703,64 @@ export default function OrdersView() {
   };
 
   const loadOrders = async () => {
+    const request = ++loadRequestRef.current;
     setLoading(true);
-
-    let allOrdersData: any[] = [];
+    setLoadError('');
 
     try {
-      allOrdersData = await fetchAllOrdersPaginated();
+      const allOrdersData = await Promise.race<any[]>([
+        fetchAllOrdersPaginated(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('La consulta tardó demasiado. Volvé a intentar.')), 45000)
+        ),
+      ]);
+      if (request !== loadRequestRef.current) return;
+
+      const scopedOrders = (allOrdersData || []).filter(orderInScope);
+      const { from, to } = getSafeDateRange(dateFrom, dateTo);
+      const visibleOrders = scopedOrders.filter(order => {
+        const day = getLocalDate(order.created_at);
+        return Boolean(day && day >= from && day <= to);
+      });
+      setAllOrders(scopedOrders);
+      setOrders(visibleOrders);
+
+      // La tabla no debe depender de las consultas auxiliares de los selectores.
+      void loadDeliveryProfiles(allOrdersData)
+        .then(data => {
+          if (request === loadRequestRef.current) setDeliveries(data);
+        })
+        .catch(error => console.warn('No se pudieron cargar deliveries:', error));
+
+      void Promise.resolve(
+        supabase.from('profiles').select('email, name, company_name')
+          .eq('role', 'PROVEEDOR').eq('approved', true)
+      ).then(({ data, error }) => {
+        if (error) console.warn('No se pudieron cargar proveedores:', error);
+        else if (request === loadRequestRef.current) setProviders(data || []);
+      }).catch(error => console.warn('No se pudieron cargar proveedores:', error));
+
+      void Promise.resolve(supabase.from('client_prices').select('*').order('city'))
+        .then(({ data, error }) => {
+          if (!error && request === loadRequestRef.current) setClientPrices(data || []);
+        })
+        .catch(error => console.warn('No se pudieron cargar tarifas:', error));
     } catch (ordersError: any) {
+      if (request !== loadRequestRef.current) return;
       console.error('Error cargando pedidos:', ordersError);
-      toast.error('Error al cargar pedidos: ' + (ordersError?.message || 'Error desconocido'));
-      setLoading(false);
-      return;
+      const message = ordersError?.message || 'Error desconocido';
+      setLoadError(message);
+      toast.error('Error al cargar pedidos: ' + message);
+    } finally {
+      if (request === loadRequestRef.current) setLoading(false);
     }
-
-    const [deliveriesRes, providersRes] = await Promise.all([
-      loadDeliveryProfiles(allOrdersData),
-      supabase.from('profiles').select('email, name, company_name').eq('role', 'PROVEEDOR').eq('approved', true)
-    ]);
-
-    if (providersRes.error) {
-      console.warn('⚠️ No se pudieron cargar proveedores:', providersRes.error);
-    }
-
-    const scopedOrders = (allOrdersData || []).filter(orderInScope);
-    setAllOrders(scopedOrders);
-
-    const { from, to } = getSafeDateRange(dateFrom, dateTo);
-
-    const filteredByDate = scopedOrders.filter(order => {
-      const orderDate = getLocalDate(order.created_at);
-      if (!orderDate) return false;
-      return orderDate >= from && orderDate <= to;
-    });
-
-    setOrders(filteredByDate);
-    setDeliveries(deliveriesRes);
-    setProviders(providersRes.data || []);
-    setLoading(false);
-    supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   };
 
   useEffect(() => {
-    if (allOrders.length > 0) {
-      const { from, to } = getSafeDateRange(dateFrom, dateTo);
-
-      const filteredByDate = allOrders.filter(order => {
-        const orderDate = getLocalDate(order.created_at);
-        if (!orderDate) return false;
-        return orderDate >= from && orderDate <= to;
-      });
-
-      setOrders(filteredByDate);
-    }
-  }, [dateFrom, dateTo, allOrders]);
-
-  useEffect(() => {
-    loadOrders();
-  }, []);
+    void loadOrders();
+    // El rango de fechas determina la consulta y requiere una nueva descarga.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo]);
 
   const filtered = useMemo(() => {
     const q = norm(search);
@@ -1307,7 +1322,7 @@ export default function OrdersView() {
             const last3 = getLast3Days();
             setDateFrom(last3.from);
             setDateTo(last3.to);
-            loadOrders();
+            if (dateFrom === last3.from && dateTo === last3.to) void loadOrders();
           }}
           title="Últimos 3 días"
         >
@@ -1325,8 +1340,13 @@ export default function OrdersView() {
         )}
       </div>
 
+      {loadError && (
+        <div role="alert" className="mb-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          No se pudieron cargar pedidos: {loadError}. Presioná «Actualizar» para reintentar.
+        </div>
+      )}
       <div className="text-xs text-muted-foreground mb-2">
-        {filtered.length} pedidos (últimos 3 días: {dateFrom} a {dateTo})
+        {filtered.length} pedidos ({dateFrom} a {dateTo}){loading ? ' · Actualizando…' : ''}
       </div>
 
       {/* Tabla Desktop */}
