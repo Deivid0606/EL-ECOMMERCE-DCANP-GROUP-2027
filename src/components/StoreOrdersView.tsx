@@ -2122,11 +2122,18 @@ export function StoreOrderTabBridge({
         return;
       }
 
-      onLoadOrder(
-        makeStoreOrderPrefill(
-          data as StoreOrder
-        )
-      );
+      // The form opens in a new tab; resolve the saved mapping here too.
+      // Always use this seller's mappings, never mappings from another account.
+      const { data: mapped, error: mappingError } = await supabase
+        .from("product_title_mappings")
+        .select("owner_email,title_key,raw_title,sku")
+        .eq("owner_email", email);
+      if (!active) return;
+      if (mappingError) {
+        console.warn("No se pudieron consultar las asociaciones SKU", mappingError);
+      }
+      onLoadOrder(makeStoreOrderPrefill(data as StoreOrder,
+        (mapped || []) as StoreProductMapping[]));
     })();
 
     return () => {
