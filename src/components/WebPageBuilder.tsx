@@ -2201,7 +2201,7 @@ export default function WebPageBuilder({
               <div>
                 <label className="app-label">Enlace público</label>
                 <div className="flex items-center rounded-xl border border-border overflow-hidden bg-secondary/20">
-                  <span className="px-3 text-xs text-muted-foreground">mitienda…/</span>
+                  <span className="px-3 text-xs text-muted-foreground">/#/p/</span>
                   <input
                     className="flex-1 bg-transparent px-2 py-2.5 outline-none text-sm"
                     value={slug}
