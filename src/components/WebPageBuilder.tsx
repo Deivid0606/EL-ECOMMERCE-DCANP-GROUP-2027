@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { PARAGUAY_LOCATIONS, locationKey } from "@/lib/paraguayLocations";
+import { normalizeStoreWhatsAppNumber, WhatsAppLogo } from "@/lib/storeWhatsApp";
 
 export type BuilderProduct = {
   id: string;
@@ -228,6 +229,8 @@ export type LandingConfig = {
   buttonColor: string;
   buttonText: string;
   buttonSubtext: string;
+  whatsappEnabled: boolean;
+  whatsappNumber: string;
   mainButtonTextColor: string;
   mainButtonBorderColor: string;
   mainButtonBorderWidth: number;
@@ -323,6 +326,8 @@ const defaultConfig = (): LandingConfig => ({
   buttonColor: "#ff1717",
   buttonText: "👉 CLICK AQUI Y PAGA EN CASA 👈",
   buttonSubtext: "PAGAS EN TU CASA AL RECIBIR !!!",
+  whatsappEnabled: false,
+  whatsappNumber: "",
   mainButtonTextColor: "#ffffff",
   mainButtonBorderColor: "#000000",
   mainButtonBorderWidth: 5,
@@ -416,6 +421,8 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
     },
     benefits: raw?.benefits || base.benefits,
     faq: raw?.faq || base.faq,
+    whatsappEnabled: raw?.whatsappEnabled === true,
+    whatsappNumber: String(raw?.whatsappNumber || "").slice(0, 25),
     mainButtonTextColor: raw?.mainButtonTextColor || "#ffffff",
     mainButtonBorderColor: raw?.mainButtonBorderColor || "#000000",
     mainButtonBorderWidth: Number.isFinite(Number(raw?.mainButtonBorderWidth))
@@ -1901,6 +1908,10 @@ export default function WebPageBuilder({
     }
     if (!slugify(slug || name)) {
       toast.error("Ingresá una URL válida");
+      return false;
+    }
+    if (config.whatsappEnabled && !normalizeStoreWhatsAppNumber(config.whatsappNumber)) {
+      toast.error("Ingresá un WhatsApp válido, por ejemplo 0981123456 o +595981123456.");
       return false;
     }
     if (config.selectedProductIds.length === 0) {
@@ -3909,6 +3920,36 @@ export default function WebPageBuilder({
                 </button>
               </div>
 
+              <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-3 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-black text-emerald-400">
+                  <WhatsAppLogo size={23} /> Botón de compra por WhatsApp
+                </div>
+                <label className="flex items-center gap-2 text-sm font-semibold">
+                  <input type="checkbox" checked={config.whatsappEnabled}
+                    onChange={(e) => setConfig(prev => ({ ...prev, whatsappEnabled: e.target.checked }))}/>
+                  Mostrar botón verde debajo del botón de compra
+                </label>
+                <div>
+                  <label className="app-label">Número de WhatsApp del vendedor</label>
+                  <input className="app-input" type="tel" inputMode="tel"
+                    placeholder="0981 123 456 o +595 981 123 456"
+                    value={config.whatsappNumber}
+                    onChange={(e) => setConfig(prev => ({ ...prev, whatsappNumber: e.target.value }))}
+                    maxLength={25}/>
+                  {config.whatsappNumber.trim() && !normalizeStoreWhatsAppNumber(config.whatsappNumber) && (
+                    <p className="mt-1 text-xs text-rose-400">Revisá el número: agregá el código de país si no es de Paraguay.</p>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  El cliente abrirá WhatsApp con producto, cantidad, precio y enlace de la página.
+                  No se registra como pedido confirmado automáticamente.
+                </p>
+                {config.whatsappEnabled && normalizeStoreWhatsAppNumber(config.whatsappNumber) && (
+                  <div className="flex items-center justify-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-black text-white shadow-md">
+                    <WhatsAppLogo size={22}/> PEDIR POR WHATSAPP
+                  </div>
+                )}
+              </div>
               <div>
                 <label className="app-label">Texto reviews</label>
                 <input
@@ -4535,6 +4576,17 @@ function ShrinePreview({
                 <div>{config.buttonText}</div>
                 <div style={{ fontSize: 11, marginTop: 3 }}>{config.buttonSubtext}</div>
               </button>
+
+              {config.whatsappEnabled && normalizeStoreWhatsAppNumber(config.whatsappNumber) && (
+                <div style={{
+                  width: "100%", display: "flex", justifyContent: "center", alignItems: "center", gap: 12,
+                  marginTop: 12, minHeight: 62, borderRadius: 999,
+                  background: "#25D366", color: "#fff", fontWeight: 900,
+                  boxShadow: "0 5px 15px rgba(0,0,0,.2)",
+                }}>
+                  <WhatsAppLogo size={28}/> PEDIR POR WHATSAPP
+                </div>
+              )}
 
               {config.sections.timeline && (
                 <div
