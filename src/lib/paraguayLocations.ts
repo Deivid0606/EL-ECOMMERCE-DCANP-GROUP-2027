@@ -356,3 +356,54 @@ export const citiesForDepartment = (department: string) =>
 
 export const locationKey = (department: string, city: string) =>
   `${department}|||${city}`;
+
+
+/**
+ * Keep platform coverage sourced from client_prices, not a static city whitelist.
+ * City names added by administrators appear in checkout immediately after refresh.
+ */
+export type PlatformCoverageCity = { departamento?: string | null; city?: string | null };
+
+const normalizePlace = (value: unknown) =>
+  String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+export function buildPlatformCoverageLocations(rows: PlatformCoverageCity[]): ParaguayDepartment[] {
+  const groupByKey = new Map<string, { department: string; cities: Map<string, string> }>();
+  for (const dep of PARAGUAY_LOCATIONS) {
+    groupByKey.set(normalizePlace(dep.department), {
+      department: dep.department, cities: new Map(),
+    });
+  }
+  for (const row of rows) {
+    const cityText = String(row.city ?? "").trim();
+    const departmentText = String(row.departamento ?? "").trim();
+    if (!cityText || !departmentText) continue;
+
+    const cityKey = normalizePlace(cityText);
+    // Asunción is a single city and can be stored under Central in client_prices.
+    const departmentKey = cityKey === "asuncion" ? "asuncion" : normalizePlace(departmentText);
+    const knownDepartment = PARAGUAY_LOCATIONS.find(d => normalizePlace(d.department) === departmentKey);
+    const departmentName = knownDepartment?.department || departmentText;
+    let group = groupByKey.get(departmentKey);
+    if (!group) {
+      group = { department: departmentName, cities: new Map() };
+      groupByKey.set(departmentKey, group);
+    }
+    const canonicalName = knownDepartment?.cities.find(c => normalizePlace(c) === cityKey);
+    if (cityKey && !group.cities.has(cityKey)) {
+      group.cities.set(cityKey, canonicalName || (cityKey === "asuncion" ? "Asunción" : cityText));
+    }
+  }
+
+  return [...groupByKey.values()].filter(g => g.cities.size > 0).map(g => {
+    const reference = PARAGUAY_LOCATIONS.find(d => d.department === g.department)?.cities ?? [];
+    const order = new Map(reference.map((city, index) => [normalizePlace(city), index]));
+    const cities = [...g.cities.values()].sort((a, b) => {
+      const ai = order.get(normalizePlace(a)) ?? Infinity;
+      const bi = order.get(normalizePlace(b)) ?? Infinity;
+      return ai - bi || a.localeCompare(b, "es");
+    });
+    return { department: g.department, cities };
+  });
+}
