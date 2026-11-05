@@ -147,6 +147,7 @@ const normalizePublicConfig = (raw: any): LandingConfig => {
 
   return {
     ...raw,
+    imageFit: raw?.imageFit === "cover" ? "cover" : "contain",
     buyButtonEnabled: raw?.buyButtonEnabled !== false,
     whatsappEnabled: raw?.whatsappEnabled === true,
     whatsappNumber: String(raw?.whatsappNumber || "").slice(0, 25),
@@ -1398,6 +1399,7 @@ export default function PublicLandingPage({
           "--primary": config.primaryColor,
           "--buy": config.buttonColor,
           "--text": config.accentColor,
+          "--store-image-fit": config.imageFit === "cover" ? "cover" : "contain",
         } as React.CSSProperties
       }
       className="sky-landing"
@@ -1408,12 +1410,12 @@ export default function PublicLandingPage({
         button,input,select,textarea{font:inherit}
         .sky-announcement{background:var(--primary);color:#fff;text-align:center;padding:17px 12px;font-size:19px;font-weight:800;letter-spacing:.35px}
         .sky-product{max-width:1170px;margin:36px auto 0;padding:0 18px;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(380px,.82fr);gap:48px;align-items:start}
-        .sky-main-image{width:100%;aspect-ratio:1/1;border-radius:12px;overflow:hidden;background:#f2f2f2;position:relative}
-        .sky-main-image img,.sky-main-image video{width:100%;height:100%;object-fit:cover;display:block}
+        .sky-main-image{width:100%;aspect-ratio:1/1;border-radius:12px;overflow:hidden;background:#fff;position:relative;display:grid;place-items:center}
+        .sky-main-image img,.sky-main-image video{width:100%;height:100%;object-fit:var(--store-image-fit,contain);display:block}
         .sky-thumbs{display:flex;gap:9px;margin-top:9px;overflow:auto;padding:2px}
-        .sky-thumb{width:82px;height:82px;border-radius:9px;overflow:hidden;border:1px solid #ddd;padding:0;background:#111;cursor:pointer;flex:0 0 auto;position:relative}
+        .sky-thumb{width:82px;height:82px;border-radius:9px;overflow:hidden;border:1px solid #ddd;padding:0;background:#fff;cursor:pointer;flex:0 0 auto;position:relative}
         .sky-thumb.active{outline:2px solid #111;outline-offset:1px}
-        .sky-thumb img,.sky-thumb video{width:100%;height:100%;object-fit:cover}
+        .sky-thumb img,.sky-thumb video{width:100%;height:100%;object-fit:var(--store-image-fit,contain)}
         .sky-play{position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-size:25px;text-shadow:0 2px 8px #000}
         .sky-title{font-size:40px;line-height:1.05;margin:4px 0 8px;font-weight:900;letter-spacing:-.8px}
         .sky-rating{display:flex;align-items:center;gap:10px;font-size:18px}
