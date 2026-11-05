@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  BrowserRouter,
   HashRouter,
   Route,
   Routes,
@@ -21,6 +22,7 @@ import AssignOrdersView from "./components/AssignOrdersView.tsx";
 import QRScannerView from "./components/QRScannerView.tsx";
 import ProductsView from "./components/ProductsView.tsx";
 import PublicLandingPage from "./components/PublicLandingPage.tsx";
+import { isStorePublicHostname } from "./lib/storefrontUrls";
 
 const queryClient = new QueryClient();
 
@@ -110,6 +112,15 @@ const App = () => (
         <ApprovedPasswordModal />
 
         <ViewErrorBoundary>
+        {isStorePublicHostname(window.location.hostname) ? (
+          <BrowserRouter>
+            <Routes>
+              <Route path="/:slug" element={<PublicLandingRoute />} />
+              <Route path="/p/:slug" element={<PublicLandingRoute />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        ) : (
         <HashRouter>
           <Routes>
             <Route path="/" element={<Index />} />
@@ -142,6 +153,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
         </HashRouter>
+        )}
         </ViewErrorBoundary>
               </ProviderScopeProvider>
       </AuthProvider>

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/:slug",
+      "has": [
+        {
+          "type": "host",
+          "value": "mitienda.el-ecommercedcanpgroup.com"
+        }
+      ],
+      "destination": "/index.html"
+    }
+  ]
+}
