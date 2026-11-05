@@ -229,6 +229,7 @@ export type LandingConfig = {
   buttonColor: string;
   buttonText: string;
   buttonSubtext: string;
+  buyButtonEnabled: boolean;
   whatsappEnabled: boolean;
   whatsappNumber: string;
   mainButtonTextColor: string;
@@ -326,6 +327,7 @@ const defaultConfig = (): LandingConfig => ({
   buttonColor: "#ff1717",
   buttonText: "👉 CLICK AQUI Y PAGA EN CASA 👈",
   buttonSubtext: "PAGAS EN TU CASA AL RECIBIR !!!",
+  buyButtonEnabled: true,
   whatsappEnabled: false,
   whatsappNumber: "",
   mainButtonTextColor: "#ffffff",
@@ -421,6 +423,7 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
     },
     benefits: raw?.benefits || base.benefits,
     faq: raw?.faq || base.faq,
+    buyButtonEnabled: raw?.buyButtonEnabled !== false,
     whatsappEnabled: raw?.whatsappEnabled === true,
     whatsappNumber: String(raw?.whatsappNumber || "").slice(0, 25),
     mainButtonTextColor: raw?.mainButtonTextColor || "#ffffff",
@@ -2100,6 +2103,9 @@ export default function WebPageBuilder({
     return (
       <div className="space-y-5">
         <style>{`
+          @keyframes skyWhatsAppCTA{0%,86%,100%{transform:translateX(0)}88%{transform:translateX(-7px)}90%{transform:translateX(7px)}92%{transform:translateX(-6px)}94%{transform:translateX(6px)}96%{transform:translateX(-3px)}98%{transform:translateX(0)}}
+          .sky-builder-whatsapp-shake{animation:skyWhatsAppCTA 5s infinite}
+          @media(prefers-reduced-motion:reduce){.sky-builder-whatsapp-shake{animation:none!important}}
           .sky-dropzone{border:1.5px dashed hsl(var(--border));border-radius:14px;padding:13px;text-align:center;cursor:pointer;background:hsl(var(--secondary)/.15);transition:.2s}
           .sky-dropzone:hover{background:hsl(var(--secondary)/.35);border-color:hsl(var(--primary)/.55)}
           .sky-media-row{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 6px}
@@ -3894,6 +3900,11 @@ export default function WebPageBuilder({
               </div>
               <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-3">
                 <div className="font-black text-sm">🛒 Botón principal de compra</div>
+                <label className="flex items-center gap-2 text-sm font-semibold">
+                  <input type="checkbox" checked={config.buyButtonEnabled}
+                    onChange={(e) => setConfig(p => ({...p, buyButtonEnabled: e.target.checked}))} />
+                  Mostrar botón «Comprar ahora» en la página
+                </label>
                 <div className="grid grid-cols-3 gap-2">
                   <label className="text-[10px]">Fondo<input type="color" className="w-full h-10" value={config.buttonColor} onChange={(e)=>setConfig((p)=>({...p,buttonColor:e.target.value}))}/></label>
                   <label className="text-[10px]">Texto<input type="color" className="w-full h-10" value={config.mainButtonTextColor} onChange={(e)=>setConfig((p)=>({...p,mainButtonTextColor:e.target.value}))}/></label>
@@ -3915,9 +3926,11 @@ export default function WebPageBuilder({
                     <option value={2}>Cada 2s</option><option value={3}>Cada 3s</option><option value={5}>Cada 5s</option><option value={8}>Cada 8s</option><option value={12}>Cada 12s</option>
                   </select>
                 </div>
-                <button type="button" className={`w-full font-black sky-builder-main-${config.mainButtonEffect}`} style={{background:config.buttonColor,color:config.mainButtonTextColor,border:`${config.mainButtonBorderWidth}px solid ${config.mainButtonBorderColor}`,borderRadius:config.mainButtonBorderRadius,padding:`${config.mainButtonPaddingY}px 16px`,fontSize:config.mainButtonFontSize,animationDuration:`${config.mainButtonEffectEverySeconds}s`}}>
-                  <div>{config.buttonText}</div><div style={{fontSize:11,marginTop:3}}>{config.buttonSubtext}</div>
-                </button>
+                {config.buyButtonEnabled && (
+                  <button type="button" className={`w-full font-black sky-builder-main-${config.mainButtonEffect}`} style={{background:config.buttonColor,color:config.mainButtonTextColor,border:`${config.mainButtonBorderWidth}px solid ${config.mainButtonBorderColor}`,borderRadius:config.mainButtonBorderRadius,padding:`${config.mainButtonPaddingY}px 16px`,fontSize:config.mainButtonFontSize,animationDuration:`${config.mainButtonEffectEverySeconds}s`}}>
+                    <div>{config.buttonText}</div><div style={{fontSize:11,marginTop:3}}>{config.buttonSubtext}</div>
+                  </button>
+                )}
               </div>
 
               <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-3 space-y-3">
@@ -3927,7 +3940,7 @@ export default function WebPageBuilder({
                 <label className="flex items-center gap-2 text-sm font-semibold">
                   <input type="checkbox" checked={config.whatsappEnabled}
                     onChange={(e) => setConfig(prev => ({ ...prev, whatsappEnabled: e.target.checked }))}/>
-                  Mostrar botón verde debajo del botón de compra
+                  Mostrar botón verde de WhatsApp en la página
                 </label>
                 <div>
                   <label className="app-label">Número de WhatsApp del vendedor</label>
@@ -3945,7 +3958,7 @@ export default function WebPageBuilder({
                   No se registra como pedido confirmado automáticamente.
                 </p>
                 {config.whatsappEnabled && normalizeStoreWhatsAppNumber(config.whatsappNumber) && (
-                  <div className="flex items-center justify-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-black text-white shadow-md">
+                  <div className="sky-builder-whatsapp-shake flex items-center justify-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-black text-white shadow-md">
                     <WhatsAppLogo size={22}/> PEDIR POR WHATSAPP
                   </div>
                 )}
@@ -4556,9 +4569,10 @@ function ShrinePreview({
                 <span>−</span><span>1</span><span>＋</span>
               </div>
 
-              <button
-                className={`sky-builder-main-${config.mainButtonEffect}`}
-                style={{
+              {config.buyButtonEnabled && (
+                <button
+                  className={`sky-builder-main-${config.mainButtonEffect}`}
+                  style={{
                   width: "100%",
                   marginTop: 16,
                   minHeight: 66,
@@ -4573,12 +4587,13 @@ function ShrinePreview({
                   animationDuration: `${config.mainButtonEffectEverySeconds}s`,
                 }}
               >
-                <div>{config.buttonText}</div>
-                <div style={{ fontSize: 11, marginTop: 3 }}>{config.buttonSubtext}</div>
-              </button>
+                  <div>{config.buttonText}</div>
+                  <div style={{ fontSize: 11, marginTop: 3 }}>{config.buttonSubtext}</div>
+                </button>
+              )}
 
               {config.whatsappEnabled && normalizeStoreWhatsAppNumber(config.whatsappNumber) && (
-                <div style={{
+                <div className="sky-builder-whatsapp-shake" style={{
                   width: "100%", display: "flex", justifyContent: "center", alignItems: "center", gap: 12,
                   marginTop: 12, minHeight: 62, borderRadius: 999,
                   background: "#25D366", color: "#fff", fontWeight: 900,
