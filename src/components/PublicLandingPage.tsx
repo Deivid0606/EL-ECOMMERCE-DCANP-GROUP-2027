@@ -649,6 +649,18 @@ export default function PublicLandingPage({
       return;
     }
 
+    if (config?.coverageMode === "platform") {
+      if (platformCoverageStatus !== "ready") {
+        alert("No se pudo verificar la cobertura actual. Reintentá después de actualizar las ciudades.");
+        return;
+      }
+      if (!availableLocations.some(dep =>
+        dep.department === form.department && dep.cities.includes(form.city))) {
+        alert("La ciudad seleccionada ya no está en la cobertura de la plataforma. Elegí una ciudad disponible.");
+        return;
+      }
+    }
+
     if (preview) {
       alert(
         "✅ PRUEBA CORRECTA\n\nEl checkout funciona. Como estás en VISTA PREVIA, este pedido NO fue guardado.",
@@ -1976,6 +1988,11 @@ export default function PublicLandingPage({
                 <label>Celular con WhatsApp *</label>
                 <input value={form.phone} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} placeholder="0981..." />
               </div>
+              {config.coverageMode === "platform" && platformCoverageStatus === "ready" && availableLocations.length === 0 && (
+                <p role="status" style={{fontSize:12,color:"#9b241c"}}>
+                  No hay ciudades configuradas con cobertura. Consultá con la tienda.
+                </p>
+              )}
               {config.coverageMode === "platform" && platformCoverageStatus !== "ready" && (
                 <p role="status" style={{fontSize:12,color:platformCoverageStatus==="error"?"#9b241c":"#555",padding:"8px 0"}}>
                   {platformCoverageStatus==="loading"
