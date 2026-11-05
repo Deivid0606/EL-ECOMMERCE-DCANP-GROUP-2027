@@ -224,6 +224,7 @@ export type LandingConfig = {
   version: 2;
   selectedProductIds: string[];
   productSnapshots: LandingProductSnapshot[];
+  imageFit: "contain" | "cover";
   announcement: string;
   primaryColor: string;
   accentColor: string;
@@ -322,6 +323,7 @@ const defaultConfig = (): LandingConfig => ({
   version: 2,
   selectedProductIds: [],
   productSnapshots: [],
+  imageFit: "contain",
   announcement: "🛍 ENVIOS GRATIS Y PAGAS AL RECIBIR",
   primaryColor: "#743c98",
   accentColor: "#111111",
@@ -418,6 +420,7 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
     ...base,
     ...(raw || {}),
     version: 2,
+    imageFit: raw?.imageFit === "cover" ? "cover" : "contain",
     sections: {
       ...base.sections,
       ...(raw?.sections || {}),
@@ -3838,6 +3841,15 @@ export default function WebPageBuilder({
 
             <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
               <div className="font-black">4. Tema Shrine / Skyline</div>
+              <div className="rounded-xl border border-border bg-secondary/20 p-3 space-y-2">
+                <label className="app-label">🖼️ Ajuste de imagen del producto</label>
+                <select className="app-input w-full" value={config.imageFit}
+                  onChange={e => setConfig(p => ({...p, imageFit: e.target.value as "contain" | "cover"}))}>
+                  <option value="contain">✅ Imagen completa (sin recortes)</option>
+                  <option value="cover">Recortar para llenar el cuadro</option>
+                </select>
+                <p className="text-xs text-muted-foreground">Se aplica a imagen principal y miniaturas, en la vista previa y página pública.</p>
+              </div>
               <div>
                 <label className="app-label">Barra superior</label>
                 <input
@@ -4434,7 +4446,7 @@ function ShrinePreview({
                   aspectRatio: "1/1",
                   borderRadius: 12,
                   overflow: "hidden",
-                  background: "#f3f3f3",
+                  background: "#fff",
                 }}
               >
                 {firstMedia?.type === "video" ? (
@@ -4442,7 +4454,7 @@ function ShrinePreview({
                     src={firstMedia.url}
                     controls
                     muted
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    style={{ width: "100%", height: "100%", objectFit: config.imageFit }}
                   />
                 ) : firstImage ? (
                   <img
@@ -4451,7 +4463,7 @@ function ShrinePreview({
                     style={{
                       width: "100%",
                       height: "100%",
-                      objectFit: "cover",
+                      objectFit: config.imageFit,
                       display: "block",
                     }}
                   />
@@ -4488,11 +4500,11 @@ function ShrinePreview({
                         <img
                           src={item.url}
                           alt=""
-                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          style={{ width: "100%", height: "100%", objectFit: config.imageFit }}
                         />
                       ) : (
                         <>
-                          <video src={item.url} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          <video src={item.url} muted style={{ width: "100%", height: "100%", objectFit: config.imageFit }} />
                           <span style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#fff", fontSize: 25 }}>▶</span>
                         </>
                       )}
