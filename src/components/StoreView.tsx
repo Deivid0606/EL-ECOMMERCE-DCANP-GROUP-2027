@@ -69,6 +69,7 @@ export default function StoreView({
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const [referenceReady, setReferenceReady] = useState(false);
   const [productMappings, setProductMappings] = useState<StoreProductMapping[]>([]);
+  const [favoriteProductIds, setFavoriteProductIds] = useState<string[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -77,6 +78,7 @@ export default function StoreView({
       setCities([]);
       setCatalogProducts([]);
       setProductMappings([]);
+      setFavoriteProductIds([]);
       return;
     }
 
@@ -87,11 +89,11 @@ export default function StoreView({
         supabase
           .from("products")
           .select("id,title,sku,provider_email,is_private,is_private_stock,private_to_emails"),
-        supabase.from("user_favorites").select("product_id").eq("user_email", email),
+        supabase.from("user_favorites").select("product_id").ilike("user_email", email),
         supabase.from("product_title_mappings").select("owner_email,title_key,raw_title,sku").eq("owner_email", email),
       ]);
       if (!active) return;
-      if (pricesResult.error || productsResult.error || favoritesResult.error || mappingsResult.error) {
+      if (pricesResult.error || productsResult.error) {
         console.error("Mi Tienda: datos de referencia", {
           prices: pricesResult.error,
           products: productsResult.error,
@@ -102,13 +104,17 @@ export default function StoreView({
         setCities([]);
         setCatalogProducts([]);
         setProductMappings([]);
+        setFavoriteProductIds([]);
         return;
       }
 
       const visibleCities = (pricesResult.data || [])
         .filter((p) => Boolean(p.city?.trim()) && Boolean(p.departamento?.trim()))
         .map((p) => ({ city: p.city, departamento: p.departamento }));
+      if (favoritesResult.error) console.warn('No se pudieron cargar Favoritos en Mi Tienda', favoritesResult.error);
+      if (mappingsResult.error) console.warn('No se pudieron cargar los SKU asociados', mappingsResult.error);
       const favorites = new Set((favoritesResult.data || []).map((p) => p.product_id));
+      setFavoriteProductIds([...favorites]);
       const visibleProducts = ((productsResult.data || []) as ProductRow[]).filter((p) => {
         const privateProduct = Boolean(p.is_private_stock ?? p.is_private);
         const privateEmails = String(p.private_to_emails || "")
@@ -203,7 +209,7 @@ export default function StoreView({
           {tab === "realtime" && <StoreRealtimeView />}
           {tab === "pixel" && <StorePixelView />}
           {tab === "sku-settings" && (
-            <StoreSkuSettingsView catalogProducts={catalogProducts} mappings={productMappings}
+            <StoreSkuSettingsView catalogProducts={catalogProducts} favoriteProductIds={favoriteProductIds} mappings={productMappings}
               onMappingsChanged={refreshProductMappings} />
           )}
         </div>
