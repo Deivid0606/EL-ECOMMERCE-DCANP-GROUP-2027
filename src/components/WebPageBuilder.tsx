@@ -664,6 +664,9 @@ export default function WebPageBuilder({
 }) {
   const [pages, setPages] = useState<LandingRow[]>([]);
   const [loadingPages, setLoadingPages] = useState(false);
+  const [globalAutoImport, setGlobalAutoImport] = useState(false);
+  const [globalAutoImportLoading, setGlobalAutoImportLoading] = useState(true);
+  const [globalAutoImportSaving, setGlobalAutoImportSaving] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -783,6 +786,43 @@ export default function WebPageBuilder({
   useEffect(() => {
     loadPages();
   }, [loadPages]);
+
+  useEffect(() => {
+    if (!userEmail) {
+      setGlobalAutoImport(false);
+      setGlobalAutoImportLoading(false);
+      return;
+    }
+    let alive = true;
+    setGlobalAutoImportLoading(true);
+    (supabase as any).rpc("store_get_auto_import_enabled").then(({data,error}: {data:boolean|null,error:any}) => {
+      if (!alive) return;
+      setGlobalAutoImportLoading(false);
+      if (error) {
+        console.error("No se pudo consultar carga automática global:",error);
+        toast.error("No se pudo consultar el estado de la carga automática.");
+        return;
+      }
+      setGlobalAutoImport(data === true);
+    });
+    return () => { alive = false; };
+  }, [userEmail]);
+
+  const toggleGlobalAutoImport = async (next: boolean) => {
+    if (globalAutoImportLoading || globalAutoImportSaving) return;
+    setGlobalAutoImportSaving(true);
+    const { data, error } = await (supabase as any).rpc("store_set_auto_import_enabled", {p_enabled: next});
+    setGlobalAutoImportSaving(false);
+    if (error) {
+      console.error("No se pudo cambiar carga automática:",error);
+      toast.error(error.message || "No se pudo actualizar la carga automática.");
+      return;
+    }
+    setGlobalAutoImport(data === true);
+    toast.success(data === true
+      ? "⚡ Carga automática activada para todas tus páginas."
+      : "Carga automática desactivada para todas tus páginas.");
+  };
 
   const resetEditor = () => {
     setEditingId(null);
@@ -4091,26 +4131,6 @@ export default function WebPageBuilder({
               <button className="nav-btn active w-full" onClick={()=>setConfig((p)=>({...p,checkoutSections:[...p.checkoutSections,{id:uid(),title:"ATENCIÓN",text:"Agregá aquí información importante para el cliente.",icon:"⭐",placement:"before_form",backgroundColor:"#fff8e8",textColor:"#111111",borderColor:"#e5c76b"}]}))}>＋ Agregar sección al checkout</button>
             </div>
 
-            <div className="rounded-[24px] border border-emerald-500/30 bg-background p-4 space-y-3">
-              <div className="flex items-center gap-2 font-black text-base">⚡ Carga automática de ventas</div>
-              <label className="flex items-start gap-3 cursor-pointer rounded-xl bg-secondary/20 border border-border p-3">
-                <input type="checkbox" className="mt-1" checked={config.autoImportOrders}
-                  onChange={e=>setConfig(p=>({...p,autoImportOrders:e.target.checked}))}/>
-                <span>
-                  <b className="text-sm">Registrar automáticamente las ventas en Pedidos</b>
-                  <span className="block text-xs text-muted-foreground mt-1">Cuando un cliente complete el formulario de esta página, Supabase intentará guardar el pedido en el sistema aunque tengas la app cerrada. No requiere aprobar cada venta.</span>
-                </span>
-              </label>
-              <div className="text-xs text-muted-foreground space-y-1">
-                <p>✅ Control independiente para esta página. Desactivado por defecto.</p>
-                <p>🔒 Verifica cobertura, SKU/producto autorizado, stock y datos del comprador; impide duplicados.</p>
-                <p>⚠️ Si hay datos incompletos o un producto no se puede asociar, el pedido permanecerá en Mi Tienda → Pedidos para revisión y carga manual.</p>
-                <p>🛒 Se aplica únicamente a ventas del formulario. Los mensajes de WhatsApp no generan pedidos automáticos.</p>
-              </div>
-              {config.autoImportOrders && config.coverageMode !== "platform" && (
-                <p className="text-xs text-amber-400">La importación automática solo admite ciudades con cobertura registrada en la plataforma, incluso cuando la página permita mostrar otras ciudades.</p>
-              )}
-            </div>
             <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
               <div className="font-black">7. 🇵🇾 Cobertura</div>
               <div className="grid gap-2">
@@ -4338,6 +4358,40 @@ export default function WebPageBuilder({
         </button>
       </div>
 
+      <div className="rounded-[24px] border border-emerald-500/30 bg-background p-4 sm:p-5 space-y-3">
+        <div className="font-black text-lg">⚡ Carga automática de ventas</div>
+        <label className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-border bg-secondary/20 p-3">
+          <span className="min-w-0">
+            <span className="block font-semibold text-sm">Activar para todas mis páginas</span>
+            <span className="block text-xs text-muted-foreground mt-1">
+              Un único control para todas tus páginas actuales y futuras.
+              Las ventas del formulario se cargan automáticamente aunque no estés conectado.
+            </span>
+          </span>
+          <input type="checkbox" className="h-5 w-5 shrink-0 accent-emerald-500"
+            checked={globalAutoImport}
+            disabled={globalAutoImportLoading || globalAutoImportSaving}
+            aria-label="Activar carga automática para todas mis páginas"
+            onChange={e => void toggleGlobalAutoImport(e.target.checked)}/>
+        </label>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {globalAutoImportLoading ? (
+            <span className="text-muted-foreground">Consultando configuración…</span>
+          ) : globalAutoImportSaving ? (
+            <span className="text-muted-foreground">Guardando configuración…</span>
+          ) : globalAutoImport ? (
+            <span className="font-bold text-emerald-400">● Carga automática activa para todas tus páginas</span>
+          ) : (
+            <span className="text-muted-foreground">● Carga manual; activá el interruptor cuando quieras</span>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Solo importa ventas con cobertura, producto y SKU reconocidos, permisos y stock válidos.
+          Si falla una validación, el pedido queda pendiente en Mi Tienda → Pedidos para revisión manual.
+          No incluye conversaciones de WhatsApp ni modifica pedidos anteriores.
+        </p>
+      </div>
+
       {loadingPages ? (
         <div className="rounded-2xl border border-border p-10 text-center">
           Cargando páginas...
@@ -4357,7 +4411,7 @@ export default function WebPageBuilder({
         <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4">
           {pages.map((page) => {
             const first = page.config?.productSnapshots?.[0];
-            const automatic = page.config?.autoImportOrders === true;
+
             const cover =
               first?.media?.find((m) => m.type === "image")?.url ||
               first?.images?.[0];
@@ -4396,11 +4450,6 @@ export default function WebPageBuilder({
                         ? `${window.location.origin}/#/p/${page.slug}`
                         : `${window.location.origin}/#/preview/${page.id}`}
                     </div>
-                    {automatic && (
-                      <div className="mt-2 text-[11px] text-emerald-400 font-bold">
-                        ⚡ Carga automática activa {page.status !== "published" ? "(al publicar)" : ""}
-                      </div>
-                    )}
                     {page.status !== "published" && (
                       <div className="text-[11px] text-amber-500 font-bold mt-1">
                         Borrador: el link público todavía no está habilitado.
