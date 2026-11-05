@@ -649,7 +649,7 @@ export default function PublicLandingPage({
       return;
     }
 
-    if (config?.coverageMode === "platform") {
+    if (!preview && config?.coverageMode === "platform") {
       if (platformCoverageStatus !== "ready") {
         alert("No se pudo verificar la cobertura actual. Reintentá después de actualizar las ciudades.");
         return;
