@@ -68,30 +68,35 @@ export default function StoreView({
   const [cities, setCities] = useState<CityEntry[]>([]);
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const [referenceReady, setReferenceReady] = useState(false);
+  const [coverageReady, setCoverageReady] = useState(false);
   const [productMappings, setProductMappings] = useState<StoreProductMapping[]>([]);
+  const [favoriteProductIds, setFavoriteProductIds] = useState<string[]>([]);
 
   useEffect(() => {
     let active = true;
     if (!email || !role) {
       setReferenceReady(false);
+      setCoverageReady(false);
       setCities([]);
       setCatalogProducts([]);
       setProductMappings([]);
+      setFavoriteProductIds([]);
       return;
     }
 
     const loadReferenceData = async () => {
       setReferenceReady(false);
+      setCoverageReady(false);
       const [pricesResult, productsResult, favoritesResult, mappingsResult] = await Promise.all([
         supabase.from("client_prices").select("city,departamento"),
         supabase
           .from("products")
           .select("id,title,sku,provider_email,is_private,is_private_stock,private_to_emails"),
-        supabase.from("user_favorites").select("product_id").eq("user_email", email),
+        supabase.from("user_favorites").select("product_id").ilike("user_email", email),
         supabase.from("product_title_mappings").select("owner_email,title_key,raw_title,sku").eq("owner_email", email),
       ]);
       if (!active) return;
-      if (pricesResult.error || productsResult.error || favoritesResult.error || mappingsResult.error) {
+      if (productsResult.error) {
         console.error("Mi Tienda: datos de referencia", {
           prices: pricesResult.error,
           products: productsResult.error,
@@ -102,13 +107,18 @@ export default function StoreView({
         setCities([]);
         setCatalogProducts([]);
         setProductMappings([]);
+        setFavoriteProductIds([]);
         return;
       }
 
+      if (pricesResult.error) console.warn("No se pudo consultar cobertura de Mi Tienda", pricesResult.error);
       const visibleCities = (pricesResult.data || [])
         .filter((p) => Boolean(p.city?.trim()) && Boolean(p.departamento?.trim()))
         .map((p) => ({ city: p.city, departamento: p.departamento }));
+      if (favoritesResult.error) console.warn('No se pudieron cargar Favoritos en Mi Tienda', favoritesResult.error);
+      if (mappingsResult.error) console.warn('No se pudieron cargar los SKU asociados', mappingsResult.error);
       const favorites = new Set((favoritesResult.data || []).map((p) => p.product_id));
+      setFavoriteProductIds([...favorites]);
       const visibleProducts = ((productsResult.data || []) as ProductRow[]).filter((p) => {
         const privateProduct = Boolean(p.is_private_stock ?? p.is_private);
         const privateEmails = String(p.private_to_emails || "")
@@ -125,6 +135,7 @@ export default function StoreView({
       });
       if (!active) return;
       setCities(visibleCities);
+      setCoverageReady(!pricesResult.error);
       setProductMappings((mappingsResult.data || []) as StoreProductMapping[]);
       setCatalogProducts(
         visibleProducts.map((p) => ({ id: p.id, title: p.title, sku: p.sku }))
@@ -149,7 +160,7 @@ export default function StoreView({
       // Asunción corresponde al Distrito Capital y siempre está en cobertura.
       // No depender de que el formulario envíe «Capital» o «Central».
       if (CITY_WITHOUT_DEPARTMENT_CHECK.has(cityKey(city))) return "covered";
-      if (!referenceReady || !cityKey(city) || !departmentKey(department)) return "unknown";
+      if (!coverageReady || !cityKey(city) || !departmentKey(department)) return "unknown";
       const matchingCities = cities.filter((entry) => cityKey(entry.city) === cityKey(city));
       if (!matchingCities.length) return "uncovered";
       return matchingCities.some(
@@ -158,7 +169,7 @@ export default function StoreView({
         ? "covered"
         : "uncovered";
     },
-    [cities, referenceReady],
+    [cities, coverageReady],
   );
 
   // No mostrar productos como inexistentes antes de terminar la consulta.
@@ -203,7 +214,7 @@ export default function StoreView({
           {tab === "realtime" && <StoreRealtimeView />}
           {tab === "pixel" && <StorePixelView />}
           {tab === "sku-settings" && (
-            <StoreSkuSettingsView catalogProducts={catalogProducts} mappings={productMappings}
+            <StoreSkuSettingsView catalogProducts={catalogProducts} favoriteProductIds={favoriteProductIds} mappings={productMappings}
               onMappingsChanged={refreshProductMappings} />
           )}
         </div>
