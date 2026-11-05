@@ -41,6 +41,7 @@ export type StoreOrder = {
   page_name: string | null;
   page_slug: string | null;
   system_status: string | null;
+  raw_payload?: { auto_import_error?: string } | null;
   sent_to_system_at: string | null;
   created_at: string;
   tags?: string[] | null;
@@ -78,7 +79,7 @@ export type StoreOrdersViewProps = {
 };
 
 const SELECT =
-  "id,landing_page_id,product_id,product_title,quantity,unit_price_gs,total_gs,customer_name,phone,department,city,address,reference,status,seller_email,page_name,page_slug,system_status,sent_to_system_at,created_at,tags";
+  "id,landing_page_id,product_id,product_title,quantity,unit_price_gs,total_gs,customer_name,phone,department,city,address,reference,status,seller_email,page_name,page_slug,system_status,raw_payload,sent_to_system_at,created_at,tags";
 
 const nf = (n: number) =>
   new Intl.NumberFormat("es-PY").format(
@@ -1801,6 +1802,8 @@ export default function StoreOrdersView({
               const cov = getCoverage(order);
               const match = classifyProduct(order, catalogProducts, productMappings);
               const stage = loadStage(order);
+              const autoError = typeof order.raw_payload?.auto_import_error === "string"
+                ? order.raw_payload.auto_import_error : "";
               const saved = stage === "loaded";
               const isOpen = expanded === order.id;
               const isChosen = chosen.includes(order.id);
@@ -1912,7 +1915,11 @@ export default function StoreOrdersView({
                             <Badge {...PRODUCT_BADGE[match]} />
                             {assignedSku && <Badge label={`🔗 SKU: ${assignedSku}`} cls="border-primary/40 text-primary" />}
                             {order.status && <Badge label={`Estado web: ${order.status}`} cls="border-border text-muted-foreground" />}
+                            {autoError && !isSaved(order) && <Badge label="⚠️ Carga automática pendiente de revisión" cls="border-amber-500/50 text-amber-400" />}
                           </div>
+                          {autoError && !isSaved(order) && (
+                            <p className="text-xs text-amber-400">⚠️ La venta se recibió, pero no se cargó automáticamente en Pedidos: {autoError}. Podés corregirla y usar la carga manual.</p>
+                          )}
                           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-2 text-sm">
                             {[
                               ["Cliente", order.customer_name],
