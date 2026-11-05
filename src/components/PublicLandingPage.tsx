@@ -147,6 +147,7 @@ const normalizePublicConfig = (raw: any): LandingConfig => {
 
   return {
     ...raw,
+    buyButtonEnabled: raw?.buyButtonEnabled !== false,
     whatsappEnabled: raw?.whatsappEnabled === true,
     whatsappNumber: String(raw?.whatsappNumber || "").slice(0, 25),
     mainButtonTextColor: raw?.mainButtonTextColor || "#ffffff",
@@ -1429,6 +1430,9 @@ export default function PublicLandingPage({
         .sky-whatsapp-buy:hover{filter:brightness(.94);transform:translateY(-1px)}
         .sky-whatsapp-buy:focus-visible{outline:3px solid #128C7E;outline-offset:3px}
         .sky-whatsapp-buy svg{flex-shrink:0}
+        @keyframes skyWhatsAppCTA{0%,86%,100%{transform:translateX(0)}88%{transform:translateX(-7px)}90%{transform:translateX(7px)}92%{transform:translateX(-6px)}94%{transform:translateX(6px)}96%{transform:translateX(-3px)}98%{transform:translateX(0)}}
+        .sky-whatsapp-shake{animation:skyWhatsAppCTA 5s infinite}
+        @media(prefers-reduced-motion:reduce){.sky-whatsapp-shake,.sky-buy-effect-shake,.sky-buy-effect-pulse,.sky-buy-effect-bounce,.sky-buy-effect-shine{animation:none!important}}
         .sky-buy-main{font-size:14px;letter-spacing:.45px}
         .sky-buy-sub{font-size:11px;margin-top:4px}
         .sky-timeline{margin:26px 5px 25px;display:grid;grid-template-columns:1fr 1fr 1fr;position:relative;text-align:center}
@@ -1623,6 +1627,7 @@ export default function PublicLandingPage({
             <button onClick={() => setQuantity((q) => q + 1)}>＋</button>
           </div>
 
+          {config.buyButtonEnabled && (
           <button
             type="button"
             className={`sky-buy sky-buy-effect-${config.mainButtonEffect}`}
@@ -1645,9 +1650,10 @@ export default function PublicLandingPage({
             <div className="sky-buy-main">{config.buttonText}</div>
             <div className="sky-buy-sub">{config.buttonSubtext}</div>
           </button>
+          )}
 
           {config.whatsappEnabled && normalizeStoreWhatsAppNumber(config.whatsappNumber) && (
-            <a className="sky-whatsapp-buy" target="_blank" rel="noopener noreferrer"
+            <a className="sky-whatsapp-buy sky-whatsapp-shake" target="_blank" rel="noopener noreferrer"
               href={buildStoreWhatsAppLink({
                 number: config.whatsappNumber,
                 productTitle: product.title,
