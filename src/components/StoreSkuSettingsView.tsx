@@ -26,16 +26,29 @@ export default function StoreSkuSettingsView({ catalogProducts, mappings, onMapp
     if (!email) { setTitles([]); setLoading(false); return; }
     setLoading(true);
     void (async () => {
-      const { data, error } = await supabase.from("landing_page_orders")
-        .select("product_title").eq("seller_email", email).order("created_at", { ascending: false }).limit(1000);
+      const [ordersResult, pagesResult] = await Promise.all([
+        supabase.from("landing_page_orders").select("product_title")
+          .eq("seller_email", email).order("created_at", { ascending: false }).limit(1000),
+        supabase.from("landing_pages").select("config").eq("owner_email", email),
+      ]);
       if (!alive) return;
-      if (error) toast.error("No se pudieron consultar los productos de Mi Tienda.");
+      if (ordersResult.error || pagesResult.error) {
+        toast.error("No se pudieron consultar todos los productos de Mi Tienda.");
+      }
       const unique = new Map<string, string>();
-      (data || []).forEach(item => {
-        const title = String(item.product_title || "").trim();
+      const remember = (value: unknown) => {
+        const title = String(value || "").trim();
         const key = storeProductTitleKey(title);
         if (key && !unique.has(key)) unique.set(key, title);
+      };
+      // Show products already on landing pages, even if they have no sales yet.
+      (pagesResult.data || []).forEach(page => {
+        const config = page.config as any;
+        if (Array.isArray(config?.productSnapshots)) {
+          config.productSnapshots.forEach((p: any) => remember(p?.title));
+        }
       });
+      (ordersResult.data || []).forEach(item => remember(item.product_title));
       setTitles([...unique.values()]);
       setLoading(false);
     })();
