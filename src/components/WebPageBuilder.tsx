@@ -664,6 +664,9 @@ export default function WebPageBuilder({
 }) {
   const [pages, setPages] = useState<LandingRow[]>([]);
   const [loadingPages, setLoadingPages] = useState(false);
+  const [globalAutoImport, setGlobalAutoImport] = useState(false);
+  const [globalAutoImportLoading, setGlobalAutoImportLoading] = useState(true);
+  const [globalAutoImportSaving, setGlobalAutoImportSaving] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
