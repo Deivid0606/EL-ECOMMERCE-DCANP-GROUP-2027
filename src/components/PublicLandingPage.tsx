@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { PARAGUAY_LOCATIONS, locationKey } from "@/lib/paraguayLocations";
+import { buildStoreWhatsAppLink, normalizeStoreWhatsAppNumber, WhatsAppLogo } from "@/lib/storeWhatsApp";
 import type {
   LandingConfig,
   LandingContentBlock,
@@ -146,6 +147,8 @@ const normalizePublicConfig = (raw: any): LandingConfig => {
 
   return {
     ...raw,
+    whatsappEnabled: raw?.whatsappEnabled === true,
+    whatsappNumber: String(raw?.whatsappNumber || "").slice(0, 25),
     mainButtonTextColor: raw?.mainButtonTextColor || "#ffffff",
     mainButtonBorderColor: raw?.mainButtonBorderColor || "#000000",
     mainButtonBorderWidth: Number.isFinite(Number(raw?.mainButtonBorderWidth))
@@ -1422,6 +1425,10 @@ export default function PublicLandingPage({
         .sky-qty{display:grid;grid-template-columns:47px 47px 47px;height:47px;border:1px solid #ddd;border-radius:10px;overflow:hidden;background:#faf8fb;width:max-content}
         .sky-qty button,.sky-qty span{border:0;background:transparent;display:grid;place-items:center;cursor:pointer}
         .sky-buy{margin-top:16px;width:100%;min-height:68px;border-style:solid;background:var(--buy);box-shadow:0 3px 8px rgba(0,0,0,.28);font-weight:900;cursor:pointer;padding-left:20px;padding-right:20px;transform-origin:center}
+        .sky-whatsapp-buy{width:100%;min-height:64px;margin-top:12px;padding:13px 16px;display:flex;align-items:center;justify-content:center;gap:12px;border:3px solid #159f45;border-radius:999px;background:#25D366;color:#fff!important;text-decoration:none;font-size:16px;font-weight:900;box-shadow:0 5px 14px rgba(0,0,0,.23);transition:filter .18s ease,transform .18s ease;text-align:center}
+        .sky-whatsapp-buy:hover{filter:brightness(.94);transform:translateY(-1px)}
+        .sky-whatsapp-buy:focus-visible{outline:3px solid #128C7E;outline-offset:3px}
+        .sky-whatsapp-buy svg{flex-shrink:0}
         .sky-buy-main{font-size:14px;letter-spacing:.45px}
         .sky-buy-sub{font-size:11px;margin-top:4px}
         .sky-timeline{margin:26px 5px 25px;display:grid;grid-template-columns:1fr 1fr 1fr;position:relative;text-align:center}
@@ -1638,6 +1645,21 @@ export default function PublicLandingPage({
             <div className="sky-buy-main">{config.buttonText}</div>
             <div className="sky-buy-sub">{config.buttonSubtext}</div>
           </button>
+
+          {config.whatsappEnabled && normalizeStoreWhatsAppNumber(config.whatsappNumber) && (
+            <a className="sky-whatsapp-buy" target="_blank" rel="noopener noreferrer"
+              href={buildStoreWhatsAppLink({
+                number: config.whatsappNumber,
+                productTitle: product.title,
+                quantity,
+                totalGs: total,
+                pageUrl: window.location.href,
+              }) || undefined}
+              aria-label="Consultar y pedir este producto por WhatsApp">
+              <WhatsAppLogo size={28}/>
+              <span>💬 PEDIR POR WHATSAPP</span>
+            </a>
+          )}
 
           {config.sections.timeline && (
             <div className="sky-timeline">
