@@ -4358,6 +4358,40 @@ export default function WebPageBuilder({
         </button>
       </div>
 
+      <div className="rounded-[24px] border border-emerald-500/30 bg-background p-4 sm:p-5 space-y-3">
+        <div className="font-black text-lg">⚡ Carga automática de ventas</div>
+        <label className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-border bg-secondary/20 p-3">
+          <span className="min-w-0">
+            <span className="block font-semibold text-sm">Activar para todas mis páginas</span>
+            <span className="block text-xs text-muted-foreground mt-1">
+              Un único control para todas tus páginas actuales y futuras.
+              Las ventas del formulario se cargan automáticamente aunque no estés conectado.
+            </span>
+          </span>
+          <input type="checkbox" className="h-5 w-5 shrink-0 accent-emerald-500"
+            checked={globalAutoImport}
+            disabled={globalAutoImportLoading || globalAutoImportSaving}
+            aria-label="Activar carga automática para todas mis páginas"
+            onChange={e => void toggleGlobalAutoImport(e.target.checked)}/>
+        </label>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {globalAutoImportLoading ? (
+            <span className="text-muted-foreground">Consultando configuración…</span>
+          ) : globalAutoImportSaving ? (
+            <span className="text-muted-foreground">Guardando configuración…</span>
+          ) : globalAutoImport ? (
+            <span className="font-bold text-emerald-400">● Carga automática activa para todas tus páginas</span>
+          ) : (
+            <span className="text-muted-foreground">● Carga manual; activá el interruptor cuando quieras</span>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Solo importa ventas con cobertura, producto y SKU reconocidos, permisos y stock válidos.
+          Si falla una validación, el pedido queda pendiente en Mi Tienda → Pedidos para revisión manual.
+          No incluye conversaciones de WhatsApp ni modifica pedidos anteriores.
+        </p>
+      </div>
+
       {loadingPages ? (
         <div className="rounded-2xl border border-border p-10 text-center">
           Cargando páginas...
