@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { PARAGUAY_LOCATIONS, locationKey } from "@/lib/paraguayLocations";
+import { PARAGUAY_LOCATIONS, locationKey, buildPlatformCoverageLocations, type ParaguayDepartment } from "@/lib/paraguayLocations";
 import { normalizeStoreWhatsAppNumber, WhatsAppLogo } from "@/lib/storeWhatsApp";
 
 export type BuilderProduct = {
@@ -667,6 +667,9 @@ export default function WebPageBuilder({
   const [slug, setSlug] = useState("");
   const [config, setConfig] = useState<LandingConfig>(defaultConfig());
   const [saving, setSaving] = useState(false);
+  const [liveCoverage, setLiveCoverage] = useState<ParaguayDepartment[]>([]);
+  const [coverageError, setCoverageError] = useState(false);
+  const [coverageRefreshToken, setCoverageRefreshToken] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const [insertAtIndex, setInsertAtIndex] = useState<number | null>(null);
@@ -696,6 +699,38 @@ export default function WebPageBuilder({
   const [aiImageMode, setAiImageMode] = useState<"pro" | "claude" | "openai" | "none">("claude");
   const aiMakeImages = aiImageMode === "openai" || aiImageMode === "pro";
   const aiDesignBanners = aiImageMode === "claude" || aiImageMode === "pro";
+
+  useEffect(() => {
+    if (!editorOpen || config.coverageMode !== "platform") return;
+    let active = true;
+    let version = 0;
+    const refresh = async () => {
+      const request = ++version;
+      const { data, error } = await (supabase as any).rpc("store_public_coverage");
+      if (!active || request !== version) return;
+      if (error) {
+        console.error("No se pudo actualizar la cobertura de la plataforma:", error);
+        setCoverageError(true);
+      } else {
+        setCoverageError(false);
+        setLiveCoverage(buildPlatformCoverageLocations((data || []) as any[]));
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 60_000);
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      active = false;
+      version++;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [editorOpen, config.coverageMode, coverageRefreshToken]);
 
   const filteredProducts = useMemo(() => {
     const query = productSearch.trim().toLowerCase();
@@ -4060,7 +4095,22 @@ export default function WebPageBuilder({
                 <button className={`nav-btn ${config.coverageMode==="platform"?"active":""}`} onClick={()=>setConfig((p)=>({...p,coverageMode:"platform"}))}>✅ Cobertura de la plataforma</button>
                 <button className={`nav-btn ${config.coverageMode==="custom"?"active":""}`} onClick={()=>setConfig((p)=>({...p,coverageMode:"custom"}))}>🎯 Elegir / ocultar manualmente</button>
               </div>
-              {config.coverageMode==="platform" && <div className="rounded-xl bg-primary/5 border border-primary/30 p-3 text-xs">Usará únicamente las ciudades activas de <b>client_prices (ciudades configuradas)</b>.</div>}
+              {config.coverageMode==="platform" && (
+                <div className="rounded-xl bg-primary/5 border border-primary/30 p-3 text-xs space-y-2">
+                  <div>Usará automáticamente las ciudades configuradas en <b>Costos de delivery / client_prices</b>, incluyendo ciudades nuevas.</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold">{liveCoverage.reduce((total, d) => total + d.cities.length, 0)} ciudades en {liveCoverage.length} departamentos</span>
+                    <button type="button" className="nav-btn !text-xs" onClick={() => setCoverageRefreshToken(t => t + 1)}>↻ Actualizar ahora</button>
+                  </div>
+                  {coverageError && <p className="text-rose-400">No se pudo consultar la cobertura actual. Revisá la conexión.</p>}
+                  {!coverageError && liveCoverage.length > 0 && (
+                    <p className="text-muted-foreground">
+                      {liveCoverage.map(dep => dep.department + ": " + dep.cities.length).join(" · ")}
+                    </p>
+                  )}
+                  <p className="text-muted-foreground">La página pública vuelve a consultar la cobertura al abrir el formulario, al regresar a la pestaña y cada minuto.</p>
+                </div>
+              )}
               {config.coverageMode==="custom" && (
                 <div className="space-y-2 max-h-[520px] overflow-auto">
                   <div className="flex gap-2 sticky top-0 bg-background py-2 z-10">

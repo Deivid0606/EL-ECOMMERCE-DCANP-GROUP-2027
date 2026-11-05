@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { PARAGUAY_LOCATIONS, locationKey } from "@/lib/paraguayLocations";
+import { PARAGUAY_LOCATIONS, locationKey, buildPlatformCoverageLocations, type ParaguayDepartment } from "@/lib/paraguayLocations";
 import { buildStoreWhatsAppLink, normalizeStoreWhatsAppNumber, WhatsAppLogo } from "@/lib/storeWhatsApp";
 import type {
   LandingConfig,
@@ -339,7 +339,8 @@ export default function PublicLandingPage({
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [metaPixelId, setMetaPixelId] = useState("");
-  const [platformCoverage, setPlatformCoverage] = useState<string[]>([]);
+  const [platformCoverage, setPlatformCoverage] = useState<ParaguayDepartment[]>([]);
+  const [platformCoverageStatus, setPlatformCoverageStatus] = useState<"loading" | "ready" | "error">("loading");
   const [selectedOfferId, setSelectedOfferId] = useState("");
   const [form, setForm] = useState({
     full_name: "",
@@ -480,38 +481,42 @@ export default function PublicLandingPage({
   useEffect(() => {
     if (!config || config.coverageMode !== "platform") {
       setPlatformCoverage([]);
+      setPlatformCoverageStatus("loading");
       return;
     }
-    (async () => {
-      // La cobertura pública se consulta mediante una función limitada a ciudades.
-      // No expone los precios de client_prices ni exige iniciar sesión.
-      const { data, error } = await (supabase as any)
-        .rpc("store_public_coverage");
+    let active = true;
+    let version = 0;
+    const refreshCoverage = async () => {
+      const request = ++version;
+      // This public RPC only returns covered city + department names, never prices.
+      const { data, error } = await (supabase as any).rpc("store_public_coverage");
+      if (!active || request !== version) return;
       if (error) {
-        console.error("Error cobertura plataforma:", error);
+        console.error("Error actualizando cobertura de la plataforma:", error);
+        setPlatformCoverageStatus("error");
         return;
       }
-      const normalizePlace = (value: unknown) => String(value ?? "")
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-      const covered = new Set<string>();
-      for (const dep of PARAGUAY_LOCATIONS) {
-        for (const city of dep.cities) {
-          const cityName = normalizePlace(city);
-          const departmentName = normalizePlace(dep.department);
-          if ((data || []).some((row: any) => {
-            if (normalizePlace(row.city) !== cityName) return false;
-            // Asunción es Distrito Capital; en client_prices figura como Central.
-            if (cityName === "asuncion") return true;
-            return normalizePlace(row.departamento) === departmentName;
-          })) {
-            covered.add(locationKey(dep.department, city));
-          }
-        }
-      }
-      setPlatformCoverage([...covered]);
-    })();
-  }, [config?.coverageMode]);
+      setPlatformCoverage(buildPlatformCoverageLocations((data || []) as any[]));
+      setPlatformCoverageStatus("ready");
+    };
+    setPlatformCoverageStatus("loading");
+    void refreshCoverage();
+    // Read current coverage on checkout open and periodically while page stays open.
+    const interval = window.setInterval(() => void refreshCoverage(), 60_000);
+    const checkVisible = () => {
+      if (document.visibilityState === "visible") void refreshCoverage();
+    };
+    window.addEventListener("focus", checkVisible);
+    document.addEventListener("visibilitychange", checkVisible);
+    return () => {
+      active = false;
+      version++;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", checkVisible);
+      document.removeEventListener("visibilitychange", checkVisible);
+    };
+  }, [config?.coverageMode, checkoutOpen]);
+
   const products = config?.productSnapshots || [];
   const product =
     products.find((p) => p.id === activeProductId) || products[0] || null;
@@ -522,10 +527,7 @@ export default function PublicLandingPage({
   const availableLocations = useMemo(() => {
     if (!config) return PARAGUAY_LOCATIONS;
     if (config.coverageMode === "platform") {
-      return PARAGUAY_LOCATIONS.map((dep) => ({
-        ...dep,
-        cities: dep.cities.filter((city) => platformCoverage.includes(locationKey(dep.department, city))),
-      })).filter((dep) => dep.cities.length > 0);
+      return platformCoverage;
     }
     if (config.coverageMode === "custom") {
       return PARAGUAY_LOCATIONS
@@ -537,7 +539,7 @@ export default function PublicLandingPage({
         .filter((dep) => dep.cities.length > 0);
     }
     return PARAGUAY_LOCATIONS;
-  }, [config?.coverageMode, JSON.stringify(config?.hiddenDepartments || []), JSON.stringify(config?.hiddenCities || []), platformCoverage.join("|")]);
+  }, [config?.coverageMode, JSON.stringify(config?.hiddenDepartments || []), JSON.stringify(config?.hiddenCities || []), platformCoverage]);
 
   const availableCities =
     availableLocations.find((dep) => dep.department === form.department)?.cities || [];
@@ -645,6 +647,18 @@ export default function PublicLandingPage({
     if (!form.full_name.trim() || !form.phone.trim() || !form.department.trim() || !form.city.trim()) {
       alert("Completá nombre, teléfono y ciudad.");
       return;
+    }
+
+    if (!preview && config?.coverageMode === "platform") {
+      if (platformCoverageStatus !== "ready") {
+        alert("No se pudo verificar la cobertura actual. Reintentá después de actualizar las ciudades.");
+        return;
+      }
+      if (!availableLocations.some(dep =>
+        dep.department === form.department && dep.cities.includes(form.city))) {
+        alert("La ciudad seleccionada ya no está en la cobertura de la plataforma. Elegí una ciudad disponible.");
+        return;
+      }
     }
 
     if (preview) {
@@ -1974,6 +1988,18 @@ export default function PublicLandingPage({
                 <label>Celular con WhatsApp *</label>
                 <input value={form.phone} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} placeholder="0981..." />
               </div>
+              {config.coverageMode === "platform" && platformCoverageStatus === "ready" && availableLocations.length === 0 && (
+                <p role="status" style={{fontSize:12,color:"#9b241c"}}>
+                  No hay ciudades configuradas con cobertura. Consultá con la tienda.
+                </p>
+              )}
+              {config.coverageMode === "platform" && platformCoverageStatus !== "ready" && (
+                <p role="status" style={{fontSize:12,color:platformCoverageStatus==="error"?"#9b241c":"#555",padding:"8px 0"}}>
+                  {platformCoverageStatus==="loading"
+                    ? "Actualizando ciudades con cobertura…"
+                    : "No se pudo actualizar la cobertura. Volvé a abrir el formulario o recargá la página."}
+                </p>
+              )}
               <div className="sky-field">
                 <label>Departamento *</label>
                 <select value={form.department} onChange={(e) => setForm((p) => ({ ...p, department: e.target.value, city: "" }))}>
