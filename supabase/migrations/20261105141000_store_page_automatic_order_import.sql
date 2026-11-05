@@ -14,6 +14,8 @@ DECLARE
   v_product public.products%ROWTYPE;
   v_city public.client_prices%ROWTYPE;
   v_mapping_sku text;
+  v_snapshot jsonb;
+  v_offer jsonb;
   v_count integer;
   v_qty integer;
   v_sale numeric;
@@ -55,6 +57,26 @@ BEGIN
     v_sale := NEW.total_gs;
     IF v_qty IS NULL OR v_qty<1 OR v_sale IS NULL OR v_sale<=0 THEN
       RAISE EXCEPTION 'Cantidad o total inválidos';
+    END IF;
+    -- A buyer cannot invent a product or price through a modified network request.
+    SELECT p.value INTO v_snapshot FROM jsonb_array_elements(
+      CASE WHEN jsonb_typeof(v_page.config->'productSnapshots')='array'
+           THEN v_page.config->'productSnapshots' ELSE '[]'::jsonb END
+    ) AS p(value) WHERE p.value->>'id'=NEW.product_id LIMIT 1;
+    IF v_snapshot IS NULL THEN RAISE EXCEPTION 'Producto no pertenece a esta página'; END IF;
+    IF nullif(NEW.raw_payload->>'quantity_offer_id','') IS NOT NULL THEN
+      SELECT offer.value INTO v_offer FROM jsonb_array_elements(
+        CASE WHEN jsonb_typeof(v_page.config->'quantityOffers')='array'
+             THEN v_page.config->'quantityOffers' ELSE '[]'::jsonb END
+      ) AS offer(value) WHERE offer.value->>'id'=NEW.raw_payload->>'quantity_offer_id' LIMIT 1;
+      IF v_offer IS NULL OR v_sale<>coalesce((v_offer->>'priceGs')::numeric,-1)
+        OR v_qty<>coalesce((v_offer->>'quantity')::integer,-1) THEN
+        RAISE EXCEPTION 'Oferta o cantidad no coincide con la página';
+      END IF;
+    ELSE
+      IF v_sale<>coalesce((v_snapshot->>'price')::numeric,-1)*v_qty THEN
+        RAISE EXCEPTION 'Total no coincide con el precio de la página';
+      END IF;
     END IF;
     -- Match current prices and existing coverage; never infer uncovered cities.
     SELECT count(*) INTO v_count FROM public.client_prices c
