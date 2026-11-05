@@ -4396,6 +4396,11 @@ export default function WebPageBuilder({
                         ? `${window.location.origin}/#/p/${page.slug}`
                         : `${window.location.origin}/#/preview/${page.id}`}
                     </div>
+                    {automatic && (
+                      <div className="mt-2 text-[11px] text-emerald-400 font-bold">
+                        ⚡ Carga automática activa {page.status !== "published" ? "(al publicar)" : ""}
+                      </div>
+                    )}
                     {page.status !== "published" && (
                       <div className="text-[11px] text-amber-500 font-bold mt-1">
                         Borrador: el link público todavía no está habilitado.
