@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { PARAGUAY_LOCATIONS, locationKey } from "@/lib/paraguayLocations";
 import { normalizeStoreWhatsAppNumber, WhatsAppLogo } from "@/lib/storeWhatsApp";
+import { storePublicProductUrl } from "@/lib/storefrontUrls";
 
 export type BuilderProduct = {
   id: string;
@@ -2074,7 +2075,7 @@ export default function WebPageBuilder({
   const copyLink = async (page: LandingRow) => {
     const url =
       page.status === "published"
-        ? `${window.location.origin}/#/p/${page.slug}`
+        ? storePublicProductUrl(page.slug)
         : `${window.location.origin}/#/preview/${page.id}`;
 
     await navigator.clipboard.writeText(url);
@@ -2089,7 +2090,7 @@ export default function WebPageBuilder({
   const openPage = (page: LandingRow) => {
     const url =
       page.status === "published"
-        ? `${window.location.origin}/#/p/${page.slug}`
+        ? storePublicProductUrl(page.slug)
         : `${window.location.origin}/#/preview/${page.id}`;
 
     window.open(url, "_blank", "noopener,noreferrer");
@@ -2198,7 +2199,7 @@ export default function WebPageBuilder({
               <div>
                 <label className="app-label">Enlace público</label>
                 <div className="flex items-center rounded-xl border border-border overflow-hidden bg-secondary/20">
-                  <span className="px-3 text-xs text-muted-foreground">/p/</span>
+                  <span className="px-3 text-xs text-muted-foreground">mitienda…/</span>
                   <input
                     className="flex-1 bg-transparent px-2 py-2.5 outline-none text-sm"
                     value={slug}
@@ -4307,7 +4308,7 @@ export default function WebPageBuilder({
                     <div className="font-black text-lg">{page.name}</div>
                     <div className="text-xs text-muted-foreground mt-1 break-all">
                       {page.status === "published"
-                        ? `${window.location.origin}/#/p/${page.slug}`
+                        ? storePublicProductUrl(page.slug)
                         : `${window.location.origin}/#/preview/${page.id}`}
                     </div>
                     {page.status !== "published" && (
