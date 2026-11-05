@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { PARAGUAY_LOCATIONS, locationKey } from "@/lib/paraguayLocations";
 import { normalizeStoreWhatsAppNumber, WhatsAppLogo } from "@/lib/storeWhatsApp";
-import { storePublicProductUrl } from "@/lib/storefrontUrls";
+import { storePageShareUrl } from "@/lib/storefrontUrls";
 
 export type BuilderProduct = {
   id: string;
@@ -1974,6 +1974,10 @@ export default function WebPageBuilder({
       config: {
         ...config,
         version: 2,
+        // Only NEW pages use mitienda. Existing pages keep their original link type.
+        linkDomainVersion: existingPage
+          ? (existingPage.config as LandingConfig & { linkDomainVersion?: string }).linkDomainVersion
+          : "store-v1",
         productSnapshots: freshSnapshots,
       },
       published_at: preservedPublishedAt,
@@ -2075,7 +2079,7 @@ export default function WebPageBuilder({
   const copyLink = async (page: LandingRow) => {
     const url =
       page.status === "published"
-        ? storePublicProductUrl(page.slug)
+        ? storePageShareUrl(page, window.location.origin)
         : `${window.location.origin}/#/preview/${page.id}`;
 
     await navigator.clipboard.writeText(url);
@@ -2090,7 +2094,7 @@ export default function WebPageBuilder({
   const openPage = (page: LandingRow) => {
     const url =
       page.status === "published"
-        ? storePublicProductUrl(page.slug)
+        ? storePageShareUrl(page, window.location.origin)
         : `${window.location.origin}/#/preview/${page.id}`;
 
     window.open(url, "_blank", "noopener,noreferrer");
@@ -4308,7 +4312,7 @@ export default function WebPageBuilder({
                     <div className="font-black text-lg">{page.name}</div>
                     <div className="text-xs text-muted-foreground mt-1 break-all">
                       {page.status === "published"
-                        ? storePublicProductUrl(page.slug)
+                        ? storePageShareUrl(page, window.location.origin)
                         : `${window.location.origin}/#/preview/${page.id}`}
                     </div>
                     {page.status !== "published" && (
