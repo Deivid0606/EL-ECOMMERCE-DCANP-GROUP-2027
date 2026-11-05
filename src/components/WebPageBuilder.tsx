@@ -787,6 +787,43 @@ export default function WebPageBuilder({
     loadPages();
   }, [loadPages]);
 
+  useEffect(() => {
+    if (!userEmail) {
+      setGlobalAutoImport(false);
+      setGlobalAutoImportLoading(false);
+      return;
+    }
+    let alive = true;
+    setGlobalAutoImportLoading(true);
+    (supabase as any).rpc("store_get_auto_import_enabled").then(({data,error}: {data:boolean|null,error:any}) => {
+      if (!alive) return;
+      setGlobalAutoImportLoading(false);
+      if (error) {
+        console.error("No se pudo consultar carga automática global:",error);
+        toast.error("No se pudo consultar el estado de la carga automática.");
+        return;
+      }
+      setGlobalAutoImport(data === true);
+    });
+    return () => { alive = false; };
+  }, [userEmail]);
+
+  const toggleGlobalAutoImport = async (next: boolean) => {
+    if (globalAutoImportLoading || globalAutoImportSaving) return;
+    setGlobalAutoImportSaving(true);
+    const { data, error } = await (supabase as any).rpc("store_set_auto_import_enabled", {p_enabled: next});
+    setGlobalAutoImportSaving(false);
+    if (error) {
+      console.error("No se pudo cambiar carga automática:",error);
+      toast.error(error.message || "No se pudo actualizar la carga automática.");
+      return;
+    }
+    setGlobalAutoImport(data === true);
+    toast.success(data === true
+      ? "⚡ Carga automática activada para todas tus páginas."
+      : "Carga automática desactivada para todas tus páginas.");
+  };
+
   const resetEditor = () => {
     setEditingId(null);
     setName("");
