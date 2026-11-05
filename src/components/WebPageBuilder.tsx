@@ -1975,8 +1975,8 @@ export default function WebPageBuilder({
         ...config,
         version: 2,
         // Only NEW pages use mitienda. Existing pages keep their original link type.
-        linkDomainVersion: existingPage
-          ? (existingPage.config as LandingConfig & { linkDomainVersion?: string }).linkDomainVersion
+        linkDomainVersion: editingId
+          ? (existingPage?.config as (LandingConfig & { linkDomainVersion?: string }) | undefined)?.linkDomainVersion
           : "store-v1",
         productSnapshots: freshSnapshots,
       },
