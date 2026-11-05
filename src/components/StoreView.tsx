@@ -10,8 +10,10 @@ import StoreOrdersView, {
 } from "@/components/StoreOrdersView";
 import StoreRealtimeView from "@/components/StoreRealtimeView";
 import StorePixelView from "@/components/StorePixelView";
+import StoreSkuSettingsView from "@/components/StoreSkuSettingsView";
+import type { StoreProductMapping } from "@/lib/storeProductMappings";
 
-type StoreTab = "pages" | "orders" | "realtime" | "pixel";
+type StoreTab = "pages" | "orders" | "realtime" | "pixel" | "sku-settings";
 type CityEntry = { city: string; departamento: string | null };
 type ProductRow = {
   id: string;
@@ -66,6 +68,7 @@ export default function StoreView({
   const [cities, setCities] = useState<CityEntry[]>([]);
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const [referenceReady, setReferenceReady] = useState(false);
+  const [productMappings, setProductMappings] = useState<StoreProductMapping[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -73,28 +76,32 @@ export default function StoreView({
       setReferenceReady(false);
       setCities([]);
       setCatalogProducts([]);
+      setProductMappings([]);
       return;
     }
 
     const loadReferenceData = async () => {
       setReferenceReady(false);
-      const [pricesResult, productsResult, favoritesResult] = await Promise.all([
+      const [pricesResult, productsResult, favoritesResult, mappingsResult] = await Promise.all([
         supabase.from("client_prices").select("city,departamento"),
         supabase
           .from("products")
           .select("id,title,sku,provider_email,is_private,is_private_stock,private_to_emails"),
         supabase.from("user_favorites").select("product_id").eq("user_email", email),
+        supabase.from("product_title_mappings").select("owner_email,title_key,raw_title,sku").eq("owner_email", email),
       ]);
       if (!active) return;
-      if (pricesResult.error || productsResult.error || favoritesResult.error) {
+      if (pricesResult.error || productsResult.error || favoritesResult.error || mappingsResult.error) {
         console.error("Mi Tienda: datos de referencia", {
           prices: pricesResult.error,
           products: productsResult.error,
           favorites: favoritesResult.error,
+          mappings: mappingsResult.error,
         });
         toast.error("No se pudo verificar el catálogo o la cobertura de Mi Tienda.");
         setCities([]);
         setCatalogProducts([]);
+        setProductMappings([]);
         return;
       }
 
@@ -118,6 +125,7 @@ export default function StoreView({
       });
       if (!active) return;
       setCities(visibleCities);
+      setProductMappings((mappingsResult.data || []) as StoreProductMapping[]);
       setCatalogProducts(
         visibleProducts.map((p) => ({ id: p.id, title: p.title, sku: p.sku }))
       );
@@ -127,6 +135,14 @@ export default function StoreView({
     void loadReferenceData();
     return () => { active = false; };
   }, [email, role]);
+
+  const refreshProductMappings = useCallback(async () => {
+    if (!email) return;
+    const { data, error } = await supabase.from("product_title_mappings")
+      .select("owner_email,title_key,raw_title,sku").eq("owner_email", email);
+    if (error) throw error;
+    setProductMappings((data || []) as StoreProductMapping[]);
+  }, [email]);
 
   const checkCoverage = useCallback(
     (city: string, department: string | null): CoverageResult => {
@@ -170,6 +186,7 @@ export default function StoreView({
               <button className={`nav-btn ${tab === "orders" ? "active" : ""}`} onClick={() => setTab("orders")}>📦 Pedidos</button>
               <button className={`nav-btn ${tab === "realtime" ? "active" : ""}`} onClick={() => setTab("realtime")}>📊 Vista en tiempo real</button>
               <button className={`nav-btn ${tab === "pixel" ? "active" : ""}`} onClick={() => setTab("pixel")}>🎯 Pixel</button>
+              <button className={`nav-btn ${tab === "sku-settings" ? "active" : ""}`} onClick={() => setTab("sku-settings")}>⚙️ Asociar productos / SKU</button>
             </div>
           </div>
         </div>
@@ -180,10 +197,15 @@ export default function StoreView({
               onLoadOrder={onLoadOrder}
               checkCoverage={checkCoverage}
               catalogProducts={productsForOrders}
+              productMappings={productMappings}
             />
           )}
           {tab === "realtime" && <StoreRealtimeView />}
           {tab === "pixel" && <StorePixelView />}
+          {tab === "sku-settings" && (
+            <StoreSkuSettingsView catalogProducts={catalogProducts} mappings={productMappings}
+              onMappingsChanged={refreshProductMappings} />
+          )}
         </div>
       </div>
     </div>

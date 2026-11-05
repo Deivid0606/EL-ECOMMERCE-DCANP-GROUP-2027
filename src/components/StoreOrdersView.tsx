@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import DropiButton from "@/components/DropiButton";
+import { mappedStoreSku, type StoreProductMapping } from "@/lib/storeProductMappings";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
@@ -15,6 +16,7 @@ export type StoreOrderPrefill = {
   departamento?: string;
   email?: string;
   productTitle?: string;
+  sku?: string;
   totalGs?: number;
   qty?: number;
   obs?: string;
@@ -63,6 +65,7 @@ export type CatalogProduct = {
 
 export type StoreOrdersViewProps = {
   onLoadOrder: (prefill: StoreOrderPrefill) => void;
+  productMappings?: StoreProductMapping[];
   checkCoverage?: (
     city: string,
     department: string | null
@@ -123,7 +126,8 @@ const isSaved = (order: StoreOrder) =>
   );
 
 export function makeStoreOrderPrefill(
-  order: StoreOrder
+  order: StoreOrder,
+  mappings: StoreProductMapping[] = []
 ): StoreOrderPrefill {
   return {
     customer: order.customer_name || "",
@@ -132,6 +136,7 @@ export function makeStoreOrderPrefill(
     street: order.address || "",
     departamento: order.department || "",
     productTitle: order.product_title || "",
+    sku: mappedStoreSku(order.product_title, mappings) || undefined,
     totalGs: Number(order.total_gs || 0),
     qty: Number(order.quantity || 1),
     obs: [
@@ -166,25 +171,21 @@ function orderUrl(ids: string[]) {
 
 function classifyProduct(
   order: StoreOrder,
-  products?: CatalogProduct[]
+  products?: CatalogProduct[],
+  mappings: StoreProductMapping[] = [],
 ): ProductMatch {
   if (!products) return "review";
-
+  const mapped = mappedStoreSku(order.product_title, mappings);
+  if (mapped) {
+    // A mapping never silently falls back to another product when its SKU is unavailable.
+    const matches = products.filter(p => p.sku?.trim().toLowerCase() === mapped.trim().toLowerCase());
+    return matches.length === 1 ? "matched" : "review";
+  }
   const name = normalize(order.product_title);
-
-  const exact = products.filter(
-    (p) =>
-      normalize(p.title) === name ||
-      (p.aliases || []).some(
-        (a) => normalize(a) === name
-      )
+  const exact = products.filter(p =>
+    normalize(p.title) === name || (p.aliases || []).some(a => normalize(a) === name)
   );
-
-  return exact.length === 1
-    ? "matched"
-    : exact.length > 1
-      ? "review"
-      : "missing";
+  return exact.length === 1 ? "matched" : exact.length > 1 ? "review" : "missing";
 }
 
 // ============================================
@@ -849,6 +850,7 @@ export default function StoreOrdersView({
   onLoadOrder,
   checkCoverage,
   catalogProducts,
+  productMappings = [],
 }: StoreOrdersViewProps) {
   const { user } = useAuth();
   const email = user?.email?.toLowerCase() || "";
@@ -1050,7 +1052,7 @@ export default function StoreOrdersView({
   const canImport = (o: StoreOrder) =>
     !isSaved(o) &&
     getCoverage(o) === "covered" &&
-    classifyProduct(o, catalogProducts) === "matched" &&
+    classifyProduct(o, catalogProducts, productMappings) === "matched" &&
     Boolean(o.customer_name?.trim()) &&
     Boolean(o.phone?.trim()) &&
     Number(o.quantity) > 0 &&
@@ -1797,7 +1799,7 @@ export default function StoreOrdersView({
           <div className="divide-y divide-border">
             {pagedOrders.map((order) => {
               const cov = getCoverage(order);
-              const match = classifyProduct(order, catalogProducts);
+              const match = classifyProduct(order, catalogProducts, productMappings);
               const stage = loadStage(order);
               const saved = stage === "loaded";
               const isOpen = expanded === order.id;
@@ -1805,10 +1807,12 @@ export default function StoreOrdersView({
               const tagging = taggingIds.includes(order.id);
               const deleting = deletingIds.includes(order.id);
 
-              const matches = (catalogProducts || []).filter(
-                (p) =>
-                  normalize(p.title) === normalize(order.product_title) ||
-                  (p.aliases || []).some((a) => normalize(a) === normalize(order.product_title))
+              const assignedSku = mappedStoreSku(order.product_title, productMappings);
+              const matches = (catalogProducts || []).filter(p =>
+                assignedSku
+                  ? p.sku?.trim().toLowerCase() === assignedSku.trim().toLowerCase()
+                  : normalize(p.title) === normalize(order.product_title)
+                    || (p.aliases || []).some(a => normalize(a) === normalize(order.product_title))
               );
               const dropiProduct = matches.length === 1 ? matches[0] : undefined;
 
@@ -1906,6 +1910,7 @@ export default function StoreOrdersView({
                             <Badge {...STAGE_BADGE[stage]} />
                             <Badge {...COVERAGE_BADGE[cov]} />
                             <Badge {...PRODUCT_BADGE[match]} />
+                            {assignedSku && <Badge label={`🔗 SKU: ${assignedSku}`} cls="border-primary/40 text-primary" />}
                             {order.status && <Badge label={`Estado web: ${order.status}`} cls="border-border text-muted-foreground" />}
                           </div>
                           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-2 text-sm">
@@ -2117,11 +2122,18 @@ export function StoreOrderTabBridge({
         return;
       }
 
-      onLoadOrder(
-        makeStoreOrderPrefill(
-          data as StoreOrder
-        )
-      );
+      // The form opens in a new tab; resolve the saved mapping here too.
+      // Always use this seller's mappings, never mappings from another account.
+      const { data: mapped, error: mappingError } = await supabase
+        .from("product_title_mappings")
+        .select("owner_email,title_key,raw_title,sku")
+        .eq("owner_email", email);
+      if (!active) return;
+      if (mappingError) {
+        console.warn("No se pudieron consultar las asociaciones SKU", mappingError);
+      }
+      onLoadOrder(makeStoreOrderPrefill(data as StoreOrder,
+        (mapped || []) as StoreProductMapping[]));
     })();
 
     return () => {
