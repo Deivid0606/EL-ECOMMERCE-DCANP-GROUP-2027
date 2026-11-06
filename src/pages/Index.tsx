@@ -32,6 +32,7 @@ const ShopifyInboxView = lazy(() => import('@/components/ShopifyInboxView'));
 const ShopifyConnectionView = lazy(() => import('@/components/ShopifyConnectionView'));
 const QRScannerView = lazy(() => import('@/components/QRScannerView'));
 const StoreView = lazy(() => import('@/components/StoreView'));
+const BranchCamerasView = lazy(() => import('@/components/BranchCamerasView'));
 const BotSkyImportBridge = lazy(() => import('@/components/BotSkyImportBridge'));
 const TrackingPage = lazy(() => import('@/components/TrackingPage'));
 const RoutePage = lazy(() => import('@/components/RoutePage'));
@@ -368,6 +369,9 @@ export default function Index() {
             onLoadProduct={handleLoadProduct}
           />
         );
+
+      case 'sucursal':
+        return ['ADMIN', 'PROVEEDOR'].includes(String(profile.role || '')) ? <BranchCamerasView /> : <DashboardView />;
 
       case 'store':
         return (
