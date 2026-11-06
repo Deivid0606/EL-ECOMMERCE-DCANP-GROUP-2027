@@ -1037,11 +1037,18 @@ export default function OrdersView() {
       updated_at: new Date().toISOString(),
     };
     if (deliveryEmail) updates.status = 'EN RUTA';
+    const releasingRescheduled = !deliveryEmail && String(order?.status || '').toUpperCase() === 'REAGENDADO';
     const { error } = await supabase.from('orders').update(updates).eq('id', orderId);
     if (error) { toast.error(error.message); return; }
-    toast.success(deliveryEmail ? `Asignado a ${deliveryEmail}` : 'Delivery removido');
-    setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
+    // The database clears the prior guide and team assignment when a rescheduled order is unassigned.
+    const displayUpdates = releasingRescheduled
+      ? { ...updates, delivery_owner: null, assigned_team_member: null, status2: null, guide_generated_at: null }
+      : updates;
+    toast.success(releasingRescheduled
+      ? 'Delivery desasignado. El pedido vuelve a Despacho en la fecha reagendada.'
+      : deliveryEmail ? `Asignado a ${deliveryEmail}` : 'Delivery removido');
+    setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...displayUpdates } : o));
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...displayUpdates } : o));
     if (deliveryEmail) postNews(`${myEmail} asignó pedido ${orderNum} a ${deliveryEmail}`, orderNum);
   };
 
