@@ -146,7 +146,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [deliveredTodayCount, setDeliveredTodayCount] = useState(0);
   
   // FILTROS EXISTENTES
-  const [status2Filter, setStatus2Filter] = useState<string>('TODOS');
+  const [status2Filter, setStatus2Filter] = useState<string>('PENDIENTES');
   const [shownRows, setShownRows] = useState(120);
   const [showHistorical, setShowHistorical] = useState(false);
   const [loadError, setLoadError] = useState('');
