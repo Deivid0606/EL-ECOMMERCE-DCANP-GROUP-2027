@@ -147,6 +147,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   // FILTROS EXISTENTES
   const [status2Filter, setStatus2Filter] = useState<string>('TODOS');
   const [shownRows, setShownRows] = useState(120);
+  const [showHistorical, setShowHistorical] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [selectedCities, setSelectedCities] = useState<Set<string>>(new Set());
   const [citySearch, setCitySearch] = useState('');
@@ -285,6 +286,10 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       // pedidas en paralelo.
       const { data: allRows, error } = await fetchAllRows('orders', (query) => {
         let q = query.order('created_at', { ascending: false });
+        // Keep the default all-status screen fast; historical orders stay accessible on demand.
+        if (status2Filter === 'TODOS' && !showHistorical && !search.trim()) {
+          q = q.gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString());
+        }
         if (search && search.trim()) q = q.ilike('order_number', `%${search.trim()}%`);
         if (status2Filter === 'PENDIENTES') q = q.or('status2.is.null,status2.eq.--');
         else if (status2Filter === 'CON_GUIA') q = q.eq('status2', 'GUIA GENERADA');
@@ -382,7 +387,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
   useEffect(() => { 
     load(); 
-  }, [status2Filter, role, myEmail]);
+  }, [status2Filter, role, myEmail, showHistorical]);
 
   useEffect(() => {
     if (search && search.trim()) {
@@ -1557,6 +1562,13 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           <option value="CON_GUIA">✅ Con guía generada</option>
           <option value="TODOS">📦 Todos</option>
         </select>
+        {status2Filter === 'TODOS' && (
+          <button type="button" className="nav-btn !text-xs"
+            onClick={() => setShowHistorical(v => !v)}
+            title="Alternar entre los últimos 30 días y todos los pedidos históricos">
+            {showHistorical ? '📆 Solo últimos 30 días' : '📚 Incluir históricos'}
+          </button>
+        )}
         
         {role !== 'PROVEEDOR' && (
           <div className="relative">
