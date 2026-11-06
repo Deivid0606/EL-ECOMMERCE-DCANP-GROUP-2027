@@ -131,13 +131,11 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [targetDelivery, setTargetDelivery] = useState('');
   const [assigningBulk, setAssigningBulk] = useState(false);
   const canAssignFromGuides = role === 'ADMIN' || role === 'PROVEEDOR';
-  const canApplyStock = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
 
   // STOCK: productos, stock por delivery y descuentos vigentes por pedido.
   const [stockProducts, setStockProducts] = useState<StockProduct[]>([]);
   const [deliveryStock, setDeliveryStock] = useState<Map<string, number>>(new Map());
   const [stockLedger, setStockLedger] = useState<Map<string, StockLedgerRow[]>>(new Map());
-  const [applyingStockId, setApplyingStockId] = useState<string | null>(null);
   // Guías generadas hoy (para «Stock del día»): producto → { unidades, pedidos }.
   const [guidesToday, setGuidesToday] = useState<any[]>([]);
   const [showStockDay, setShowStockDay] = useState(false);
@@ -753,10 +751,6 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     }
     return m;
   }, [guidesToday, stockProducts]);
-  const remainingReal = (productId: string) => {
-    const p = stockProducts.find(x => x.id === productId);
-    return Number(p?.real_stock || 0) - (usedToday.get(productId)?.units || 0);
-  };
   // La guía no consume stock; la disponibilidad efectiva se valida al ENTREGAR.
   const [stockSearch, setStockSearch] = useState('');
   const [stockView, setStockView] = useState<'todos' | 'usados' | 'bajos' | 'agotados'>('todos');
