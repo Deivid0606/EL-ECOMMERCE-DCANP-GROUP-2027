@@ -96,7 +96,7 @@ BEGIN
 
   PERFORM set_config('app.skip_stock_log', '0', true);
   RETURN jsonb_build_object('ok', jsonb_array_length(lines) > 0, 'lines', lines, 'missing', missing);
-END; $function$
+END; $function$;
 
 CREATE OR REPLACE FUNCTION public.apply_order_stock(p_order_id uuid)
  RETURNS jsonb
@@ -115,7 +115,7 @@ BEGIN
     RAISE EXCEPTION 'No se puede descontar stock al generar guía; solo al entregar el pedido';
   END IF;
   RETURN public.apply_order_stock_internal(p_order_id, 'ENTREGADO', me);
-END; $function$
+END; $function$;
 
 CREATE OR REPLACE FUNCTION public.order_stock_status_trigger()
  RETURNS trigger
@@ -136,7 +136,7 @@ BEGIN
     RAISE EXCEPTION 'No se pudo actualizar el stock del pedido %: %', NEW.id, SQLERRM;
   END;
   RETURN NEW;
-END; $function$
+END; $function$;
 
 CREATE OR REPLACE FUNCTION public.orders_guide_guard()
 RETURNS trigger
