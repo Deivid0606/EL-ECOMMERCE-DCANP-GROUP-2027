@@ -3,6 +3,7 @@ import { Camera, CameraOff, Info, Loader2, Plus, RefreshCw, Save, ShieldCheck, T
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import BranchCameraPlayer from '@/components/BranchCameraPlayer';
 
 type BranchCamera = {
   id: string;
@@ -136,13 +137,7 @@ export default function BranchCamerasView() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {cameras.map(camera => (
           <div key={camera.id} className="overflow-hidden rounded-2xl border border-slate-700 bg-[#101827] text-white">
-            <div className="flex aspect-video flex-col items-center justify-center gap-2 bg-black/60 p-5 text-center">
-              <CameraOff className="h-11 w-11 text-slate-500" />
-              <span className="text-sm font-bold">Transmisión no conectada</span>
-              <p className="max-w-xs text-xs text-slate-400">
-                Se requiere un puente de video RTSP → WebRTC/HLS con acceso autenticado.
-              </p>
-            </div>
+            <BranchCameraPlayer key={camera.stream_id} streamId={camera.stream_id} name={camera.name} />
             <div className="space-y-3 p-4">
               <div><h3 className="font-bold text-lg">{camera.name}</h3><p className="text-xs text-slate-400">{camera.branch_name}</p></div>
               <div className="flex items-center gap-2 text-xs text-slate-300">
@@ -150,6 +145,12 @@ export default function BranchCamerasView() {
                 {camera.local_ip || 'IP local pendiente'} · RTSP {camera.rtsp_port}
               </div>
               {camera.notes && <p className="text-sm text-slate-300">{camera.notes}</p>}
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-700/70 bg-slate-900/50 p-2">
+                <span className="text-[10px] text-slate-400">ID privado del canal (configuración PC)</span>
+                <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={()=>{
+                  navigator.clipboard.writeText(camera.stream_id).then(()=>toast.success('ID de canal copiado')).catch(()=>toast.error('No se pudo copiar.'));
+                }}>Copiar ID</button>
+              </div>
               <div className="flex gap-2 border-t border-slate-700 pt-3">
                 <button className="nav-btn flex-1" onClick={() => startEdit(camera)}>Editar</button>
                 <button className="nav-btn !text-rose-300" aria-label={'Eliminar '+camera.name} onClick={() => void remove(camera)}><Trash2 className="h-4 w-4" /></button>
@@ -163,8 +164,9 @@ export default function BranchCamerasView() {
         <div className="flex items-center gap-2 font-bold"><Info className="h-4 w-4" /> Próximo paso para ver video en vivo</div>
         <p className="mt-1 text-muted-foreground">
           Tu cámara ya transmite por RTSP local. Para verla desde cualquier dispositivo, necesitás un servidor de video
-          confiable en la misma red de la sucursal (por ejemplo MediaMTX) con conexión segura hacia la web y autorización
-          por usuario. Vercel no puede acceder directamente a direcciones 192.168.x.x.
+          en la red de la sucursal. Ya está preparado el reproductor con autenticación por usuario, pero requiere instalar
+          MediaMTX en la PC, configurar un túnel HTTPS y registrar su dominio en la variable VITE_BRANCH_CAMERA_HLS_BASE_URL
+          de Vercel. Hasta entonces no habrá transmisión en vivo.
         </p>
         <p className="mt-1 text-muted-foreground">No abras el puerto RTSP al público, ni ingreses contraseñas en este formulario.</p>
       </div>
