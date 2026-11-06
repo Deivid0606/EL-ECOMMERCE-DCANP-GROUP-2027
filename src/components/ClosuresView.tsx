@@ -1441,6 +1441,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   };
 
   const updateAssignedDelivery = async (orderId: string, deliveryEmail: string) => {
+    const original = orders.find(o => o.id === orderId);
+    const releasingRescheduled = !deliveryEmail && String(original?.status || '').toUpperCase() === 'REAGENDADO';
     const { error } = await supabase.from('orders').update({
       delivery_owner: deliveryEmail || null,
       assigned_delivery: deliveryEmail || null,
@@ -1455,13 +1457,16 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       return;
     }
 
-    toast.success(deliveryEmail ? 'Delivery reasignado' : 'Delivery removido');
+    toast.success(releasingRescheduled
+      ? 'Delivery desasignado. Vuelve a Despacho en su fecha reagendada.'
+      : deliveryEmail ? 'Delivery reasignado' : 'Delivery removido');
     setOrders(prev => prev.map(o => o.id === orderId ? {
       ...o,
       delivery_owner: deliveryEmail || null,
       assigned_delivery: deliveryEmail || null,
       assigned_team_member: null,
       assigned_at: deliveryEmail ? new Date().toISOString() : null,
+      ...(releasingRescheduled ? { status2: null, guide_generated_at: null } : {}),
       updated_at: new Date().toISOString()
     } : o));
   };
