@@ -127,6 +127,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [guideId, setGuideId] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deliveryOptions, setDeliveryOptions] = useState<{user_id:string;email:string;name:string}[]>([]);
+  const [assignedDeliveryNames, setAssignedDeliveryNames] = useState<Record<string, string>>({});
   const [deliveryQuery, setDeliveryQuery] = useState('');
   const [targetDelivery, setTargetDelivery] = useState('');
   const [assigningBulk, setAssigningBulk] = useState(false);
@@ -644,7 +645,32 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
   const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
   const visibleOrders = filtered;
-  const pageOrders = visibleOrders.slice(0, shownRows);
+  const pageOrders = useMemo(() => visibleOrders.slice(0, shownRows), [visibleOrders, shownRows]);
+  const assignedEmails = useMemo(() => [...new Set(pageOrders
+    .map(o => lc(o.assigned_delivery))
+    .filter(Boolean))].sort(), [pageOrders]);
+  const assignedEmailsKey = assignedEmails.join('|');
+  useEffect(() => {
+    if (!assignedEmailsKey) return;
+    let active = true;
+    const fetchNames = async () => {
+      const names: Record<string, string> = {};
+      // Look up only the deliveries in the currently visible rows, not all historical orders.
+      for (let offset = 0; offset < assignedEmails.length; offset += 100) {
+        const batch = assignedEmails.slice(offset, offset + 100);
+        const {data, error} = await supabase.from('profiles').select('email,name').in('email', batch);
+        if (!active) return;
+        if (error) { console.error('No se pudieron consultar nombres de deliveries:', error); return; }
+        for (const p of data || []) {
+          const email = lc(p.email);
+          if (email && p.name?.trim()) names[email] = p.name.trim();
+        }
+      }
+      if (active) setAssignedDeliveryNames(prev => ({...prev, ...names}));
+    };
+    void fetchNames();
+    return () => { active = false; };
+  }, [assignedEmailsKey]);
   useEffect(() => { setShownRows(120); }, [status2Filter, selectedProviders, selectedProducts, selectedCities, selectedDepartments, search]);
 
   const repeatedClients = useMemo(() => {
@@ -2029,7 +2055,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
       {/* Tabla */}
       <div className="overflow-auto rounded-2xl border border-slate-700/80 bg-[#101827] shadow-2xl">
-        <table className="w-full min-w-[1740px] text-sm [&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-3">
+        <table className="w-full min-w-[1900px] text-sm [&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-3">
           <thead className="bg-[#070b18] sticky top-0 z-10">
             <tr className="text-left text-[11px] uppercase tracking-widest text-slate-400 border-b border-slate-700/80">
               <th className="w-[40px] text-center">
@@ -2047,6 +2073,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
               <th>Teléfono</th>
               <th>Vendedor</th>
               <th>Proveedor</th>
+              <th>Asignado a (delivery)</th>
               <th>Estado 2</th>
               <th>Guía</th>
             </tr>
@@ -2136,6 +2163,18 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                 <td className="text-xs">{o.phone}</td>
                 <td className="text-xs">{o.created_by}</td>
                 <td className="text-xs">{o.provider_emails_list || o.provider_email || '—'}</td>
+                <td className="text-xs min-w-[195px]">
+                  {o.assigned_delivery ? (
+                    <div className="space-y-0.5">
+                      <span className="font-bold text-sky-300">🛵 {assignedDeliveryNames[lc(o.assigned_delivery)] || deliveryOptions.find(d => lc(d.email) === lc(o.assigned_delivery))?.name || o.assigned_delivery}</span>
+                      {(assignedDeliveryNames[lc(o.assigned_delivery)] || deliveryOptions.some(d => lc(d.email) === lc(o.assigned_delivery) && !!d.name)) && (
+                        <div className="text-[10px] text-slate-400 break-all">{o.assigned_delivery}</div>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-amber-300 font-semibold">Sin asignar</span>
+                  )}
+                </td>
                 <td className="text-xs">
                   <select className="bg-[#070b18] border border-slate-700 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-blue-400" value={o.status2 || '--'}
                     onChange={e => updateStatus2(o.id, e.target.value)}>
@@ -2157,7 +2196,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             ))}
             {visibleOrders.length === 0 && (
               <tr>
-                <td colSpan={14} className="text-center text-muted-foreground py-8">
+                <td colSpan={15} className="text-center text-muted-foreground py-8">
                   <div className="space-y-2">
                     <p>{loadError ? "Error al cargar pedidos: " + loadError : loading ? "Cargando pedidos…" : "No hay pedidos que coincidan con los filtros actuales."}</p>
                     <button type="button" className="nav-btn active" onClick={() => {
