@@ -59,7 +59,9 @@ paths:
     sourceOnDemand: true
 "@
 $config = Join-Path $workdir 'mediamtx.yml'
-[System.IO.File]::WriteAllText($config,$yaml,[System.Text.Encoding]::UTF8)
+# PowerShell 5.1 UTF8 writes a BOM; MediaMTX YAML rejects it as an unknown key.
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($config,$yaml,$utf8NoBom)
 # Restrict filesystem access to current user and SYSTEM; RTSP source can contain passwords.
 & icacls $config /inheritance:r /grant:r "${env:USERNAME}:(R,W)" 'SYSTEM:(F)' | Out-Null
 $runner = Join-Path $workdir 'start-mediamtx.ps1'
