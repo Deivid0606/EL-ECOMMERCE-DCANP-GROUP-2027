@@ -285,14 +285,26 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       // Sin límite práctico de filas: trae los pedidos en páginas de 1.000
       // pedidas en paralelo.
       const { data: allRows, error } = await fetchAllRows('orders', (query) => {
-        let q = query.order('created_at', { ascending: false });
-        // Keep the default all-status screen fast; historical orders stay accessible on demand.
+        // A guide can be created today for an old order, so its creation
+        // date must not hide it from today's dispatch results.
+        let q = status2Filter === 'CON_GUIA'
+          ? query.order('guide_generated_at', { ascending: false, nullsFirst: false })
+          : query.order('created_at', { ascending: false });
         if (status2Filter === 'TODOS' && !showHistorical && !search.trim()) {
           q = q.gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString());
         }
         if (search && search.trim()) q = q.ilike('order_number', `%${search.trim()}%`);
-        if (status2Filter === 'PENDIENTES') q = q.or('status2.is.null,status2.eq.--');
-        else if (status2Filter === 'CON_GUIA') q = q.eq('status2', 'GUIA GENERADA');
+        if (status2Filter === 'PENDIENTES') {
+          q = q.or('status2.is.null,status2.eq.--');
+        } else if (status2Filter === 'CON_GUIA') {
+          q = q.eq('status2', 'GUIA GENERADA');
+          // Fetch only today's generated guides by default. Older ones are
+          // accessible with the explicit historical switch.
+          if (!showHistorical) {
+            q = q.gte('guide_generated_at', pyStart(pyToday()))
+              .lte('guide_generated_at', pyEnd(pyToday()));
+          }
+        }
         return q;
       });
 
@@ -323,8 +335,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           .from('orders')
           .select('id, provider_emails_list, provider_email, assigned_delivery')
           .eq('status2', 'GUIA GENERADA')
-          .gte('updated_at', pyStart(today))
-          .lte('updated_at', pyEnd(today)),
+          .gte('guide_generated_at', pyStart(today))
+          .lte('guide_generated_at', pyEnd(today)),
         supabase
           .from('orders')
           .select('id, provider_emails_list, provider_email, assigned_delivery')
@@ -1557,16 +1569,28 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       {/* Filtros */}
       <div className={cardCls + " flex flex-wrap items-end gap-2 mb-3 p-3"}>
         <label className="app-label !mt-0">Estado</label>
-        <select className={pillInputCls + " !w-auto min-w-[150px]"} value={status2Filter} onChange={e => setStatus2Filter(e.target.value)}>
+        <select className={pillInputCls + " !w-auto min-w-[150px]"} value={status2Filter} onChange={e => {
+          setStatus2Filter(e.target.value);
+          setShowHistorical(false);
+          setSelectedProducts(new Set());
+          setSelectedCities(new Set());
+          setSelectedDepartments(new Set());
+          setSelectedProviders(new Set());
+          setShowWaiting(false);
+        }}>
           <option value="PENDIENTES">📋 Pendientes</option>
-          <option value="CON_GUIA">✅ Con guía generada</option>
+          <option value="CON_GUIA">✅ Con guía generada (hoy)</option>
           <option value="TODOS">📦 Todos</option>
         </select>
-        {status2Filter === 'TODOS' && (
+        {(status2Filter === 'TODOS' || status2Filter === 'CON_GUIA') && (
           <button type="button" className="nav-btn !text-xs"
             onClick={() => setShowHistorical(v => !v)}
-            title="Alternar entre los últimos 30 días y todos los pedidos históricos">
-            {showHistorical ? '📆 Solo últimos 30 días' : '📚 Incluir históricos'}
+            title={status2Filter === 'CON_GUIA'
+              ? 'Alternar las guías generadas hoy y las guías anteriores'
+              : 'Alternar entre los últimos 30 días y todos los pedidos históricos'}>
+            {status2Filter === 'CON_GUIA'
+              ? showHistorical ? '📅 Solo guías de hoy' : '📚 Incluir guías anteriores'
+              : showHistorical ? '📆 Solo últimos 30 días' : '📚 Incluir históricos'}
           </button>
         )}
         
@@ -1647,6 +1671,12 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         )}
       </div>
 
+      {status2Filter === 'CON_GUIA' && !showHistorical && (
+        <div className="mb-3 rounded-xl border border-cyan-500/25 bg-cyan-500/5 p-2 text-xs text-cyan-200">
+          📅 Mostrando guías generadas hoy en Paraguay, aunque el pedido se haya creado antes.
+          {loading ? ' Cargando…' : ` ${orders.length} pedido(s) encontrados.`}
+        </div>
+      )}
       {/* Filtros segunda línea */}
       <div className={cardCls + " flex flex-wrap gap-2 mb-3 p-3"}>
         <input className={pillInputCls + " flex-1 min-w-[240px]"} placeholder="🔎 Buscar por order_number..."
