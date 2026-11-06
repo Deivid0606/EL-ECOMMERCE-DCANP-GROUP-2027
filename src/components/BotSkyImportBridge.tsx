@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 
 type SourceOrder = {
   source_order_id: string;
+  items?: Array<{sku:string;title?:string;quantity:number;price:number}>;
   order_number?: string;
   customer_name?: string;
   phone?: string;
@@ -304,7 +305,7 @@ export default function BotSkyImportBridge() {
               error: existingError,
             } = await supabase
               .from("orders")
-              .select("id, order_number")
+              .select("id, order_number, items_json")
               .eq("source_system", "BOT_SKY")
               .eq("source_order_id", id)
               .maybeSingle();
@@ -314,6 +315,14 @@ export default function BotSkyImportBridge() {
             }
 
             if (existing) {
+              const expected=Array.isArray(raw.items)&&raw.items.length ? raw.items
+                : [{sku:raw.sku||"",quantity:Number(raw.quantity),price:Number(raw.total)/Number(raw.quantity)}];
+              const actual=Array.isArray(existing.items_json)?existing.items_json:[];
+              const signature=(items:Array<{sku?:string;quantity?:number;qty?:number;price?:number;sale_gs?:number}>)=>
+                items.map(item=>[normalize(item.sku),Number(item.quantity??item.qty),
+                  Math.round(Number(item.sale_gs??(Number(item.price)*Number(item.quantity??item.qty)))*100)/100].join("|")).sort().join(";");
+              if(signature(expected)!==signature(actual))
+                throw new Error("El pedido ya existe en E-commerce con productos o cantidades diferentes. Revisar manualmente.");
               results.push({
                 source_order_id: id,
                 status: "already_exists",
@@ -330,97 +339,41 @@ export default function BotSkyImportBridge() {
             // VALIDAR SKU
             // ====================================
 
-            const sku = normalize(raw.sku);
-
-            if (!sku) {
-              throw new Error(
-                "El pedido no tiene SKU."
-              );
+            const total=Number(raw.total);
+            if(!Number.isFinite(total)||total<=0)throw new Error("Precio total inválido.");
+            const legacyQty=Number(raw.quantity);
+            const entries=Array.isArray(raw.items)&&raw.items.length?raw.items:
+              [{sku:raw.sku||"",quantity:legacyQty,price:total/legacyQty}];
+            if(!entries.length||entries.length>20)throw new Error("Demasiados artículos en el pedido.");
+            const importedItems:Array<{sku:string;title:string;sale_gs:number;qty:number;provider_price_gs:number;provider_email:string}>=[];
+            let subtotal=0,providerSubtotal=0;
+            for(const item of entries){
+              const sku=normalize(item.sku);
+              if(!sku)throw new Error("Un artículo no tiene SKU.");
+              const matches=(products||[]).filter(product=>normalize(product.sku)===sku);
+              if(matches.length!==1)throw new Error(matches.length
+                ? `El SKU "${item.sku}" está duplicado en E-commerce.`
+                : `El SKU "${item.sku}" no existe en E-commerce.`);
+              const product=matches[0];
+              const privateProduct=product.is_private===true;
+              const privateEmails=String(product.private_to_emails||"").split(",").map(normalize);
+              const authorized=role==="admin"||role==="administrador"||
+                (["provider","proveedor"].includes(role)&&normalize(product.provider_email)===email)||
+                (["seller","vendedor"].includes(role)&&(!privateProduct||privateEmails.includes(email)));
+              const listed=privateProduct||favoriteIds.has(product.id);
+              if(!authorized||!listed)throw new Error(`El SKU "${item.sku}" no está disponible para este usuario.`);
+              const qty=Number(item.quantity),unit=Number(item.price),providerPrice=Number(product.provider_price_gs||0);
+              if(!Number.isSafeInteger(qty)||qty<=0||qty>100||!Number.isFinite(unit)||unit<=0)
+                throw new Error(`Precio o cantidad inválidos para SKU "${item.sku}".`);
+              if(!Number.isFinite(providerPrice)||providerPrice<0)
+                throw new Error(`Costo de proveedor inválido para SKU "${item.sku}".`);
+              const lineTotal=qty*unit;
+              subtotal+=lineTotal;providerSubtotal+=providerPrice*qty;
+              importedItems.push({sku:product.sku,title:product.title,sale_gs:lineTotal,qty,
+                provider_price_gs:providerPrice,provider_email:product.provider_email||""});
             }
-
-            const matches = (
-              products || []
-            ).filter(
-              (product) =>
-                normalize(product.sku) === sku
-            );
-
-            if (matches.length === 0) {
-              throw new Error(
-                `El SKU "${raw.sku}" no existe en E-commerce.`
-              );
-            }
-
-            if (matches.length > 1) {
-              throw new Error(
-                `El SKU "${raw.sku}" está duplicado en E-commerce.`
-              );
-            }
-
-            const product = matches[0];
-
-            // ====================================
-            // VALIDAR PERMISOS
-            // ====================================
-
-            const privateProduct =
-              product.is_private === true;
-
-            const privateEmails = String(
-              product.private_to_emails || ""
-            )
-              .split(",")
-              .map(normalize);
-
-            const authorized =
-              role === "admin" ||
-              role === "administrador" ||
-              (
-                ["provider", "proveedor"].includes(role) &&
-                normalize(product.provider_email) === email
-              ) ||
-              (
-                ["seller", "vendedor"].includes(role) &&
-                (
-                  !privateProduct ||
-                  privateEmails.includes(email)
-                )
-              );
-
-            const listed =
-              privateProduct ||
-              favoriteIds.has(product.id);
-
-            if (!authorized || !listed) {
-              throw new Error(
-                `El SKU "${raw.sku}" no está disponible para este usuario.`
-              );
-            }
-
-            // ====================================
-            // VALIDAR CANTIDAD Y TOTAL
-            // ====================================
-
-            const qty = Number(raw.quantity);
-            const total = Number(raw.total);
-
-            if (
-              !Number.isSafeInteger(qty) ||
-              qty <= 0
-            ) {
-              throw new Error(
-                "Cantidad inválida."
-              );
-            }
-
-            if (
-              !Number.isFinite(total) ||
-              total <= 0
-            ) {
-              throw new Error(
-                "Precio total inválido."
-              );
-            }
+            if(Math.abs(subtotal-total)>0.02)
+              throw new Error("La suma de artículos no coincide con el total registrado en BOT SKY.");
 
             // ====================================
             // VALIDAR CLIENTE
@@ -514,32 +467,9 @@ export default function BotSkyImportBridge() {
               city.price_gs || 0
             );
 
-            const providerPrice = Number(
-              product.provider_price_gs || 0
-            );
-
-            if (
-              !Number.isFinite(delivery) ||
-              delivery < 0
-            ) {
-              throw new Error(
-                `Tarifa inválida para "${raw.city}".`
-              );
-            }
-
-            if (
-              !Number.isFinite(providerPrice) ||
-              providerPrice < 0
-            ) {
-              throw new Error(
-                `Costo de proveedor inválido para SKU "${raw.sku}".`
-              );
-            }
-
-            const commission =
-              total -
-              providerPrice * qty -
-              delivery;
+            if (!Number.isFinite(delivery) || delivery < 0)
+              throw new Error(`Tarifa inválida para "${raw.city}".`);
+            const commission=total-providerSubtotal-delivery;
 
             // ====================================
             // GENERAR NÚMERO VISIBLE
@@ -604,25 +534,13 @@ export default function BotSkyImportBridge() {
                   .filter(Boolean)
                   .join(" | "),
 
-                items_json: [
-                  {
-                    sku: product.sku,
-                    title: product.title,
-                    sale_gs: total,
-                    qty,
-                    provider_price_gs:
-                      providerPrice,
-                    provider_email:
-                      product.provider_email || "",
-                  },
-                ],
+                items_json: importedItems,
 
                 total_gs: total,
                 delivery_gs: delivery,
                 commission_gs: commission,
 
-                provider_emails_list:
-                  product.provider_email || "",
+                provider_emails_list: [...new Set(importedItems.map(item=>item.provider_email).filter(Boolean))].join(","),
               } as any)
               .select("id, order_number")
               .single();
