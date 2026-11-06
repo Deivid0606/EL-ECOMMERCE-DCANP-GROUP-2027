@@ -116,7 +116,7 @@ export default function WithGuidesView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
   const myEmail = profile?.email || '';
-  const { orderInScope, productInScope } = useProviderScope();
+  const { orderInScope, productInScope, active: favoritesActive, setActive: setFavoritesActive } = useProviderScope();
 const [ordersRaw, setOrders] = useState<any[]>([]);
   const orders = useMemo(() => ordersRaw.filter(orderInScope), [ordersRaw, orderInScope]);
   const [search, setSearch] = useState('');
@@ -145,7 +145,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [deliveredTodayCount, setDeliveredTodayCount] = useState(0);
   
   // FILTROS EXISTENTES
-  const [status2Filter, setStatus2Filter] = useState<string>('PENDIENTES');
+  const [status2Filter, setStatus2Filter] = useState<string>('TODOS');
+  const [shownRows, setShownRows] = useState(120);
+  const [loadError, setLoadError] = useState('');
   const [selectedCities, setSelectedCities] = useState<Set<string>>(new Set());
   const [citySearch, setCitySearch] = useState('');
   const [showCityDropdown, setShowCityDropdown] = useState(false);
@@ -276,6 +278,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
   const load = async () => {
     setLoading(true);
+    setLoadError('');
 
     try {
       // Sin límite práctico de filas: trae los pedidos en páginas de 1.000
@@ -289,6 +292,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       });
 
       if (error) {
+        setLoadError(error.message);
         toast.error(error.message);
         return;
       }
@@ -378,7 +382,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
   useEffect(() => { 
     load(); 
-  }, [status2Filter]);
+  }, [status2Filter, role, myEmail]);
 
   useEffect(() => {
     if (search && search.trim()) {
@@ -462,9 +466,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       if (!showWaiting && isWaitingDate(o)) return false;
       if (showWaiting && !isWaitingDate(o)) return false;
       if (role === 'PROVEEDOR') {
-        const providerList = o.provider_emails_list || '';
-        const myEmailLower = myEmail.toLowerCase();
-        const isMine = providerList.toLowerCase().includes(myEmailLower);
+        const providerList = `${o.provider_emails_list || ''},${o.provider_email || ''}`;
+        const myEmailLower = myEmail.trim().toLowerCase();
+        const isMine = providerList.split(/[,;\s]+/).some((email: string) => email.trim().toLowerCase() === myEmailLower);
         if (!isMine) return false;
       }
 
@@ -622,6 +626,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
   const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
   const visibleOrders = filtered;
+  const pageOrders = visibleOrders.slice(0, shownRows);
+  useEffect(() => { setShownRows(120); }, [status2Filter, selectedProviders, selectedProducts, selectedCities, selectedDepartments, search]);
 
   const repeatedClients = useMemo(() => {
     const map: Record<string, { name: string; count: number; guides: string[]; phones: string[] }> = {};
@@ -2003,7 +2009,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/80">
-            {visibleOrders.map(o => (
+            {pageOrders.map(o => (
               <tr key={o.id} className="hover:bg-slate-800/45 transition-colors">
                 <td className="text-center">
                   <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
@@ -2108,12 +2114,38 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             ))}
             {visibleOrders.length === 0 && (
               <tr>
-                <td colSpan={14} className="text-center text-muted-foreground py-8">Sin pedidos para mostrar</td>
+                <td colSpan={14} className="text-center text-muted-foreground py-8">
+                  <div className="space-y-2">
+                    <p>{loadError ? "Error al cargar pedidos: " + loadError : loading ? "Cargando pedidos…" : "No hay pedidos que coincidan con los filtros actuales."}</p>
+                    <button type="button" className="nav-btn active" onClick={() => {
+                      setStatus2Filter('TODOS');
+                      setSelectedProviders(new Set());
+                      setSelectedCities(new Set());
+                      setSelectedDepartments(new Set());
+                      setSelectedProducts(new Set());
+                      setShowWaiting(false);
+                      setSearch('');
+                      void load();
+                    }}>🔄 Ver todos y actualizar</button>
+                    {favoritesActive && <button type="button" className="nav-btn" onClick={() => setFavoritesActive(false)}>
+                      Mostrar también proveedores fuera de favoritos
+                    </button>}
+                  </div>
+                </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {visibleOrders.length > shownRows && (
+        <div className="flex flex-wrap items-center justify-center gap-3 rounded-xl border border-slate-700/80 bg-slate-900/50 p-3 text-sm text-slate-200">
+          Mostrando {Math.min(shownRows, visibleOrders.length)} de {visibleOrders.length} pedidos filtrados.
+          <button type="button" className="nav-btn active" onClick={() => setShownRows(n => n + 120)}>
+            📦 Ver 120 pedidos más
+          </button>
+        </div>
+      )}
 
       {/* MODAL DE GUÍA CON QR */}
       {showGuideModal && currentOrder && (
