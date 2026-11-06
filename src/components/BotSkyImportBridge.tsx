@@ -305,7 +305,7 @@ export default function BotSkyImportBridge() {
               error: existingError,
             } = await supabase
               .from("orders")
-              .select("id, order_number")
+              .select("id, order_number, items_json")
               .eq("source_system", "BOT_SKY")
               .eq("source_order_id", id)
               .maybeSingle();
@@ -315,6 +315,14 @@ export default function BotSkyImportBridge() {
             }
 
             if (existing) {
+              const expected=Array.isArray(raw.items)&&raw.items.length ? raw.items
+                : [{sku:raw.sku||"",quantity:Number(raw.quantity),price:Number(raw.total)/Number(raw.quantity)}];
+              const actual=Array.isArray(existing.items_json)?existing.items_json:[];
+              const signature=(items:Array<{sku?:string;quantity?:number;qty?:number;price?:number;sale_gs?:number}>)=>
+                items.map(item=>[normalize(item.sku),Number(item.quantity??item.qty),
+                  Math.round(Number(item.sale_gs??(Number(item.price)*Number(item.quantity??item.qty)))*100)/100].join("|")).sort().join(";");
+              if(signature(expected)!==signature(actual))
+                throw new Error("El pedido ya existe en E-commerce con productos o cantidades diferentes. Revisar manualmente.");
               results.push({
                 source_order_id: id,
                 status: "already_exists",
