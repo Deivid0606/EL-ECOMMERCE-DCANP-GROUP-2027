@@ -11,6 +11,7 @@ export type ViewName =
   | 'chat'
   | 'products'
   | 'store'
+  | 'sucursal'
   | 'earnings'
   | 'order'
   | 'orders'
@@ -45,6 +46,7 @@ const navItems: NavItem[] = [
   },
   { id: 'news', label: 'Novedades', excludeRoles: ['DELIVERY'] },
   { id: 'chat', label: 'Chat' },
+  { id: 'sucursal', label: '📹 Sucursal', roles: ['ADMIN', 'PROVEEDOR'] },
   {
     id: 'withGuides',
     label: 'Despacho',
