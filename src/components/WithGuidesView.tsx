@@ -378,30 +378,6 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     setGuidesToday((g || []) as any[]);
   };
 
-  const applyStock = async (o: any) => {
-    const items = getOrderItems(o);
-    const summary = items.map((it: any) => `• ${it.title || it.sku} x${it.qty || it.quantity || 1}`).join('\n');
-    if (!window.confirm(`¿Bajar el stock de este pedido?\n\n${summary}\n\nSi el delivery asignado tiene stock propio se descuenta del suyo; si no, del stock global (visible y real). Si el pedido vuelve a DEVUELTO A DEPÓSITO, el stock se repone.`)) return;
-
-    setApplyingStockId(o.id);
-    const { data, error } = await supabase.rpc('apply_order_stock' as any, { p_order_id: o.id });
-    setApplyingStockId(null);
-
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    const result = (data || {}) as { ok?: boolean; already?: boolean; missing?: string[]; lines?: { delivery: number; global: number }[] };
-    if (result.already) toast.info('Este pedido ya tenía el stock descontado.');
-    else if (result.ok) {
-      const fromDelivery = (result.lines || []).reduce((n, l) => n + l.delivery, 0);
-      const fromGlobal = (result.lines || []).reduce((n, l) => n + l.global, 0);
-      toast.success(`📦 Stock descontado: ${[fromDelivery ? `${fromDelivery} del delivery` : '', fromGlobal ? `${fromGlobal} del global` : ''].filter(Boolean).join(' + ')}`);
-    } else toast.error('No se encontró el producto del pedido en el catálogo.');
-    if (result.missing?.length) toast.warning(`Sin producto en catálogo: ${result.missing.join(', ')}`);
-    await loadStock(orders);
-  };
-
   useEffect(() => { 
     load(); 
   }, [status2Filter]);
@@ -483,27 +459,6 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     Boolean(o.rescheduled_for) && String(o.rescheduled_for) > todayKey && !o.assigned_delivery && (!o.status2 || o.status2 === '--');
   const waitingDateCount = orders.filter(isWaitingDate).length;
   const [showWaiting, setShowWaiting] = useState(false);
-  // Reagendados lejos (no es el próximo día hábil) que todavía tiene el delivery: el proveedor los desasigna.
-  const toRelease = useMemo(() => {
-    const nbd = nextBusinessDay(todayKey);
-    return orders.filter(o => {
-      if (String(o.status || '').toUpperCase() !== 'REAGENDADO' || !o.assigned_delivery || !o.rescheduled_for) return false;
-      if (String(o.rescheduled_for) <= nbd) return false;
-      if (role === 'PROVEEDOR') return String(o.provider_emails_list || o.provider_email || '').toLowerCase().includes(myEmail.toLowerCase());
-      return true;
-    });
-  }, [orders, role, myEmail, todayKey]);
-  const [releasingId, setReleasingId] = useState<string | null>(null);
-  const releaseOrder = async (o: any) => {
-    if (!window.confirm(`↩️ Desasignar ${o.order_number} de ${o.assigned_delivery}?\n\nVuelve a Despacho el ${dayLabel(String(o.rescheduled_for))} para aprobar el despacho de nuevo.`)) return;
-    setReleasingId(o.id);
-    const { error } = await (supabase as any).rpc('release_rescheduled_order', { p_order_id: o.id });
-    setReleasingId(null);
-    if (error) { toast.error(error.message); return; }
-    toast.success(`↩️ ${o.order_number} desasignado: el stock volvió y aparece en Despacho el ${dayLabel(String(o.rescheduled_for))}.`);
-    void load();
-  };
-
   const productFilterBaseOrders = useMemo(() => {
     return orders.filter(o => {
       if (!showWaiting && isWaitingDate(o)) return false;
@@ -802,19 +757,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     const p = stockProducts.find(x => x.id === productId);
     return Number(p?.real_stock || 0) - (usedToday.get(productId)?.units || 0);
   };
-  // Sin guía todavía y algún producto sin stock real suficiente → no se puede seleccionar para imprimir.
-  const noRealStock = (o: any): string => {
-    if (o.status2 === 'GUIA GENERADA') return '';
-    for (const it of getOrderItems(o)) {
-      const p = findItemProduct(it, stockProducts);
-      if (!p) continue;
-      const qty = Number(it.qty || it.quantity || 1);
-      if (Number(p.real_stock || 0) < qty || remainingReal(p.id) < qty) {
-        return `${p.title || p.sku}: stock real ${Number(p.real_stock || 0)}, usado hoy ${usedToday.get(p.id)?.units || 0}`;
-      }
-    }
-    return '';
-  };
+  // La guía no consume stock; la disponibilidad efectiva se valida al ENTREGAR.
   const [stockSearch, setStockSearch] = useState('');
   const [stockView, setStockView] = useState<'todos' | 'usados' | 'bajos' | 'agotados'>('todos');
   const stockDayBase = useMemo(() => {
@@ -931,26 +874,6 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       toast.error('Seleccioná pedidos primero');
       return;
     }
-    const blocked = selected.filter(o => noRealStock(o));
-    if (blocked.length) {
-      toast.error(`Sin stock real: ${blocked.map(o => o.order_number).slice(0, 5).join(', ')}. Sacalos de la selección.`);
-      return;
-    }
-    // Entre todos los seleccionados no pueden pasar el stock real que queda.
-    const need = new Map<string, number>();
-    selected.filter(o => o.status2 !== 'GUIA GENERADA').forEach(o => getOrderItems(o).forEach((it: any) => {
-      const p = findItemProduct(it, stockProducts);
-      if (p) need.set(p.id, (need.get(p.id) || 0) + Number(it.qty || it.quantity || 1));
-    }));
-    const over = [...need].filter(([id, q]) => q > remainingReal(id));
-    if (over.length) {
-      toast.error('No alcanza el stock real: ' + over.map(([id, q]) => {
-        const p = stockProducts.find(x => x.id === id);
-        return `${p?.title || p?.sku} (pedís ${q}, quedan ${Math.max(0, remainingReal(id))})`;
-      }).join('; '), { duration: 10000 });
-      return;
-    }
-
     const toastId = toast.loading(`Actualizando ${selected.length} pedido${selected.length > 1 ? 's' : ''}...`);
     
     try {
@@ -1853,33 +1776,6 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
       {orderTools.modal}
 
-      {toRelease.length > 0 && (
-        <div className="mb-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3">
-          <div className="mb-2 text-sm font-black text-amber-200">
-            ↩️ Reagendados para desasignar ({toRelease.length})
-            <span className="ml-2 text-xs font-normal text-amber-100/80">No son para el próximo día hábil: desasignalos del delivery y vuelven a Despacho en su fecha.</span>
-          </div>
-          <div className="space-y-1.5">
-            {toRelease.map(o => (
-              <div key={o.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-black/20 px-3 py-2 text-xs">
-                <b>{o.order_number}</b>
-                <span>{o.customer_name}</span>
-                <span className="text-slate-400">· {o.city}</span>
-                <span className="text-sky-300">📅 {dayLabel(String(o.rescheduled_for))}</span>
-                <span className="text-slate-400">· 🛵 {o.assigned_delivery}</span>
-                <button
-                  className="nav-btn ml-auto !px-3 !py-1 !text-[11px] !bg-amber-500/30 !text-amber-100"
-                  disabled={releasingId === o.id}
-                  onClick={() => void releaseOrder(o)}
-                >
-                  {releasingId === o.id ? 'Desasignando…' : '↩️ Desasignar'}
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {waitingDateCount > 0 && (
         <button
           className={`mb-3 rounded-full border px-3 py-1 text-xs font-bold ${showWaiting ? 'border-sky-400 bg-sky-500/20 text-sky-200' : 'border-slate-600 text-slate-300'}`}
@@ -2095,7 +1991,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             <tr className="text-left text-[11px] uppercase tracking-widest text-slate-400 border-b border-slate-700/80">
               <th className="w-[40px] text-center">
                 <input type="checkbox" checked={selectedIds.size === visibleOrders.length && visibleOrders.length > 0}
-                  onChange={() => selectedIds.size > 0 ? setSelectedIds(new Set()) : setSelectedIds(new Set(visibleOrders.filter(o => !noRealStock(o)).map(o => o.id)))} />
+                  onChange={() => selectedIds.size > 0 ? setSelectedIds(new Set()) : setSelectedIds(new Set(visibleOrders.map(o => o.id)))} />
               </th>
               <th>Fecha</th>
               <th>ID</th>
@@ -2116,11 +2012,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             {visibleOrders.map(o => (
               <tr key={o.id} className="hover:bg-slate-800/45 transition-colors">
                 <td className="text-center">
-                  {noRealStock(o) ? (
-                    <span title={`Sin stock real · ${noRealStock(o)}`} className="cursor-help text-[13px]">⛔</span>
-                  ) : (
-                    <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
-                  )}
+                  <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
                  </td>
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">
