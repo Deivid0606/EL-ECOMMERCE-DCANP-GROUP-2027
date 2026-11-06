@@ -347,8 +347,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
       const roleFilter = (o: any) => {
         if (role === 'PROVEEDOR') {
-          const providerList = o.provider_emails_list || '';
-          return providerList.toLowerCase().includes(myEmail.toLowerCase());
+          const providers = `${o.provider_emails_list || ''},${o.provider_email || ''}`
+            .split(/[,;\\s]+/).map((email: string) => email.trim().toLowerCase());
+          return providers.includes(myEmail.trim().toLowerCase());
         }
         if (role === 'DELIVERY') return (o.assigned_delivery || '').toLowerCase() === myEmail.toLowerCase();
         if (role === 'VENDEDOR') return (o.created_by || '').toLowerCase() === myEmail.toLowerCase();
