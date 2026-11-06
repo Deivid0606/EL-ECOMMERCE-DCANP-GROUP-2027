@@ -244,7 +244,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     const providerEmail=myEmail.trim().toLowerCase();
     const unauthorized = role==='PROVEEDOR' && selected.some(o=>{
       const emails=[
-        ...String(o.provider_emails_list||'').toLowerCase().split(/[,;\\s]+/),
+        ...String(o.provider_emails_list||'').toLowerCase().split(/[,;\s]+/),
         String(o.provider_email||'').toLowerCase(),
         String(o.supplier_email||'').toLowerCase(),
       ];
@@ -348,7 +348,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       const roleFilter = (o: any) => {
         if (role === 'PROVEEDOR') {
           const providers = `${o.provider_emails_list || ''},${o.provider_email || ''}`
-            .split(/[,;\\s]+/).map((email: string) => email.trim().toLowerCase());
+            .split(/[,;\s]+/).map((email: string) => email.trim().toLowerCase());
           return providers.includes(myEmail.trim().toLowerCase());
         }
         if (role === 'DELIVERY') return (o.assigned_delivery || '').toLowerCase() === myEmail.toLowerCase();
