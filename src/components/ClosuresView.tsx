@@ -642,6 +642,25 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [settlementFilter, setSettlementFilter] = useState<'all' | 'settled' | 'pending'>(isDelivery ? 'pending' : 'all');
   // DELIVERY starts with all historical unreported orders. Dates are an optional filter.
   const [useDeliveryDateRange, setUseDeliveryDateRange] = useState(false);
+  const [todayPickupCount, setTodayPickupCount] = useState<number | null>(null);
+  const refreshTodayPickupCount = async () => {
+    if (!isDelivery || !myEmail) return;
+    // Uses a dedicated timestamp recorded by the database at pickup, independent of date filters.
+    const today = pyToday();
+    const { count, error } = await supabase.from('orders')
+      .select('id', { head: true, count: 'exact' })
+      .or(`delivery_owner.eq.${myEmail},assigned_delivery.eq.${myEmail}`)
+      .eq('estado_retiro', 'REALIZADO')
+      .gte('retiro_realizado_at', pyStart(today))
+      .lte('retiro_realizado_at', pyEnd(today));
+    if (error) {
+      console.warn('No se pudo consultar el KPI de retiros:', error.message);
+      setTodayPickupCount(null);
+      return;
+    }
+    setTodayPickupCount(count ?? 0);
+  };
+  useEffect(() => { void refreshTodayPickupCount(); }, [isDelivery, myEmail]);
   const [searchTerm, setSearchTerm] = useState('');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
@@ -2023,9 +2042,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     () => ({
       all: orders.length,
       settled: orders.filter(order => (order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA') && order.delivery_settled).length,
-      pending: orders.filter(order => (order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA') && !order.delivery_settled).length,
+      pending: orders.filter(order => (isDelivery || order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA') && !order.delivery_settled).length,
     }),
-    [orders],
+    [orders, isDelivery],
   );
 
   const rendidos = useMemo(
@@ -2472,7 +2491,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       updated_at: new Date().toISOString()
     }).eq('id', orderId);
     if (error) toast.error(error.message);
-    else { toast.success('Estado de retiro actualizado'); loadClosures(); }
+    else { toast.success('Estado de retiro actualizado'); loadClosures(); void refreshTodayPickupCount(); }
   };
 
   const applyBulkRetiroStatus = async () => {
@@ -2513,6 +2532,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       toast.success(`${ids.length} pedido(s) actualizado(s) a ${bulkRetiroStatus}`);
       setSelectedGuideIds(new Set());
       await loadClosures();
+      void refreshTodayPickupCount();
     } catch (error: any) {
       toast.error(error?.message || 'No se pudo actualizar el Estado de retiro');
     } finally {
@@ -3860,6 +3880,13 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           <div className="closure-premium-indicator"><span className="closure-live-dot" /> Resumen de pedidos cargados</div>
         </div>
         <div className="closure-premium-kpis">
+          {isDelivery && (
+            <div className="closure-premium-metric metric-orders">
+              <div className="metric-label">📦 HOY, {new Date(pyToday() + 'T12:00:00').toLocaleDateString('es-PY')}, RETIRASTE</div>
+              <strong>{todayPickupCount === null ? '—' : todayPickupCount}</strong>
+              <span>Pedidos con retiro REALIZADO hoy · no depende del filtro de fechas</span>
+            </div>
+          )}
           <div className="closure-premium-metric metric-orders"><div className="metric-label">📦 PEDIDOS EN VISTA</div><strong>{filteredOrders.length}</strong><span>Según los filtros activos</span></div>
           <div className="closure-premium-metric metric-complete"><div className="metric-label">✅ RENDIDOS</div><strong>{kpis.rendidos}</strong><span>Gs {nf(kpis.montoRendido)}</span></div>
           <div className="closure-premium-metric metric-pending"><div className="metric-label">⏳ SIN RENDIR</div><strong>{kpis.noRendidos}</strong><span>Gs {nf(kpis.montoPendiente)}</span></div>
