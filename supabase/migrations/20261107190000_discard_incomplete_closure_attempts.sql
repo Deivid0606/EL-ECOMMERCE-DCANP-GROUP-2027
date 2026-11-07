@@ -6,6 +6,14 @@ ALTER TABLE public.delivery_closure_recovery
   ADD CONSTRAINT delivery_closure_recovery_status_check
   CHECK (status IN ('PREPARADO', 'ARCHIVO_CARGADO', 'COMPLETADO', 'DESCARTADO'));
 
+-- The existing ALL approval guard is permissive; make it RESTRICTIVE so it
+-- cannot override owner/destination-specific SELECT/UPDATE policies.
+DROP POLICY IF EXISTS approved_account_required ON public.delivery_closure_recovery;
+CREATE POLICY approved_account_required ON public.delivery_closure_recovery
+  AS RESTRICTIVE FOR ALL TO authenticated
+  USING ((SELECT public.app_account_approved()))
+  WITH CHECK ((SELECT public.app_account_approved()));
+
 DROP POLICY IF EXISTS closure_recovery_provider_read ON public.delivery_closure_recovery;
 CREATE POLICY closure_recovery_provider_read ON public.delivery_closure_recovery
   FOR SELECT TO authenticated
