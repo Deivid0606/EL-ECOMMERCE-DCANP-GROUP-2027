@@ -639,7 +639,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set());
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
-  const [settlementFilter, setSettlementFilter] = useState<'all' | 'settled' | 'pending'>('all');
+  const [settlementFilter, setSettlementFilter] = useState<'all' | 'settled' | 'pending'>(isDelivery ? 'pending' : 'all');
+  // DELIVERY starts with all historical unreported orders. Dates are an optional filter.
+  const [useDeliveryDateRange, setUseDeliveryDateRange] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
@@ -1555,10 +1557,13 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     let query = supabase.from('orders').select('*');
 
     if (!isTeamClosureView) {
-      query = query
-        .gte(dateField, pyStart(dateFrom))
-        .lte(dateField, pyEnd(dateTo))
-        .order(dateField, { ascending: false });
+      if (!isDelivery || useDeliveryDateRange) {
+        query = query
+          .gte(dateField, pyStart(dateFrom))
+          .lte(dateField, pyEnd(dateTo));
+      }
+      // Always order results before pagination, even when date filtering is disabled.
+      query = query.order(dateField, { ascending: false });
     }
 
     if (isTeamClosureView) {
@@ -1799,12 +1804,12 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     }
     
     if (deliveryToCheck) {
-      const { data: rp } = await supabase.from('rendiciones_pagadas').select('*')
-        .eq('delivery_email', deliveryToCheck)
-        .gte('pagado_en', pyStart(dateFrom))
-        .lte('pagado_en', pyEnd(dateTo))
-        .order('pagado_en', { ascending: false })
-        .limit(1);
+      let paidQuery = supabase.from('rendiciones_pagadas').select('*')
+        .eq('delivery_email', deliveryToCheck);
+      if (!isDelivery || useDeliveryDateRange) {
+        paidQuery = paidQuery.gte('pagado_en', pyStart(dateFrom)).lte('pagado_en', pyEnd(dateTo));
+      }
+      const { data: rp } = await paidQuery.order('pagado_en', { ascending: false }).limit(1);
       setRendicionPagada(rp && rp.length > 0 ? { id: rp[0].id, pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
     } else {
       setRendicionPagada(null);
@@ -1819,6 +1824,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     filterStatuses,
     dateFrom,
     dateTo,
+    useDeliveryDateRange,
     filterDateBy,
     activeSection,
     teamMembers,
@@ -1832,7 +1838,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     if (settlementFilter !== 'all') {
       base = base.filter(order => {
         const isDelivered = order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA';
-        if (!isDelivered) return false;
+        if (!isDelivery && !isDelivered) return false;
         return settlementFilter === 'settled' ? Boolean(order.delivery_settled) : !Boolean(order.delivery_settled);
       });
     }
@@ -1849,7 +1855,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         (order.city && order.city.toLowerCase().includes(term))
       );
     });
-  }, [orders, searchTerm, settlementFilter]);
+  }, [orders, searchTerm, settlementFilter, isDelivery]);
 
   // Detección informativa, sin modificar estados ni importes de pedidos.
   // Se consideran posibles repetidos cuando comparten teléfono, ciudad y fecha de creación.
@@ -3497,7 +3503,18 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       <details className="closure-accordion" open>
         <summary>🔎 Filtros de consulta <span className="closure-accordion-hint">Fechas · Delivery · Proveedor · Estado · Rendición</span></summary>
         <div className="closure-accordion-inner">
+      {isDelivery && activeSection === 'orders' && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background/50 p-3">
+          <span className="text-sm font-bold">📅 Fechas de mis pedidos:</span>
+          <button type="button" className={`nav-btn !py-1 ${!useDeliveryDateRange ? 'active' : ''}`}
+            onClick={() => setUseDeliveryDateRange(false)}>Todas las fechas</button>
+          <button type="button" className={`nav-btn !py-1 ${useDeliveryDateRange ? 'active' : ''}`}
+            onClick={() => setUseDeliveryDateRange(true)}>Elegir fechas</button>
+          <span className="text-xs text-muted-foreground">Por defecto se muestran todos los pedidos no rendidos, incluso de días anteriores.</span>
+        </div>
+      )}
       <div className="flex flex-wrap gap-2 mb-3">
+        {(!isDelivery || useDeliveryDateRange || activeSection === 'teamClosures') && (<>
         <label className="app-label !mt-0">Desde</label>
         <input
           type="date"
@@ -3512,12 +3529,10 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           value={dateTo}
           onChange={e => e.target.value && setDateTo(e.target.value)}
         />
-        <span
-          className="self-center text-[10px] text-muted-foreground"
-          title="El rango inicial es hoy a mañana, pero podés cambiar ambas fechas libremente."
-        >
-          24 h iniciales
+        <span className="self-center text-[10px] text-muted-foreground">
+          Rango de fechas editable
         </span>
+        </>)}
         
         {activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin) && (
           <div className="flex items-center gap-1">
@@ -3887,7 +3902,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             </div>
             <div className="flex items-center gap-2">
               <span className="chip text-[11px]">Fecha:</span>
-              <span className="text-sm">{dateFrom} a {dateTo}</span>
+              <span className="text-sm">{isDelivery && !useDeliveryDateRange && activeSection !== 'teamClosures' ? 'Todas las fechas' : `${dateFrom} a ${dateTo}`}</span>
             </div>
             {canViewNormalClosureFinancials && (
               <div className="flex items-center gap-2">
