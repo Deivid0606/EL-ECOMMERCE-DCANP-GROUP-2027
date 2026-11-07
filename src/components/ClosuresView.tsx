@@ -4449,7 +4449,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             const date = activeSection === 'teamClosures' ? (o.team_assigned_at || o.assigned_at) : o.assigned_at;
             const deliveryLabel = deliveries.find((d: any) => d.email === o.assigned_delivery)?.name || o.assigned_delivery || '—';
             return (
-              <article key={o.id} className={`min-w-0 rounded-2xl border border-border bg-card p-3 shadow-sm transition-shadow hover:shadow-md ${isSettled ? 'opacity-75' : ''}`}>
+              <article key={o.id} className="min-w-0 rounded-2xl bg-card p-3 transition-shadow" style={{ border: '3px solid #000000', boxShadow: '0 3px 0 #000000, 0 7px 18px rgba(0,0,0,0.22)' }}>
                 <div className="mb-2 flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1">
