@@ -639,20 +639,26 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set());
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
-  const [settlementFilter, setSettlementFilter] = useState<'all' | 'settled' | 'pending'>(isDelivery ? 'pending' : 'all');
-  // DELIVERY starts with all historical unreported orders. Dates are an optional filter.
+  const [settlementFilter, setSettlementFilter] = useState<'all' | 'settled' | 'pending'>((isDelivery || isSupplier || isAdmin) ? 'pending' : 'all');
+  // DELIVERY, PROVEEDOR and ADMIN start with historical unreported orders. Dates are optional.
   const [useDeliveryDateRange, setUseDeliveryDateRange] = useState(false);
   const [todayPickupCount, setTodayPickupCount] = useState<number | null>(null);
   const refreshTodayPickupCount = async () => {
-    if (!isDelivery || !myEmail) return;
+    if (!(isDelivery || isSupplier || isAdmin) || !myEmail) return;
     // Uses a dedicated timestamp recorded by the database at pickup, independent of date filters.
     const today = pyToday();
-    const { count, error } = await supabase.from('orders')
+    let pickupQuery = supabase.from('orders')
       .select('id', { head: true, count: 'exact' })
-      .or(`delivery_owner.eq.${myEmail},assigned_delivery.eq.${myEmail}`)
       .eq('estado_retiro', 'REALIZADO')
       .gte('retiro_realizado_at', pyStart(today))
       .lte('retiro_realizado_at', pyEnd(today));
+    if (isDelivery) {
+      pickupQuery = pickupQuery.or(`delivery_owner.eq.${myEmail},assigned_delivery.eq.${myEmail}`);
+    } else if (isSupplier) {
+      // Provider KPI counts their commercial orders; RLS also enforces visibility.
+      pickupQuery = pickupQuery.eq('provider_email', myEmail);
+    }
+    const { count, error } = await pickupQuery;
     if (error) {
       console.warn('No se pudo consultar el KPI de retiros:', error.message);
       setTodayPickupCount(null);
@@ -660,7 +666,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     }
     setTodayPickupCount(count ?? 0);
   };
-  useEffect(() => { void refreshTodayPickupCount(); }, [isDelivery, myEmail]);
+  useEffect(() => { void refreshTodayPickupCount(); }, [isDelivery, isSupplier, isAdmin, myEmail]);
   const [searchTerm, setSearchTerm] = useState('');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
@@ -1576,7 +1582,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     let query = supabase.from('orders').select('*');
 
     if (!isTeamClosureView) {
-      if (!isDelivery || useDeliveryDateRange) {
+      if (!(isDelivery || isSupplier || isAdmin) || useDeliveryDateRange) {
         query = query
           .gte(dateField, pyStart(dateFrom))
           .lte(dateField, pyEnd(dateTo));
@@ -1825,7 +1831,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     if (deliveryToCheck) {
       let paidQuery = supabase.from('rendiciones_pagadas').select('*')
         .eq('delivery_email', deliveryToCheck);
-      if (!isDelivery || useDeliveryDateRange) {
+      if (!(isDelivery || isSupplier || isAdmin) || useDeliveryDateRange) {
         paidQuery = paidQuery.gte('pagado_en', pyStart(dateFrom)).lte('pagado_en', pyEnd(dateTo));
       }
       const { data: rp } = await paidQuery.order('pagado_en', { ascending: false }).limit(1);
@@ -1857,7 +1863,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     if (settlementFilter !== 'all') {
       base = base.filter(order => {
         const isDelivered = order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA';
-        if (!isDelivery && !isDelivered) return false;
+        if (!(isDelivery || isSupplier || isAdmin) && !isDelivered) return false;
         return settlementFilter === 'settled' ? Boolean(order.delivery_settled) : !Boolean(order.delivery_settled);
       });
     }
@@ -1874,7 +1880,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         (order.city && order.city.toLowerCase().includes(term))
       );
     });
-  }, [orders, searchTerm, settlementFilter, isDelivery]);
+  }, [orders, searchTerm, settlementFilter, isDelivery, isSupplier, isAdmin]);
 
   // Detección informativa, sin modificar estados ni importes de pedidos.
   // Se consideran posibles repetidos cuando comparten teléfono, ciudad y fecha de creación.
@@ -2042,9 +2048,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     () => ({
       all: orders.length,
       settled: orders.filter(order => (order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA') && order.delivery_settled).length,
-      pending: orders.filter(order => (isDelivery || order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA') && !order.delivery_settled).length,
+      pending: orders.filter(order => ((isDelivery || isSupplier || isAdmin) || order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA') && !order.delivery_settled).length,
     }),
-    [orders, isDelivery],
+    [orders, isDelivery, isSupplier, isAdmin],
   );
 
   const rendidos = useMemo(
@@ -3523,9 +3529,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       <details className="closure-accordion" open>
         <summary>🔎 Filtros de consulta <span className="closure-accordion-hint">Fechas · Delivery · Proveedor · Estado · Rendición</span></summary>
         <div className="closure-accordion-inner">
-      {isDelivery && activeSection === 'orders' && (
+      {(isDelivery || isSupplier || isAdmin) && activeSection === 'orders' && (
         <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background/50 p-3">
-          <span className="text-sm font-bold">📅 Fechas de mis pedidos:</span>
+          <span className="text-sm font-bold">📅 Fechas de los pedidos:</span>
           <button type="button" className={`nav-btn !py-1 ${!useDeliveryDateRange ? 'active' : ''}`}
             onClick={() => setUseDeliveryDateRange(false)}>Todas las fechas</button>
           <button type="button" className={`nav-btn !py-1 ${useDeliveryDateRange ? 'active' : ''}`}
@@ -3534,7 +3540,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         </div>
       )}
       <div className="flex flex-wrap gap-2 mb-3">
-        {(!isDelivery || useDeliveryDateRange || activeSection === 'teamClosures') && (<>
+        {(!(isDelivery || isSupplier || isAdmin) || useDeliveryDateRange || activeSection === 'teamClosures') && (<>
         <label className="app-label !mt-0">Desde</label>
         <input
           type="date"
@@ -3880,11 +3886,11 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           <div className="closure-premium-indicator"><span className="closure-live-dot" /> Resumen de pedidos cargados</div>
         </div>
         <div className="closure-premium-kpis">
-          {isDelivery && (
+          {(isDelivery || isSupplier || isAdmin) && (
             <div className="closure-premium-metric metric-orders">
-              <div className="metric-label">📦 HOY, {new Date(pyToday() + 'T12:00:00').toLocaleDateString('es-PY')}, RETIRASTE</div>
+              <div className="metric-label">📦 {isDelivery ? 'HOY RETIRASTE' : isSupplier ? 'RETIROS HOY · MIS PEDIDOS' : 'RETIROS HOY · GENERAL'} · {new Date(pyToday() + 'T12:00:00').toLocaleDateString('es-PY')}</div>
               <strong>{todayPickupCount === null ? '—' : todayPickupCount}</strong>
-              <span>Pedidos con retiro REALIZADO hoy · no depende del filtro de fechas</span>
+              <span>Retiros REALIZADOS hoy con fecha registrada · no depende del filtro de fechas</span>
             </div>
           )}
           <div className="closure-premium-metric metric-orders"><div className="metric-label">📦 PEDIDOS EN VISTA</div><strong>{filteredOrders.length}</strong><span>Según los filtros activos</span></div>
@@ -3929,7 +3935,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             </div>
             <div className="flex items-center gap-2">
               <span className="chip text-[11px]">Fecha:</span>
-              <span className="text-sm">{isDelivery && !useDeliveryDateRange && activeSection !== 'teamClosures' ? 'Todas las fechas' : `${dateFrom} a ${dateTo}`}</span>
+              <span className="text-sm">{(isDelivery || isSupplier || isAdmin) && !useDeliveryDateRange && activeSection !== 'teamClosures' ? 'Todas las fechas' : `${dateFrom} a ${dateTo}`}</span>
             </div>
             {canViewNormalClosureFinancials && (
               <div className="flex items-center gap-2">
