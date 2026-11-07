@@ -668,6 +668,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   };
   useEffect(() => { void refreshTodayPickupCount(); }, [isDelivery, isSupplier, isAdmin, myEmail]);
   const [searchTerm, setSearchTerm] = useState('');
+  // Presentación inicial estilo tablero; la tabla clásica sigue disponible.
+  const [ordersViewMode, setOrdersViewMode] = useState<'cards' | 'table'>('cards');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(
@@ -4424,7 +4426,171 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       <div className="closure-section-heading"><span className="closure-section-number">03</span><div><h3>Listado de pedidos</h3><p>Revisá los detalles, los estados y las rendiciones</p></div></div>
       {onlyCarried && <div className="closure-duplicate-notice">📅 Mostrando sólo pedidos que llegaron a estas fechas desde otro día (por "Finalicé mi día" o reasignación). <button type="button" className="nav-btn" onClick={() => { setSelectedGuideIds(new Set()); setOnlyCarried(false); }}>Quitar filtro</button></div>}
       {onlyPossibleDuplicates && <div className="closure-duplicate-notice">🔁 Mostrando solamente coincidencias por teléfono, ciudad y día de creación. Revisá manualmente: no son duplicados confirmados. <button type="button" className="nav-btn" onClick={() => { setSelectedGuideIds(new Set()); setOnlyPossibleDuplicates(false); }}>Quitar filtro</button></div>}
-      <div className="closure-premium-table overflow-auto">
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/60 p-3">
+        <div>
+          <p className="text-sm font-extrabold">📦 Vista de pedidos · {displayedOrders.length} pedidos</p>
+          <p className="text-xs text-muted-foreground">Cuadros compactos sin desplazamiento horizontal, o tabla clásica con todas las columnas.</p>
+        </div>
+        <div className="inline-flex flex-wrap items-center gap-2" role="group" aria-label="Elegir vista de pedidos">
+          <button type="button" className={`nav-btn !py-2 ${ordersViewMode === 'cards' ? 'active' : ''}`}
+            aria-pressed={ordersViewMode === 'cards'} onClick={() => setOrdersViewMode('cards')}>▦ Vista en cuadros</button>
+          <button type="button" className={`nav-btn !py-2 ${ordersViewMode === 'table' ? 'active' : ''}`}
+            aria-pressed={ordersViewMode === 'table'} onClick={() => setOrdersViewMode('table')}>☷ Vista actual (tabla)</button>
+        </div>
+      </div>
+
+      {ordersViewMode === 'cards' && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {displayedOrders.map(o => {
+            const isSettled = Boolean(o.delivery_settled);
+            const fee = getDeliveryFeeForOrder(o);
+            const items = getOrderItems(o);
+            const date = activeSection === 'teamClosures' ? (o.team_assigned_at || o.assigned_at) : o.assigned_at;
+            const deliveryLabel = deliveries.find((d: any) => d.email === o.assigned_delivery)?.name || o.assigned_delivery || '—';
+            return (
+              <article key={o.id} className={`min-w-0 rounded-2xl border border-border bg-card p-3 shadow-sm transition-shadow hover:shadow-md ${isSettled ? 'opacity-75' : ''}`}>
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {canUseGuides && (
+                        <input type="checkbox" checked={selectedGuideIds.has(o.id)}
+                          onChange={() => toggleGuideSelection(o.id)}
+                          aria-label={`Seleccionar pedido ${o.order_number || o.id.slice(0,8)}`} />
+                      )}
+                      {o.day_seq && <span className="rounded bg-sky-500/10 px-1 text-xs font-bold text-sky-400">#{o.day_seq}</span>}
+                      <strong className="break-all text-sm">{o.order_number || o.id.slice(0, 8)}</strong>
+                    </div>
+                    <div className="mt-1 text-[11px] text-muted-foreground">Asignado: {formatDatePY(date)}</div>
+                    <div className="text-[11px] text-muted-foreground">Creado: {formatDatePY(o.created_at)}</div>
+                    {isCarried(o) && <div className="text-[11px] font-bold text-violet-400">🔁 De {formatDatePY(o.first_assigned_at)}</div>}
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${isSettled ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'}`}>
+                    {isSettled ? 'RENDIDO' : 'SIN RENDIR'}
+                  </span>
+                </div>
+
+                <div className="mb-2 space-y-1 rounded-xl bg-muted/30 p-2">
+                  <p className="break-words text-sm font-black">{o.customer_name || 'Cliente sin nombre'}</p>
+                  {canEditFull ? (
+                    <select className="app-input w-full !py-1 text-xs" aria-label="Ciudad" value={o.city || ''}
+                      onChange={e => updateOrderCity(o.id, e.target.value)}>
+                      <option value="">Seleccionar ciudad</option>
+                      {clientPrices.map((cp: any) => <option key={cp.city} value={cp.city}>{cp.city}</option>)}
+                      {o.city && !clientPrices.some((cp: any) => cp.city === o.city) && <option value={o.city}>{o.city}</option>}
+                    </select>
+                  ) : <p className="text-xs text-muted-foreground">📍 {o.city || 'Sin ciudad'}</p>}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {getOrderPhone(o) && (
+                      <button type="button" className="text-xs font-bold text-green-500 hover:underline"
+                        onClick={() => void openClientWhatsApp(o)}>📱 WhatsApp</button>
+                    )}
+                    {canMarkContacted && getOrderPhone(o) && (
+                      <button type="button" className="nav-btn !px-2 !py-1 !text-[10px]"
+                        disabled={updatingContactedIds.has(o.id)} onClick={() => toggleContacted(o)}>
+                        {o.contacted ? '✓ Contactado' : '✓ Contactar'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mb-2 rounded-xl border border-border/60 p-2 text-xs">
+                  <p className="mb-1 font-bold">🛍️ Productos</p>
+                  {items.length === 0 ? <span className="text-muted-foreground">Sin detalle de productos</span> :
+                    items.map((item: any, index: number) => (
+                      <p key={index} className="break-words">
+                        {item.title || item.name || item.product_name || item.sku || 'Producto'} × {Number(item.quantity ?? item.qty ?? 1)}
+                      </p>
+                    ))}
+                  <div className="mt-2 flex justify-between border-t border-border/60 pt-2">
+                    <span>Total</span><strong>Gs {nf(Number(o.total_gs || 0))}</strong>
+                  </div>
+                  {canViewNormalClosureFinancials && (
+                    <>
+                      <div className="flex justify-between"><span>Tarifa</span><strong>Gs {nf(fee)}</strong></div>
+                      <div className="flex justify-between"><span>Neto</span><strong>Gs {nf(Number(o.total_gs || 0) - fee)}</strong></div>
+                    </>
+                  )}
+                </div>
+
+                <div className="mb-2 text-xs">
+                  <p className="mb-1 font-bold">Proveedor: <span className="font-normal break-all">{o.provider_email || '—'}</span></p>
+                  {canEditFull ? (
+                    <select className="app-input w-full !py-1 text-xs" aria-label="Delivery asignado"
+                      value={o.assigned_delivery || ''} onChange={e => updateAssignedDelivery(o.id, e.target.value)}>
+                      <option value="">Seleccionar delivery</option>
+                      {deliveries.map((d: any) => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
+                    </select>
+                  ) : <p>🚚 Delivery: {deliveryLabel}</p>}
+                  {activeSection === 'orders' && o.delivery_owner && String(o.delivery_owner).toLowerCase() !== String(o.assigned_delivery || '').toLowerCase() &&
+                    <p className="mt-1 text-[11px] text-violet-400">👥 Equipo: {getOrderTeamLeaderLabel(o)}</p>}
+                  {canEditFull && editingDateId === o.id ? (
+                    <input type="date" className="app-input mt-2 w-full !py-1 text-xs"
+                      defaultValue={dateInputValue(date)} onChange={e => handleDateChange(o.id, e.target.value)}
+                      onBlur={() => setEditingDateId(null)}
+                      onKeyDown={e => { if (e.key === 'Escape') setEditingDateId(null); }} autoFocus />
+                  ) : canEditFull && (
+                    <button type="button" className="nav-btn mt-2 !px-2 !py-1 !text-[10px]"
+                      onClick={() => setEditingDateId(o.id)}>📅 Cambiar fecha</button>
+                  )}
+                </div>
+
+                <div className="mb-3 grid grid-cols-1 gap-2">
+                  <label className="text-[11px] font-bold">Estado 1
+                    {canEditStatus1 ? (
+                      <select className="app-input mt-1 w-full !py-1 text-xs" value={o.status || 'PENDIENTE'}
+                        disabled={isVendedor} onChange={e => updateStatus1(o.id, e.target.value)}>
+                        {STATUS_1_OPTIONS.map(st => <option key={st} value={st}>{st}</option>)}
+                      </select>
+                    ) : <span className="ml-2">{o.status || '—'}</span>}
+                  </label>
+                  {String(o.status || '').toUpperCase() === 'REAGENDADO' && o.rescheduled_for &&
+                    <p className="text-[11px] text-sky-400">📅 Reagendado: {dayLabel(String(o.rescheduled_for))}</p>}
+                  <label className="text-[11px] font-bold">Estado de retiro
+                    {canEditFull ? (
+                      <select className="app-input mt-1 w-full !py-1 text-xs" value={o.estado_retiro || ''}
+                        onChange={e => updateRetiro(o.id, e.target.value)}>
+                        {retiroOpts.map(st => <option key={st} value={st}>{st || '—'}</option>)}
+                      </select>
+                    ) : <span className="ml-2">{o.estado_retiro || '—'}</span>}
+                  </label>
+                  <label className="text-[11px] font-bold">Estado 2
+                    {canEditFull ? (
+                      <select className="app-input mt-1 w-full !py-1 text-xs" value={o.status2 || '--'}
+                        onChange={e => updateStatus2(o.id, e.target.value)}>
+                        {state2Opts.map(st => <option key={st} value={st}>{st}</option>)}
+                      </select>
+                    ) : <span className="ml-2">{o.status2 || '—'}</span>}
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 border-t border-border pt-3">
+                  {canUseGuides && (
+                    <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]"
+                      onClick={async () => { try { await navigator.clipboard.writeText(buildGuideText(o)); toast.success('Guía copiada'); } catch { toast.error('No se pudo copiar la guía'); } }}>
+                      📋 Copiar guía
+                    </button>
+                  )}
+                  <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => loadOrderHistory(o)}>📜 Historial</button>
+                  {canTrackOrder(o) &&
+                    <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => void shareTracking(o)}>🛵 Seguimiento</button>}
+                  {canEditOrderItems &&
+                    <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => orderTools.openEditor(o)}>✏️ Productos</button>}
+                  {canManageRendicion && !isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
+                    <button type="button" className="nav-btn active !px-2 !py-1 !text-[11px]" onClick={() => markSingleRendido(o.id)}>✅ RENDIDO</button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+          {displayedOrders.length === 0 &&
+            <div className="col-span-full rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground">
+              {searchTerm ? 'No se encontraron pedidos para tu búsqueda' : 'Sin pedidos para los filtros actuales'}
+            </div>}
+        </div>
+      )}
+
+      <div className={ordersViewMode === 'table' ? 'closure-premium-table overflow-auto' : 'hidden'}>
         <table className="app-table min-w-[1800px]">
           <thead>
             <tr>
