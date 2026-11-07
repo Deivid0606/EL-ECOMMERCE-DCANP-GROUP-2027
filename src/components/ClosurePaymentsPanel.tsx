@@ -145,7 +145,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
     setBanks(b.data || []);
     setHistory(h.data || []);
 
-    if (isDelivery || role === 'ADMIN') {
+    if (isDelivery || role === 'ADMIN' || role === 'PROVEEDOR') {
       const drafts = await supabase
         .from('delivery_closure_recovery' as any)
         .select('*')
@@ -153,7 +153,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
         .limit(100);
 
       if (drafts.error) toast.error('No se pudo consultar recuperación de cierres: ' + drafts.error.message);
-      else setRecovery(drafts.data || []);
+      else setRecovery((drafts.data || []).filter((d: any) => d.status !== 'DESCARTADO'));
     }
 
     if (role === 'ADMIN') {
@@ -678,6 +678,24 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
           '. Revisá Recuperación de cierres antes de volver a subir el archivo.',
       );
       await reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const discardIncompleteAttempt = async (attempt: any) => {
+    if (busy || !['ADMIN', 'PROVEEDOR'].includes(role)) return;
+    if (role === 'PROVEEDOR' && attempt.destination_user_id !== userId) return;
+    if (!['PREPARADO', 'ARCHIVO_CARGADO'].includes(attempt.status)) return;
+    if (!window.confirm('¿Descartar este intento incompleto? No se borrará el comprobante ni se modificará ningún cierre real.')) return;
+    setBusy(true);
+    try {
+      const { error } = await (supabase as any).rpc('discard_incomplete_closure_attempt', { p_attempt_id: attempt.id });
+      if (error) throw error;
+      toast.success('Intento incompleto descartado. El comprobante se conserva para auditoría.');
+      await reload();
+    } catch (e: any) {
+      toast.error('No se pudo descartar: ' + (e?.message || 'Error desconocido'));
     } finally {
       setBusy(false);
     }
@@ -1241,7 +1259,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
         </section>
       )}
 
-      {(isDelivery || role === 'ADMIN') && view === 'pagos' && (
+      {(isDelivery || role === 'ADMIN' || role === 'PROVEEDOR') && view === 'pagos' && (
         <section className="rounded-2xl border border-border bg-card/60 p-4 space-y-3 shadow-sm">
           <div className="flex items-center gap-3 pb-2 border-b border-border">
             <div className="h-10 w-10 rounded-xl bg-violet-500/15 flex items-center justify-center text-lg">🛟</div>
@@ -1265,6 +1283,13 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                   Reintentar registro con el mismo comprobante
                 </button>
               )}
+              {(role === 'ADMIN' || (role === 'PROVEEDOR' && d.destination_user_id === userId)) &&
+                ['PREPARADO', 'ARCHIVO_CARGADO'].includes(d.status) && (
+                  <button type="button" className="nav-btn !text-red-500" disabled={busy}
+                    onClick={() => void discardIncompleteAttempt(d)}>
+                    🗑️ Descartar intento
+                  </button>
+                )}
             </div>
           ))}
         </section>
