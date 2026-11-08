@@ -361,6 +361,7 @@ const fetchCommissionRequestsPaged = async () => {
 
 type DashboardCache = {
   email: string;
+  fetchedAt: number;
   allOrders: OrderRow[];
   products: ProductRow[];
   profiles: ProfileRow[];
@@ -462,6 +463,7 @@ const [allOrdersRaw, setAllOrders] = useState<OrderRow[]>(cached?.allOrders || [
 
     const next: DashboardCache = {
       email,
+      fetchedAt: Date.now(),
       allOrders: (allOrdersRes.data || []) as OrderRow[],
       products: (productsRes.data || []) as ProductRow[],
       profiles: (profilesRes.data || []) as ProfileRow[],
@@ -483,7 +485,11 @@ const [allOrdersRaw, setAllOrders] = useState<OrderRow[]>(cached?.allOrders || [
   };
 
   useEffect(() => {
-    loadDashboard();
+    // Al regresar al panel, reutilizar el último cálculo por dos minutos.
+    // Evita descargar >20.000 pedidos nuevamente en cada cambio de pestaña.
+    // El botón «Actualizar» sigue permitiendo una consulta inmediata.
+    if (dashboardCache?.email === email && Date.now() - dashboardCache.fetchedAt < 120_000) return;
+    void loadDashboard();
   }, [email]);
 
   const profileMap = useMemo(() => {
