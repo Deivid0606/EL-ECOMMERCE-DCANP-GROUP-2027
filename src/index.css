@@ -6,25 +6,25 @@
 
 @layer base {
   :root {
-    --background: 220 33% 5%;
+    --background: 224 72% 8%;
     --foreground: 216 100% 96%;
 
-    --card: 217 31% 11%;
+    --card: 222 58% 13%;
     --card-foreground: 216 100% 96%;
 
-    --popover: 217 30% 12%;
+    --popover: 222 56% 14%;
     --popover-foreground: 216 100% 96%;
 
     --primary: 210 100% 54%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 216 29% 15%;
+    --secondary: 221 48% 18%;
     --secondary-foreground: 216 100% 96%;
 
-    --muted: 218 25% 17%;
+    --muted: 221 40% 20%;
     --muted-foreground: 215 20% 68%;
 
-    --accent: 214 38% 20%;
+    --accent: 218 50% 24%;
     --accent-foreground: 216 100% 96%;
 
     --destructive: 350 80% 65%;
@@ -36,27 +36,27 @@
     --warning: 36 100% 57%;
     --warning-foreground: 0 0% 0%;
 
-    --border: 217 30% 23%;
-    --input: 217 30% 23%;
+    --border: 219 45% 26%;
+    --input: 219 45% 26%;
     --ring: 210 100% 54%;
 
     --radius: 0.75rem;
 
-    --sidebar-background: 218 32% 8%;
+    --sidebar-background: 224 68% 9%;
     --sidebar-foreground: 216 100% 96%;
     --sidebar-primary: 210 100% 54%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 217 30% 16%;
+    --sidebar-accent: 221 50% 18%;
     --sidebar-accent-foreground: 216 100% 96%;
-    --sidebar-border: 217 30% 23%;
+    --sidebar-border: 219 45% 26%;
     --sidebar-ring: 210 100% 54%;
 
     /* Dark Blue Premium: inspirado en la paleta visual indicada, sin copiar contenido. */
     --brand: 210 100% 54%;
     --brand-glow: 198 100% 66%;
     --gradient-brand: linear-gradient(135deg, #168bff 0%, #216fe2 58%, #2459c8 100%);
-    --gradient-card: linear-gradient(150deg, #151e2d, #101722);
-    --gradient-kpi: linear-gradient(150deg, #192538, #121b29);
+    --gradient-card: linear-gradient(150deg, #10224a, #0a1734);
+    --gradient-kpi: linear-gradient(150deg, #13295a, #0b1a3c);
     --shadow-brand: 0 5px 20px rgba(22, 139, 255, 0.23);
     --shadow-card: 0 5px 24px rgba(0, 0, 0, 0.22);
     --shadow-hover: 0 12px 32px rgba(0, 0, 0, 0.32);
@@ -75,10 +75,14 @@
     min-height: 100%;
   }
 
+  /* Azul marino profundo con resplandor azul al centro y bordes oscuros. */
   #root {
     background-image:
-      radial-gradient(ellipse at 75% 0%, rgba(22, 139, 255, 0.07), transparent 48%),
-      linear-gradient(180deg, #090c12 0%, #0b111c 100%);
+      radial-gradient(ellipse 70% 55% at 50% 38%, rgba(46, 104, 214, 0.32), transparent 70%),
+      radial-gradient(ellipse 60% 40% at 50% 100%, rgba(22, 74, 170, 0.22), transparent 70%),
+      radial-gradient(ellipse 120% 90% at 50% 45%, transparent 55%, rgba(2, 6, 18, 0.65) 100%),
+      linear-gradient(180deg, #071431 0%, #0a1c44 48%, #050d24 100%);
+    background-attachment: fixed;
     min-height: 100vh;
   }
 
