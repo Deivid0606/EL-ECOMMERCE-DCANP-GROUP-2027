@@ -3179,7 +3179,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           ['config', '⚙️', 'Configuración'],
         ] as const).filter(([id]) => id !== 'config' || isAdmin || isSupplier).filter(([id]) => (id !== 'pagos' && id !== 'historial') || canViewRendicion).map(([id, icon, label]) => (
           <button key={id} type="button" className={`closure-tab-btn ${closureTab === id ? 'selected' : ''}`}
-            onClick={() => { setClosureTab(id); if (id === 'repetidos') setOnlyPossibleDuplicates(true); else setOnlyPossibleDuplicates(false); if (activeSection !== 'orders') setActiveSection('orders'); }}
+            onClick={() => { setClosureTab(id); if (id === 'pedidos' || id === 'repetidos') setOrdersViewMode('cards'); if (id === 'repetidos') setOnlyPossibleDuplicates(true); else setOnlyPossibleDuplicates(false); if (activeSection !== 'orders') setActiveSection('orders'); }}
             aria-current={closureTab === id ? 'page' : undefined}>
             <span aria-hidden="true">{icon}</span><span>{label}</span>
             {id === 'repetidos' && possibleDuplicates.count > 0 && <span className="closure-tab-count">{possibleDuplicates.count}</span>}
