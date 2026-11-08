@@ -1938,18 +1938,19 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       .trim()
       .toLowerCase();
 
-  const getFee = (deliveryEmail: string, city: string) => {
-    const emailKey = normalizeFeeKey(deliveryEmail);
-    const cityKey = normalizeFeeKey(city);
-
-    const feeRow = fees.find(
-      fee =>
-        normalizeFeeKey(fee?.delivery_email || '') === emailKey &&
-        normalizeFeeKey(fee?.city || '') === cityKey,
-    );
-
-    return Number(feeRow?.fee_gs || 0);
-  };
+  // Índice en memoria para evitar buscar entre cientos de tarifas por cada pedido.
+  // En Cierres puede haber miles de pedidos: pasamos de búsquedas repetidas a O(1).
+  const feeLookup = useMemo(() => {
+    const map = new Map<string, number>();
+    fees.forEach((fee: any) => {
+      const key = normalizeFeeKey(fee?.delivery_email || '') + '|' + normalizeFeeKey(fee?.city || '');
+      // Conserva la primera tarifa, igual que el .find() anterior.
+      if (!map.has(key)) map.set(key, Number(fee?.fee_gs || 0));
+    });
+    return map;
+  }, [fees]);
+  const getFee = (deliveryEmail: string, city: string) =>
+    feeLookup.get(normalizeFeeKey(deliveryEmail) + '|' + normalizeFeeKey(city)) ?? 0;
 
   const productCostMap = useMemo(() => {
     const m: Record<string, number> = {};
