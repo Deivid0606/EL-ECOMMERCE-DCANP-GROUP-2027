@@ -148,6 +148,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   // FILTROS EXISTENTES
   const [status2Filter, setStatus2Filter] = useState<string>('PENDIENTES');
   const [shownRows, setShownRows] = useState(120);
+  const [ordersViewMode, setOrdersViewMode] = useState<'cards' | 'table'>('cards');
   const [showHistorical, setShowHistorical] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [selectedCities, setSelectedCities] = useState<Set<string>>(new Set());
@@ -2053,8 +2054,111 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         )}
       </div>
 
-      {/* Tabla */}
-      <div className="overflow-auto rounded-2xl border border-slate-700/80 bg-[#101827] shadow-2xl">
+
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-700 bg-[#101827] p-3">
+        <div>
+          <p className="text-sm font-black text-white">📦 Vista de pedidos de Despacho</p>
+          <p className="text-xs text-slate-400">Tarjetas una al lado de otra, con los mismos filtros y acciones de la tabla.</p>
+        </div>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Vista de Despacho">
+          <button type="button" aria-pressed={ordersViewMode === 'cards'}
+            className={`nav-btn ${ordersViewMode === 'cards' ? 'active' : ''}`}
+            onClick={() => setOrdersViewMode('cards')}>▦ Cuadros</button>
+          <button type="button" aria-pressed={ordersViewMode === 'table'}
+            className={`nav-btn ${ordersViewMode === 'table' ? 'active' : ''}`}
+            onClick={() => setOrdersViewMode('table')}>☷ Tabla</button>
+        </div>
+      </div>
+
+      {ordersViewMode === 'cards' && (
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {pageOrders.map(o => {
+            const isRepeat = repeatedKeys.has(clientKey(o.customer_name, o.phone));
+            const productEntries = getOrderItems(o);
+            const deliveryEmail = lc(o.assigned_delivery || o.delivery_email);
+            const currentDelivery = assignedDeliveryNames[lc(o.assigned_delivery)] ||
+              deliveryOptions.find(d => lc(d.email) === lc(o.assigned_delivery))?.name || o.assigned_delivery;
+            return (
+              <article key={o.id} className="min-w-0 rounded-2xl bg-[#101827] p-3 text-slate-100"
+                style={{ border: '3px solid #000000', boxShadow: '0 4px 0 #000000, 0 8px 16px rgba(0,0,0,.3)' }}>
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <strong className="break-all text-sm">📦 {o.order_number || o.id.slice(0, 8)}</strong>
+                    <p className="text-[11px] text-slate-400">{new Date(o.created_at).toLocaleDateString('es-PY')}</p>
+                  </div>
+                  <input type="checkbox" aria-label={`Seleccionar pedido ${o.order_number || o.id}`}
+                    checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
+                </div>
+                <div className="mb-2 flex flex-wrap gap-1">
+                  {isRepeat && <span className="rounded-full bg-amber-500/20 px-2 py-1 text-[10px] font-black text-amber-300">⚠️ Repetido</span>}
+                  {o.rescheduled_for && (!o.status2 || o.status2 === '--') && !o.assigned_delivery &&
+                    <span className="rounded-full bg-sky-500/20 px-2 py-1 text-[10px] text-sky-300">📅 Reagendado {dayLabel(String(o.rescheduled_for))}</span>}
+                  {o.shipping_type === 'ENCOMIENDA' && (
+                    <span className="rounded-full bg-amber-500/20 px-2 py-1 text-[10px] text-amber-300">
+                      📮 Pago {o.payment_status || 'PENDIENTE'}
+                    </span>
+                  )}
+                </div>
+                <div className="mb-2 rounded-xl bg-slate-900/80 p-2 text-xs">
+                  <p className="break-words font-black">{o.customer_name || 'Sin cliente'}</p>
+                  <p className="mt-1">📍 {[o.departamento, o.city].filter(Boolean).join(' · ') || 'Sin ciudad'}</p>
+                  <p className="mt-1 break-all">📱 {o.phone || '—'}</p>
+                  <p className="mt-1 break-all text-slate-400">Vendedor: {o.created_by || '—'}</p>
+                  <p className="mt-1 break-all text-slate-400">Proveedor: {o.provider_emails_list || o.provider_email || '—'}</p>
+                </div>
+                <div className="mb-2 rounded-xl border border-slate-700 p-2 text-xs">
+                  <p className="mb-1 font-bold">🛍️ Productos</p>
+                  {productEntries.length ? productEntries.map((it: any, i: number) => {
+                    const product = findItemProduct(it, stockProducts);
+                    const qty = Number(it.qty || it.quantity || 1);
+                    const stock = product ? Number(product.stock || 0) : 0;
+                    const own = product && deliveryEmail ? deliveryStock.get(`${deliveryEmail}|${product.id}`) || 0 : 0;
+                    return <div key={i} className="mb-1 break-words">
+                      <span>{it.title || it.sku || 'Producto'} × {qty}</span>
+                      <span className={`block text-[10px] ${!product || (own < qty && stock < qty) ? 'text-rose-300' : 'text-slate-400'}`}>
+                        {product ? `Stock: ${stock} · Real: ${product.real_stock ?? 0} · Delivery: ${own}` : '⚠️ Producto sin vincular'}
+                      </span>
+                    </div>;
+                  }) : <p className="text-slate-400">Sin productos</p>}
+                  <p className="mt-2 border-t border-slate-700 pt-2 font-bold">Total: Gs {nf(Number(o.total_gs || 0))}</p>
+                </div>
+                <div className="mb-3 space-y-1 text-xs">
+                  <p>🚚 {currentDelivery || 'Sin asignar'}</p>
+                  <select aria-label="Estado de guía" className="w-full rounded-lg border border-slate-700 bg-[#070b18] px-2 py-2 text-xs text-white"
+                    value={o.status2 || '--'} onChange={e => updateStatus2(o.id, e.target.value)}>
+                    {state2Opts.map(st => <option key={st} value={st}>{st}</option>)}
+                  </select>
+                  {o.shipping_type === 'ENCOMIENDA' && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      <button type="button" className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => void viewPaymentProof(o)}>🧾 Ver comprobante</button>
+                      {o.payment_status !== 'APROBADO' &&
+                        <button type="button" className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => void reviewPayment(o, true)}>✅ Aprobar pago</button>}
+                      {o.payment_status === 'PENDIENTE' &&
+                        <button type="button" className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => void reviewPayment(o, false)}>❌ Rechazar</button>}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5 border-t border-slate-700 pt-2">
+                  <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => orderTools.openEditor(o)}>✏️ Editar</button>
+                  <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => openGuideModal(o)}>📄 Guía QR</button>
+                  <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => {
+                    navigator.clipboard.writeText(buildGuideText(o)).then(() => toast.success('Copiada')).catch(() => toast.error('No se pudo copiar'));
+                  }}>📋 Copiar</button>
+                </div>
+              </article>
+            );
+          })}
+          {pageOrders.length === 0 && (
+            <div className="col-span-full rounded-xl border border-slate-700 p-6 text-center text-slate-400">
+              {loadError ? 'Error cargando pedidos: ' + loadError : loading ? 'Cargando pedidos…' : 'No hay pedidos con estos filtros.'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tabla clásica opcional */}
+      <div className={ordersViewMode === 'table' ? 'overflow-auto rounded-2xl border border-slate-700/80 bg-[#101827] shadow-2xl' : 'hidden'}>
+
         <table className="w-full min-w-[1900px] text-sm [&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-3">
           <thead className="bg-[#070b18] sticky top-0 z-10">
             <tr className="text-left text-[11px] uppercase tracking-widest text-slate-400 border-b border-slate-700/80">
