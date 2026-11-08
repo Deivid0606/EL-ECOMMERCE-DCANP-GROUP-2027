@@ -554,6 +554,7 @@ export default function OrdersView() {
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [ordersViewMode, setOrdersViewMode] = useState<'cards' | 'table'>('cards');
   const last3Days = getLast3Days();
   const [dateFrom, setDateFrom] = useState(() => last3Days.from);
   const [dateTo, setDateTo] = useState(() => last3Days.to);
@@ -1356,8 +1357,123 @@ export default function OrdersView() {
         {filtered.length} pedidos ({dateFrom} a {dateTo}){loading ? ' · Actualizando…' : ''}
       </div>
 
-      {/* Tabla Desktop */}
-      <div className="hidden md:block overflow-x-auto">
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/60 p-3">
+        <div>
+          <p className="text-sm font-extrabold">📦 Vista de pedidos · {filtered.length} pedidos</p>
+          <p className="text-xs text-muted-foreground">Por defecto, pedidos lado a lado en cuadros con todas las acciones por rol.</p>
+        </div>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Elegir vista de pedidos">
+          <button type="button" aria-pressed={ordersViewMode === 'cards'}
+            className={`nav-btn ${ordersViewMode === 'cards' ? 'active' : ''}`} onClick={() => setOrdersViewMode('cards')}>▦ Cuadros</button>
+          <button type="button" aria-pressed={ordersViewMode === 'table'}
+            className={`nav-btn ${ordersViewMode === 'table' ? 'active' : ''}`} onClick={() => setOrdersViewMode('table')}>☷ Tabla</button>
+        </div>
+      </div>
+
+      {ordersViewMode === 'cards' && (
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {filtered.map(o => {
+            const feeStored = Number(o.delivery_fee_gs || 0);
+            const commVal = role === 'DELIVERY' ? feeStored : Number(o.commission_gs || 0);
+            const dateShown = (role === 'DELIVERY' && o.assigned_at)
+              ? new Date(o.assigned_at).toLocaleString('es-PY')
+              : new Date(o.created_at).toLocaleString('es-PY');
+            return (
+              <article key={o.id} className="min-w-0 rounded-2xl bg-card p-3"
+                style={{ border: '3px solid #000000', boxShadow: '0 4px 0 #000000, 0 8px 16px rgba(0,0,0,.25)' }}>
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <strong className="break-all text-sm">📦 {o.order_number || o.id.slice(0, 8)}</strong>
+                    <p className="text-[11px] text-muted-foreground">{dateShown}</p>
+                  </div>
+                  <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)}
+                    aria-label={`Seleccionar pedido ${o.order_number || o.id}`} />
+                </div>
+                <div className="mb-3 space-y-1 rounded-xl bg-muted/30 p-2 text-xs">
+                  <p className="break-words text-sm font-bold">{o.customer_name || 'Sin cliente'}</p>
+                  <p>📍 {o.city || 'Sin ciudad'}</p>
+                  <p className="break-all text-muted-foreground">Vendedor: {o.created_by || '—'}</p>
+                  <div className="break-all">
+                    <strong>Proveedor: </strong>
+                    {canAssignProvider ? (
+                      <select className="app-input mt-1 w-full !py-1 text-xs" value={o.provider_email || ''}
+                        aria-label="Proveedor" onChange={e => handleAssignProvider(o.id, e.target.value)}>
+                        <option value="">Sin proveedor</option>
+                        {providers.map(p => <option key={p.email} value={p.email}>{p.email}</option>)}
+                      </select>
+                    ) : (o.provider_email || '—')}
+                  </div>
+                  {role !== 'DESPACHANTE' && <p className="break-all">🚚 {o.assigned_delivery || 'Sin delivery'}</p>}
+                </div>
+                <div className="mb-3 space-y-1 rounded-xl border border-border/60 p-2 text-xs">
+                  <div className="flex justify-between gap-2"><span>Total:</span><strong>Gs {nf(Number(o.total_gs || 0))}</strong></div>
+                  <div className="flex justify-between gap-2"><span>{role === 'DELIVERY' ? 'Tarifa' : 'Comisión'}:</span><strong>Gs {nf(commVal)}</strong></div>
+                </div>
+                <div className="mb-3 space-y-2 text-xs">
+                  <label className="block font-bold">Estado 1
+                    {canEditStatus1 ? (
+                      <select className="app-input mt-1 w-full !py-1 text-xs" value={o.status || 'PENDIENTE'}
+                        onChange={e => handleStatus1Change(o.id, e.target.value)}>
+                        {(role === 'DELIVERY' ? STATUS1_DELIVERY : STATUS1_ALL).map(st => <option key={st} value={st}>{st}</option>)}
+                      </select>
+                    ) : <span className={`ml-2 badge-status ${statusClass(o.status || '')}`}>{o.status || 'PENDIENTE'}</span>}
+                  </label>
+                  {String(o.status || '').toUpperCase() === 'REAGENDADO' && o.rescheduled_for &&
+                    <div className="text-[11px] font-bold text-sky-400">📅 {dayLabel(String(o.rescheduled_for))}</div>}
+                  {role !== 'DELIVERY' && (
+                    <label className="block font-bold">Estado 2
+                      {canEditStatus2 ? (
+                        <select className="app-input mt-1 w-full !py-1 text-xs" value={o.status2 || '--'}
+                          onChange={e => handleStatus2Change(o.id, e.target.value)}>
+                          {STATUS2_ALL.map(st => <option key={st} value={st}>{st}</option>)}
+                        </select>
+                      ) : <span className="ml-2">{o.status2 || '—'}</span>}
+                    </label>
+                  )}
+                  {canAssign && (
+                    <label className="block font-bold">Asignar delivery
+                      <select className="app-input mt-1 w-full !py-1 text-xs" value={o.assigned_delivery || ''}
+                        onChange={e => handleAssignDelivery(o.id, e.target.value)}>
+                        <option value="">Sin asignar</option>
+                        {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
+                      </select>
+                    </label>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5 border-t border-border pt-3">
+                  <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => generateGuide(o)}>📄 Ver guía</button>
+                  <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => {
+                    generateGuide(o);
+                    setTimeout(copyGuide, 100);
+                  }}>📋 Copiar guía</button>
+                  <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => loadOrderHistory(o)}>📜 Historial</button>
+                  {canTrack(o) && <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]"
+                    onClick={() => void shareTracking(o)}>🛵 Seguimiento</button>}
+                  {canEdit && (
+                    <>
+                      <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => openEdit(o)}>✏️ Editar</button>
+                      <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => {
+                        if (confirm('¿Cancelar este pedido? (Solo cambiará el estado a CANCELADO)')) cancelOrder(o.id);
+                      }}>⛔ Cancelar</button>
+                      {canDeletePermanently && <button type="button" className="nav-btn !px-2 !py-1 !text-[11px] !text-red-500" onClick={() => {
+                        if (confirm('⚠️ ¿ELIMINAR PERMANENTEMENTE este pedido? Esta acción no se puede deshacer.')) deleteOrderPermanently(o.id);
+                      }}>🗑️ Eliminar</button>}
+                    </>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+          {filtered.length === 0 &&
+            <div className="col-span-full rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground">
+              Sin pedidos que coincidan con los filtros.
+            </div>}
+        </div>
+      )}
+
+      {/* Tabla clásica opcional */}
+      <div className={ordersViewMode === 'table' ? 'overflow-x-auto' : 'hidden'}>
         <table className="app-table min-w-[1000px]">
           <thead>
             <tr>
@@ -1530,8 +1646,8 @@ export default function OrdersView() {
         </table>
       </div>
 
-      {/* Vista Celular - Tarjetas simplificada */}
-      <div className="md:hidden space-y-3">
+      {/* Vista celular clásica: reemplazada por la cuadrícula adaptable, sin duplicar tarjetas. */}
+      <div className="hidden">
         {filtered.length === 0 && (
           <div className="text-center text-muted-foreground py-8">Sin pedidos en los últimos 3 días</div>
         )}
