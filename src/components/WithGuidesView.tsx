@@ -404,10 +404,12 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     load(); 
   }, [status2Filter, role, myEmail, showHistorical]);
 
+  // Evitar una descarga masiva de pedidos por cada tecla del buscador.
+  // Al escribir, se espera una pausa antes de consultar Supabase.
   useEffect(() => {
-    if (search && search.trim()) {
-      load();
-    }
+    if (!search.trim()) return;
+    const timer = window.setTimeout(() => { void load(); }, 450);
+    return () => window.clearTimeout(timer);
   }, [search]);
 
   const allProviders = useMemo(() => {
