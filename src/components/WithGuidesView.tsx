@@ -1581,7 +1581,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
             {repeatedClients.slice(0, 9).map((client, i) => (
-              <div key={i} className="rounded-xl border border-amber-500/20 bg-black/20 p-3">
+              <div key={i} className="rounded-xl bg-black/20 p-3" style={{ border: '3px solid #000000', boxShadow: '0 3px 0 #000000' }}>
                 <div className="flex items-center justify-between gap-2">
                   <div className="font-black text-white truncate">{client.name}</div>
                   <span className="text-xs font-black text-amber-200 bg-amber-500/20 px-2 py-1 rounded-full">{client.count}x</span>
