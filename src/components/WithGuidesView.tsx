@@ -1473,7 +1473,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           .a4-sheet.slots-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); }
           .a4-sheet.slots-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
           .a4-sheet .thermal-ticket { width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0;
-            padding: 1.4mm; border: 1px dashed #111; box-shadow: none; font-size: 8px; line-height: 1.15;
+            padding: 1.4mm; border: 3px solid #000000; box-shadow: none; font-size: 8px; line-height: 1.15;
             overflow: hidden; overflow-wrap: anywhere; page-break-after: auto !important; break-inside: avoid; }
           .a4-sheet .header { margin-bottom: 2px; }
           .a4-sheet .title { font-size: 10px; letter-spacing: 0; }
