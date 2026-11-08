@@ -704,6 +704,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   
   // Estados para el modal de cambio de estado
   const loadClosuresRef = useRef<() => Promise<void> | void>(() => {});
+  const closuresRequestRef = useRef(0);
   const reschedule = useRescheduleDialog(() => void loadClosuresRef.current());
   const [statusChangeModal, setStatusChangeModal] = useState<{
     isOpen: boolean;
@@ -1558,6 +1559,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   };
 
   const loadClosures = async () => {
+    const requestId = ++closuresRequestRef.current;
     let dateField = filterDateBy;
     
     if (isDelivery || isSupplier) {
@@ -1758,10 +1760,12 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     let pageFrom = 0;
 
     while (true) {
+      if (requestId !== closuresRequestRef.current) return;
       const { data: pageData, error: pageError } = await query.range(
         pageFrom,
         pageFrom + PAGE_SIZE - 1,
       );
+      if (requestId !== closuresRequestRef.current) return;
 
       if (pageError) {
         console.error('Error cargando pedidos de cierres:', pageError);
@@ -1821,6 +1825,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         });
     }
 
+    if (requestId !== closuresRequestRef.current) return;
     setOrders(finalOrders);
     setTotalPedidosAsignados(finalOrders.length);
 
@@ -1845,7 +1850,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   };
 
   useEffect(() => {
-    loadClosures();
+    // Juntar cambios rápidos de filtros y cancelar consultas obsoletas.
+    const timer = window.setTimeout(() => { void loadClosures(); }, 250);
+    return () => { window.clearTimeout(timer); closuresRequestRef.current++; };
   }, [
     filterSuppliers,
     filterDeliveries,
