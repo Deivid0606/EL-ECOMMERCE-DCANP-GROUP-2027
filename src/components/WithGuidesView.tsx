@@ -1245,7 +1245,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     <html>
     <head>
       <meta charset="utf-8">
-      <title>Guías Térmicas</title>
+      <title>${paper === 'a4' ? 'Guías A4 - Hasta 9 por hoja' : 'Guías Térmicas'}</title>
       <style>
         * {
           margin: 0;
@@ -1254,19 +1254,19 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         }
         
         @page {
-          size: 80mm auto;
-          margin: 0mm;
+          size: ${paper === 'a4' ? 'A4 portrait' : '80mm auto'};
+          margin: ${paper === 'a4' ? '5mm' : '0mm'};
         }
         
         @media print {
           html, body {
             margin: 0;
             padding: 0;
-            width: 80mm;
+            width: ${paper === 'a4' ? 'auto' : '80mm'};
             background: white;
           }
           .thermal-ticket {
-            page-break-after: always;
+            page-break-after: ${paper === 'a4' ? 'auto' : 'always'};
             width: 100%;
             padding: 3mm;
             font-family: 'Courier New', 'Courier', monospace;
@@ -1281,8 +1281,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           }
           .thermal-ticket {
             background: white;
-            width: 80mm;
-            margin: 0 auto 10px auto;
+            width: ${paper === 'a4' ? '100%' : '80mm'};
+            margin: ${paper === 'a4' ? '0' : '0 auto 10px auto'};
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
           }
         }
@@ -1481,7 +1481,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
                   try {
-                    new QRCode(el, { text: url, width: 120, height: 120 });
+                    new QRCode(el, { text: url, width: ${paper === 'a4' ? 62 : 120}, height: ${paper === 'a4' ? 62 : 120} });
                   } catch(e) {
                     console.log('QR Delivery error:', e);
                     el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>';
@@ -1513,7 +1513,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         printWindow.print();
       }, 1500);
     }
-    toast.success(`${selected.length} ticket(s) listos para imprimir en térmica`);
+    toast.success(paper === 'a4' ? `${selected.length} pedido(s) preparados en A4 (hasta 9 por hoja)` : `${selected.length} ticket(s) listos para imprimir en térmica`);
   };
 
   return (
@@ -2021,6 +2021,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           <button className="nav-btn" onClick={() => printThermal()} style={{ background: '#1a1a1a', color: 'white', border: '1px solid #333' }}>
             🧾 Imprimir Ticket Térmico (80mm)
           </button>
+          <button type="button" className="nav-btn" style={{ background: '#2563eb', color: 'white' }} onClick={() => printThermal(undefined, 'a4')}>
+            📄 Imprimir A4 · Hasta 9 pedidos por hoja
+          </button>
           <button className="nav-btn" onClick={clearSelection} style={{ background: '#ef4444', color: 'white' }}>
             ✖️ Limpiar selección
           </button>
@@ -2065,6 +2068,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
               style={{ background: '#1a1a1a', color: 'white' }}
             >
               🧾 Imprimir todos filtrados Térmica ({visibleOrders.length})
+            </button>
+            <button type="button" className="nav-btn" style={{ background: '#2563eb', color: 'white' }} onClick={() => printThermal(visibleOrders, 'a4')}>
+              📄 Imprimir todos filtrados A4 · Hasta 9 por hoja ({visibleOrders.length})
             </button>
           </>
         )}
