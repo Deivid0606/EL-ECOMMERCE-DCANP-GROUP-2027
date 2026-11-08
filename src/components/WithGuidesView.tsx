@@ -1114,14 +1114,14 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   };
 
   // IMPRESIÓN PARA IMPRESORA TÉRMICA - CAMBIO 3: QR con order_number
-  const printThermal = (ordersOverride?: any[]) => {
+  const printThermal = (ordersOverride?: any[], paper: 'thermal' | 'a4' = 'thermal') => {
     const selected = ordersOverride ?? getSelectedOrders();
     if (selected.length === 0) {
       toast.error('Seleccioná pedidos primero');
       return;
     }
 
-    let allTicketsHtml = '';
+    const ticketTemplates: string[] = [];
 
     for (const order of selected) {
       const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : (order.items_json || []);
@@ -1153,7 +1153,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       const timestamp = Date.now();
       const deliveryQrId = `qr-delivery-thermal-${timestamp}-${order.id.slice(0, 8)}`;
 
-      allTicketsHtml += `
+      ticketTemplates.push(`
         <div class="thermal-ticket">
           <div class="header">
             <div class="title">GUÍA DE ENVÍO</div>
@@ -1222,8 +1222,24 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
           <div class="cut-line">- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
         </div>
-      `;
+      `);
     }
+
+    // Hasta 9 tickets por hoja A4. Para pedidos extensos, menos tarjetas para darles espacio.
+    const sheets: string[] = [];
+    if (paper === 'a4') {
+      let offset = 0;
+      while (offset < selected.length) {
+        const next = selected.slice(offset, offset + 9);
+        const lengthy = next.some((o: any) => getOrderItems(o).length > 3 || String(o.obs || '').length > 90);
+        const veryLengthy = next.some((o: any) => getOrderItems(o).length > 6 || String(o.obs || '').length > 200);
+        const slots = veryLengthy ? 4 : lengthy ? 6 : 9;
+        const count = Math.min(slots, selected.length - offset);
+        sheets.push(`<div class="a4-sheet slots-${slots}">${ticketTemplates.slice(offset, offset + count).join('')}</div>`);
+        offset += count;
+      }
+    }
+    const allTicketsHtml = paper === 'a4' ? sheets.join('') : ticketTemplates.join('');
 
     const thermalHtml = `<!DOCTYPE html>
     <html>
