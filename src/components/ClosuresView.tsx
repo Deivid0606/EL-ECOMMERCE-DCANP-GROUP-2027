@@ -4425,7 +4425,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       </div>
 
       </div>
-      <div className={closureTab === 'pedidos' || closureTab === 'repetidos' ? '' : 'hidden'}>
+      {(closureTab === 'pedidos' || closureTab === 'repetidos') && <div>
       {closureTab === 'repetidos' && (
         <div className="closure-tab-intro"><strong>🔁 Posibles pedidos repetidos</strong><p>Coincidencias por teléfono, ciudad y día de creación: {possibleDuplicates.count} pedidos en {possibleDuplicates.groupsCount} grupos. Son alertas para revisar, no duplicados confirmados.</p></div>
       )}
@@ -4969,7 +4969,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         </table>
       </div>}
 
-      </div>
+      </div>}
       </div>
 
       {/* Modal para solicitar comentario y captura */}
