@@ -554,7 +554,7 @@ export default function OrdersView() {
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [ordersViewMode, setOrdersViewMode] = useState<'cards' | 'table'>('cards');
+  const [ordersViewMode, setOrdersViewMode] = useState<'cards' | 'table'>('table');
   const [visibleOrderLimit, setVisibleOrderLimit] = useState(60);
   const last3Days = getLast3Days();
   const [dateFrom, setDateFrom] = useState(() => last3Days.from);
