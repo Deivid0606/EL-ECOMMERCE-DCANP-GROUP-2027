@@ -154,17 +154,18 @@
     color: hsl(var(--foreground));
   }
 
+  /* Botones: negro puro con letras blancas. */
   .nav-btn {
     @apply border-0 rounded-[10px] px-3.5 py-2.5 font-bold cursor-pointer transition-all duration-200 text-sm;
-    background: hsl(217 31% 13%);
-    color: hsl(var(--foreground));
-    border: 1px solid hsl(var(--border));
+    background: #000;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.14);
   }
 
   .nav-btn:hover {
     @apply -translate-y-0.5;
-    background: hsl(216 30% 19%);
-    border-color: hsl(211 58% 37%);
+    background: #000;
+    border-color: hsl(211 80% 55%);
   }
 
   .nav-btn.active {
