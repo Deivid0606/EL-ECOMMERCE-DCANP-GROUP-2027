@@ -1114,14 +1114,14 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   };
 
   // IMPRESIÓN PARA IMPRESORA TÉRMICA - CAMBIO 3: QR con order_number
-  const printThermal = (ordersOverride?: any[]) => {
+  const printThermal = (ordersOverride?: any[], paper: 'thermal' | 'a4' = 'thermal') => {
     const selected = ordersOverride ?? getSelectedOrders();
     if (selected.length === 0) {
       toast.error('Seleccioná pedidos primero');
       return;
     }
 
-    let allTicketsHtml = '';
+    const ticketTemplates: string[] = [];
 
     for (const order of selected) {
       const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : (order.items_json || []);
@@ -1153,7 +1153,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       const timestamp = Date.now();
       const deliveryQrId = `qr-delivery-thermal-${timestamp}-${order.id.slice(0, 8)}`;
 
-      allTicketsHtml += `
+      ticketTemplates.push(`
         <div class="thermal-ticket">
           <div class="header">
             <div class="title">GUÍA DE ENVÍO</div>
@@ -1222,14 +1222,30 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
           <div class="cut-line">- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
         </div>
-      `;
+      `);
     }
+
+    // Hasta 9 tickets por hoja A4. Para pedidos extensos, menos tarjetas para darles espacio.
+    const sheets: string[] = [];
+    if (paper === 'a4') {
+      let offset = 0;
+      while (offset < selected.length) {
+        const next = selected.slice(offset, offset + 9);
+        const lengthy = next.some((o: any) => getOrderItems(o).length > 3 || String(o.obs || '').length > 90);
+        const veryLengthy = next.some((o: any) => getOrderItems(o).length > 6 || String(o.obs || '').length > 200);
+        const slots = veryLengthy ? 4 : lengthy ? 6 : 9;
+        const count = Math.min(slots, selected.length - offset);
+        sheets.push(`<div class="a4-sheet slots-${slots}">${ticketTemplates.slice(offset, offset + count).join('')}</div>`);
+        offset += count;
+      }
+    }
+    const allTicketsHtml = paper === 'a4' ? sheets.join('') : ticketTemplates.join('');
 
     const thermalHtml = `<!DOCTYPE html>
     <html>
     <head>
       <meta charset="utf-8">
-      <title>Guías Térmicas</title>
+      <title>${paper === 'a4' ? 'Guías A4 - Hasta 9 por hoja' : 'Guías Térmicas'}</title>
       <style>
         * {
           margin: 0;
@@ -1238,19 +1254,19 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         }
         
         @page {
-          size: 80mm auto;
-          margin: 0mm;
+          size: ${paper === 'a4' ? 'A4 portrait' : '80mm auto'};
+          margin: ${paper === 'a4' ? '5mm' : '0mm'};
         }
         
         @media print {
           html, body {
             margin: 0;
             padding: 0;
-            width: 80mm;
+            width: ${paper === 'a4' ? 'auto' : '80mm'};
             background: white;
           }
           .thermal-ticket {
-            page-break-after: always;
+            page-break-after: ${paper === 'a4' ? 'auto' : 'always'};
             width: 100%;
             padding: 3mm;
             font-family: 'Courier New', 'Courier', monospace;
@@ -1265,8 +1281,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           }
           .thermal-ticket {
             background: white;
-            width: 80mm;
-            margin: 0 auto 10px auto;
+            width: ${paper === 'a4' ? '100%' : '80mm'};
+            margin: ${paper === 'a4' ? '0' : '0 auto 10px auto'};
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
           }
         }
@@ -1447,6 +1463,44 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           letter-spacing: 3px;
           margin: 10px 0 3px 0;
         }
+        ${paper === 'a4' ? `
+          html, body { background: white; width: auto; }
+          .a4-sheet { width: 200mm; height: 287mm; margin: 0 auto;
+            display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 1.4mm;
+            break-after: page; page-break-after: always; box-sizing: border-box; background: white; }
+          .a4-sheet:last-child { break-after: auto; page-break-after: auto; }
+          .a4-sheet.slots-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); }
+          .a4-sheet.slots-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
+          .a4-sheet .thermal-ticket { width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0;
+            padding: 1.4mm; border: 1px dashed #111; box-shadow: none; font-size: 8px; line-height: 1.15;
+            overflow: hidden; overflow-wrap: anywhere; page-break-after: auto !important; break-inside: avoid; }
+          .a4-sheet .header { margin-bottom: 2px; }
+          .a4-sheet .title { font-size: 10px; letter-spacing: 0; }
+          .a4-sheet .order-number { font-size: 10px; margin-top: 1px; }
+          .a4-sheet .date { font-size: 7px; margin-top: 1px; }
+          .a4-sheet .divider { margin: 2px 0; }
+          .a4-sheet .section { margin: 2px 0; }
+          .a4-sheet .section-label { font-size: 7px; letter-spacing: 0; padding: 1px 3px; margin-bottom: 1px; }
+          .a4-sheet .customer-name { font-size: 9px; margin: 1px 0; }
+          .a4-sheet .customer-phone, .a4-sheet .customer-email, .a4-sheet .address-line { font-size: 7px; margin: 1px 0; }
+          .a4-sheet .products-header { font-size: 7px; margin: 2px 0 1px; padding-bottom: 1px; }
+          .a4-sheet .products-list { margin: 1px 0; }
+          .a4-sheet .product-row { font-size: 7px; margin: 1px 0; gap: 2px; }
+          .a4-sheet .total-box { font-size: 9px; margin: 3px 0; padding-top: 2px; }
+          .a4-sheet .total-amount { font-size: 10px; }
+          .a4-sheet .obs-box { font-size: 7px; margin: 2px 0; padding: 2px; }
+          .a4-sheet .qr-section { margin: 2px 0; }
+          .a4-sheet .qr-label { font-size: 7px; margin-bottom: 2px; padding: 1px 3px; }
+          .a4-sheet .qr-code, .a4-sheet .qr-code img, .a4-sheet .qr-code canvas { width: 62px !important; height: 62px !important; }
+          .a4-sheet .qr-hint { font-size: 6px; margin-top: 1px; }
+          .a4-sheet .footer { font-size: 6px; margin: 2px 0; }
+          .a4-sheet .cut-line { display: none; }
+          .a4-sheet.slots-6 .thermal-ticket { padding: 2mm; }
+          .a4-sheet.slots-4 .thermal-ticket { padding: 2.5mm; }
+          @media screen { body { background: #eee; } .a4-sheet { margin-bottom: 16px; box-shadow: 0 3px 15px rgba(0,0,0,.2); } }
+          @media print { html, body { width: auto; margin: 0; padding: 0; } .a4-sheet { width: 200mm; height: 287mm; } }
+        ` : ''}
       </style>
       <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     </head>
@@ -1465,7 +1519,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
                   try {
-                    new QRCode(el, { text: url, width: 120, height: 120 });
+                    new QRCode(el, { text: url, width: ${paper === 'a4' ? 62 : 120}, height: ${paper === 'a4' ? 62 : 120} });
                   } catch(e) {
                     console.log('QR Delivery error:', e);
                     el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>';
@@ -1497,7 +1551,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         printWindow.print();
       }, 1500);
     }
-    toast.success(`${selected.length} ticket(s) listos para imprimir en térmica`);
+    toast.success(paper === 'a4' ? `${selected.length} pedido(s) preparados en A4 (hasta 9 por hoja)` : `${selected.length} ticket(s) listos para imprimir en térmica`);
   };
 
   return (
@@ -2005,6 +2059,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           <button className="nav-btn" onClick={() => printThermal()} style={{ background: '#1a1a1a', color: 'white', border: '1px solid #333' }}>
             🧾 Imprimir Ticket Térmico (80mm)
           </button>
+          <button type="button" className="nav-btn" style={{ background: '#2563eb', color: 'white' }} onClick={() => printThermal(undefined, 'a4')}>
+            📄 Imprimir A4 · Hasta 9 pedidos por hoja
+          </button>
           <button className="nav-btn" onClick={clearSelection} style={{ background: '#ef4444', color: 'white' }}>
             ✖️ Limpiar selección
           </button>
@@ -2049,6 +2106,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
               style={{ background: '#1a1a1a', color: 'white' }}
             >
               🧾 Imprimir todos filtrados Térmica ({visibleOrders.length})
+            </button>
+            <button type="button" className="nav-btn" style={{ background: '#2563eb', color: 'white' }} onClick={() => printThermal(visibleOrders, 'a4')}>
+              📄 Imprimir todos filtrados A4 · Hasta 9 por hoja ({visibleOrders.length})
             </button>
           </>
         )}
