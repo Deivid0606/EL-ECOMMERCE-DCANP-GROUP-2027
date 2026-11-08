@@ -670,6 +670,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   // Presentación inicial estilo tablero; la tabla clásica sigue disponible.
   const [ordersViewMode, setOrdersViewMode] = useState<'cards' | 'table'>('cards');
+  const [visibleOrderLimit, setVisibleOrderLimit] = useState(60);
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(
@@ -1924,6 +1925,11 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     if (onlyCarried) list = list.filter(isCarried);
     return list;
   }, [filteredOrders, possibleDuplicates, onlyPossibleDuplicates, onlyCarried]);
+
+  // Limita el DOM: miles de tarjetas y una tabla oculta bloqueaban el navegador.
+  // Lista completa disponible para filtros, KPIs y operaciones masivas.
+  const renderedOrders = useMemo(() => displayedOrders.slice(0, visibleOrderLimit), [displayedOrders, visibleOrderLimit]);
+  useEffect(() => { setVisibleOrderLimit(60); }, [searchTerm, settlementFilter, onlyPossibleDuplicates, onlyCarried, closureTab, useDeliveryDateRange, dateFrom, dateTo]);
 
   const normalizeFeeKey = (value: string) =>
     String(value || '')
@@ -4442,7 +4448,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
       {ordersViewMode === 'cards' && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {displayedOrders.map(o => {
+          {renderedOrders.map(o => {
             const isSettled = Boolean(o.delivery_settled);
             const fee = getDeliveryFeeForOrder(o);
             const items = getOrderItems(o);
@@ -4590,7 +4596,13 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         </div>
       )}
 
-      <div className={ordersViewMode === 'table' ? 'closure-premium-table overflow-auto' : 'hidden'}>
+      {displayedOrders.length > visibleOrderLimit && (
+        <div className="my-3 flex flex-wrap items-center justify-center gap-3 rounded-xl border border-border p-3">
+          <span className="text-xs text-muted-foreground">Mostrando {renderedOrders.length} de {displayedOrders.length} pedidos</span>
+          <button type="button" className="nav-btn active" onClick={() => setVisibleOrderLimit(n => n + 60)}>📦 Mostrar 60 pedidos más</button>
+        </div>
+      )}
+      {ordersViewMode === 'table' && <div className="closure-premium-table overflow-auto">
         <table className="app-table min-w-[1800px]">
           <thead>
             <tr>
@@ -4620,7 +4632,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             </tr>
           </thead>
           <tbody>
-            {displayedOrders.map(o => {
+            {renderedOrders.map(o => {
               const fee = getDeliveryFeeForOrder(o);
               const net = Number(o.total_gs || 0) - fee;
               const isSettled = o.delivery_settled;
@@ -4954,7 +4966,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             )}
           </tbody>
         </table>
-      </div>
+      </div>}
 
       </div>
       </div>
