@@ -1463,6 +1463,44 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           letter-spacing: 3px;
           margin: 10px 0 3px 0;
         }
+        ${paper === 'a4' ? `
+          html, body { background: white; width: auto; }
+          .a4-sheet { width: 200mm; height: 287mm; margin: 0 auto;
+            display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 1.4mm;
+            break-after: page; page-break-after: always; box-sizing: border-box; background: white; }
+          .a4-sheet:last-child { break-after: auto; page-break-after: auto; }
+          .a4-sheet.slots-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); }
+          .a4-sheet.slots-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
+          .a4-sheet .thermal-ticket { width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0;
+            padding: 1.4mm; border: 1px dashed #111; box-shadow: none; font-size: 8px; line-height: 1.15;
+            overflow: hidden; overflow-wrap: anywhere; page-break-after: auto !important; break-inside: avoid; }
+          .a4-sheet .header { margin-bottom: 2px; }
+          .a4-sheet .title { font-size: 10px; letter-spacing: 0; }
+          .a4-sheet .order-number { font-size: 10px; margin-top: 1px; }
+          .a4-sheet .date { font-size: 7px; margin-top: 1px; }
+          .a4-sheet .divider { margin: 2px 0; }
+          .a4-sheet .section { margin: 2px 0; }
+          .a4-sheet .section-label { font-size: 7px; letter-spacing: 0; padding: 1px 3px; margin-bottom: 1px; }
+          .a4-sheet .customer-name { font-size: 9px; margin: 1px 0; }
+          .a4-sheet .customer-phone, .a4-sheet .customer-email, .a4-sheet .address-line { font-size: 7px; margin: 1px 0; }
+          .a4-sheet .products-header { font-size: 7px; margin: 2px 0 1px; padding-bottom: 1px; }
+          .a4-sheet .products-list { margin: 1px 0; }
+          .a4-sheet .product-row { font-size: 7px; margin: 1px 0; gap: 2px; }
+          .a4-sheet .total-box { font-size: 9px; margin: 3px 0; padding-top: 2px; }
+          .a4-sheet .total-amount { font-size: 10px; }
+          .a4-sheet .obs-box { font-size: 7px; margin: 2px 0; padding: 2px; }
+          .a4-sheet .qr-section { margin: 2px 0; }
+          .a4-sheet .qr-label { font-size: 7px; margin-bottom: 2px; padding: 1px 3px; }
+          .a4-sheet .qr-code, .a4-sheet .qr-code img, .a4-sheet .qr-code canvas { width: 62px !important; height: 62px !important; }
+          .a4-sheet .qr-hint { font-size: 6px; margin-top: 1px; }
+          .a4-sheet .footer { font-size: 6px; margin: 2px 0; }
+          .a4-sheet .cut-line { display: none; }
+          .a4-sheet.slots-6 .thermal-ticket { padding: 2mm; }
+          .a4-sheet.slots-4 .thermal-ticket { padding: 2.5mm; }
+          @media screen { body { background: #eee; } .a4-sheet { margin-bottom: 16px; box-shadow: 0 3px 15px rgba(0,0,0,.2); } }
+          @media print { html, body { width: auto; margin: 0; padding: 0; } .a4-sheet { width: 200mm; height: 287mm; } }
+        ` : ''}
       </style>
       <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     </head>
