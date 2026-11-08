@@ -670,6 +670,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   // Presentación inicial estilo tablero; la tabla clásica sigue disponible.
   const [ordersViewMode, setOrdersViewMode] = useState<'cards' | 'table'>('cards');
+  const [visibleOrderLimit, setVisibleOrderLimit] = useState(60);
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(
@@ -703,6 +704,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   
   // Estados para el modal de cambio de estado
   const loadClosuresRef = useRef<() => Promise<void> | void>(() => {});
+  const closuresRequestRef = useRef(0);
   const reschedule = useRescheduleDialog(() => void loadClosuresRef.current());
   const [statusChangeModal, setStatusChangeModal] = useState<{
     isOpen: boolean;
@@ -1557,6 +1559,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   };
 
   const loadClosures = async () => {
+    const requestId = ++closuresRequestRef.current;
     let dateField = filterDateBy;
     
     if (isDelivery || isSupplier) {
@@ -1757,10 +1760,12 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     let pageFrom = 0;
 
     while (true) {
+      if (requestId !== closuresRequestRef.current) return;
       const { data: pageData, error: pageError } = await query.range(
         pageFrom,
         pageFrom + PAGE_SIZE - 1,
       );
+      if (requestId !== closuresRequestRef.current) return;
 
       if (pageError) {
         console.error('Error cargando pedidos de cierres:', pageError);
@@ -1820,6 +1825,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         });
     }
 
+    if (requestId !== closuresRequestRef.current) return;
     setOrders(finalOrders);
     setTotalPedidosAsignados(finalOrders.length);
 
@@ -1844,7 +1850,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   };
 
   useEffect(() => {
-    loadClosures();
+    // Juntar cambios rápidos de filtros y cancelar consultas obsoletas.
+    const timer = window.setTimeout(() => { void loadClosures(); }, 250);
+    return () => { window.clearTimeout(timer); closuresRequestRef.current++; };
   }, [
     filterSuppliers,
     filterDeliveries,
@@ -1925,6 +1933,11 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     return list;
   }, [filteredOrders, possibleDuplicates, onlyPossibleDuplicates, onlyCarried]);
 
+  // Limita el DOM: miles de tarjetas y una tabla oculta bloqueaban el navegador.
+  // Lista completa disponible para filtros, KPIs y operaciones masivas.
+  const renderedOrders = useMemo(() => displayedOrders.slice(0, visibleOrderLimit), [displayedOrders, visibleOrderLimit]);
+  useEffect(() => { setVisibleOrderLimit(60); }, [searchTerm, settlementFilter, onlyPossibleDuplicates, onlyCarried, closureTab, useDeliveryDateRange, dateFrom, dateTo]);
+
   const normalizeFeeKey = (value: string) =>
     String(value || '')
       .normalize('NFD')
@@ -1932,18 +1945,19 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       .trim()
       .toLowerCase();
 
-  const getFee = (deliveryEmail: string, city: string) => {
-    const emailKey = normalizeFeeKey(deliveryEmail);
-    const cityKey = normalizeFeeKey(city);
-
-    const feeRow = fees.find(
-      fee =>
-        normalizeFeeKey(fee?.delivery_email || '') === emailKey &&
-        normalizeFeeKey(fee?.city || '') === cityKey,
-    );
-
-    return Number(feeRow?.fee_gs || 0);
-  };
+  // Índice en memoria para evitar buscar entre cientos de tarifas por cada pedido.
+  // En Cierres puede haber miles de pedidos: pasamos de búsquedas repetidas a O(1).
+  const feeLookup = useMemo(() => {
+    const map = new Map<string, number>();
+    fees.forEach((fee: any) => {
+      const key = normalizeFeeKey(fee?.delivery_email || '') + '|' + normalizeFeeKey(fee?.city || '');
+      // Conserva la primera tarifa, igual que el .find() anterior.
+      if (!map.has(key)) map.set(key, Number(fee?.fee_gs || 0));
+    });
+    return map;
+  }, [fees]);
+  const getFee = (deliveryEmail: string, city: string) =>
+    feeLookup.get(normalizeFeeKey(deliveryEmail) + '|' + normalizeFeeKey(city)) ?? 0;
 
   const productCostMap = useMemo(() => {
     const m: Record<string, number> = {};
@@ -4418,7 +4432,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       </div>
 
       </div>
-      <div className={closureTab === 'pedidos' || closureTab === 'repetidos' ? '' : 'hidden'}>
+      {(closureTab === 'pedidos' || closureTab === 'repetidos') && <div>
       {closureTab === 'repetidos' && (
         <div className="closure-tab-intro"><strong>🔁 Posibles pedidos repetidos</strong><p>Coincidencias por teléfono, ciudad y día de creación: {possibleDuplicates.count} pedidos en {possibleDuplicates.groupsCount} grupos. Son alertas para revisar, no duplicados confirmados.</p></div>
       )}
@@ -4442,7 +4456,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
       {ordersViewMode === 'cards' && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {displayedOrders.map(o => {
+          {renderedOrders.map(o => {
             const isSettled = Boolean(o.delivery_settled);
             const fee = getDeliveryFeeForOrder(o);
             const items = getOrderItems(o);
@@ -4590,7 +4604,13 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         </div>
       )}
 
-      <div className={ordersViewMode === 'table' ? 'closure-premium-table overflow-auto' : 'hidden'}>
+      {displayedOrders.length > visibleOrderLimit && (
+        <div className="my-3 flex flex-wrap items-center justify-center gap-3 rounded-xl border border-border p-3">
+          <span className="text-xs text-muted-foreground">Mostrando {renderedOrders.length} de {displayedOrders.length} pedidos</span>
+          <button type="button" className="nav-btn active" onClick={() => setVisibleOrderLimit(n => n + 60)}>📦 Mostrar 60 pedidos más</button>
+        </div>
+      )}
+      {ordersViewMode === 'table' && <div className="closure-premium-table overflow-auto">
         <table className="app-table min-w-[1800px]">
           <thead>
             <tr>
@@ -4620,7 +4640,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             </tr>
           </thead>
           <tbody>
-            {displayedOrders.map(o => {
+            {renderedOrders.map(o => {
               const fee = getDeliveryFeeForOrder(o);
               const net = Number(o.total_gs || 0) - fee;
               const isSettled = o.delivery_settled;
@@ -4954,9 +4974,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             )}
           </tbody>
         </table>
-      </div>
+      </div>}
 
-      </div>
+      </div>}
       </div>
 
       {/* Modal para solicitar comentario y captura */}

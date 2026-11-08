@@ -404,10 +404,12 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     load(); 
   }, [status2Filter, role, myEmail, showHistorical]);
 
+  // Evitar una descarga masiva de pedidos por cada tecla del buscador.
+  // Al escribir, se espera una pausa antes de consultar Supabase.
   useEffect(() => {
-    if (search && search.trim()) {
-      load();
-    }
+    if (!search.trim()) return;
+    const timer = window.setTimeout(() => { void load(); }, 450);
+    return () => window.clearTimeout(timer);
   }, [search]);
 
   const allProviders = useMemo(() => {
@@ -2217,7 +2219,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       )}
 
       {/* Tabla clásica opcional */}
-      <div className={ordersViewMode === 'table' ? 'overflow-auto rounded-2xl border border-slate-700/80 bg-[#101827] shadow-2xl' : 'hidden'}>
+      {ordersViewMode === 'table' && <div className="overflow-auto rounded-2xl border border-slate-700/80 bg-[#101827] shadow-2xl">
 
         <table className="w-full min-w-[1900px] text-sm [&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-3">
           <thead className="bg-[#070b18] sticky top-0 z-10">
@@ -2382,7 +2384,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             )}
           </tbody>
         </table>
-      </div>
+      </div>}
 
       {visibleOrders.length > shownRows && (
         <div className="flex flex-wrap items-center justify-center gap-3 rounded-xl border border-slate-700/80 bg-slate-900/50 p-3 text-sm text-slate-200">

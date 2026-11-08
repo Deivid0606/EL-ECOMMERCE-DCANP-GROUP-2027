@@ -555,6 +555,7 @@ export default function OrdersView() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [ordersViewMode, setOrdersViewMode] = useState<'cards' | 'table'>('cards');
+  const [visibleOrderLimit, setVisibleOrderLimit] = useState(60);
   const last3Days = getLast3Days();
   const [dateFrom, setDateFrom] = useState(() => last3Days.from);
   const [dateTo, setDateTo] = useState(() => last3Days.to);
@@ -780,6 +781,10 @@ export default function OrdersView() {
       return true;
     });
   }, [orders, search, statusFilter, role, myEmail]);
+
+  // Mantiene filtros y selecciones sobre el conjunto total, pero solo dibuja 60 filas.
+  const displayedPage = useMemo(() => filtered.slice(0, visibleOrderLimit), [filtered, visibleOrderLimit]);
+  useEffect(() => { setVisibleOrderLimit(60); }, [dateFrom, dateTo, search, statusFilter]);
 
   const postNews = async (message: string, orderNum: string) => {
     await supabase.from('news').insert({
@@ -1373,7 +1378,7 @@ export default function OrdersView() {
 
       {ordersViewMode === 'cards' && (
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {filtered.map(o => {
+          {displayedPage.map(o => {
             const feeStored = Number(o.delivery_fee_gs || 0);
             const commVal = role === 'DELIVERY' ? feeStored : Number(o.commission_gs || 0);
             const dateShown = (role === 'DELIVERY' && o.assigned_at)
@@ -1472,8 +1477,14 @@ export default function OrdersView() {
         </div>
       )}
 
+      {filtered.length > visibleOrderLimit && (
+        <div className="my-3 flex flex-wrap items-center justify-center gap-3 rounded-xl border border-border p-3">
+          <span className="text-xs text-muted-foreground">Mostrando {displayedPage.length} de {filtered.length} pedidos</span>
+          <button type="button" className="nav-btn active" onClick={() => setVisibleOrderLimit(n => n + 60)}>📦 Mostrar 60 más</button>
+        </div>
+      )}
       {/* Tabla clásica opcional */}
-      <div className={ordersViewMode === 'table' ? 'overflow-x-auto' : 'hidden'}>
+      {ordersViewMode === 'table' && <div className="overflow-x-auto">
         <table className="app-table min-w-[1000px]">
           <thead>
             <tr>
@@ -1505,7 +1516,7 @@ export default function OrdersView() {
                 </td>
               </tr>
             )}
-            {filtered.map(o => {
+            {displayedPage.map(o => {
               const feeStored = Number(o.delivery_fee_gs || 0);
               const commVal = role === 'DELIVERY' ? feeStored : Number(o.commission_gs || 0);
               const dateShown = (role === 'DELIVERY' && o.assigned_at)
@@ -1644,14 +1655,14 @@ export default function OrdersView() {
             })}
           </tbody>
         </table>
-      </div>
+      </div>}
 
       {/* Vista celular clásica: reemplazada por la cuadrícula adaptable, sin duplicar tarjetas. */}
-      <div className="hidden">
+      {false && <div className="hidden">
         {filtered.length === 0 && (
           <div className="text-center text-muted-foreground py-8">Sin pedidos en los últimos 3 días</div>
         )}
-        {filtered.map(o => {
+        {displayedPage.map(o => {
           const feeStored = Number(o.delivery_fee_gs || 0);
           const commVal = role === 'DELIVERY' ? feeStored : Number(o.commission_gs || 0);
           const dateShown = (role === 'DELIVERY' && o.assigned_at)
@@ -1718,7 +1729,7 @@ export default function OrdersView() {
             </div>
           );
         })}
-      </div>
+      </div>}
 
       {/* Modales */}
       {editOrder && createPortal(
