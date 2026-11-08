@@ -2722,7 +2722,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   };
 
   const toggleAllGuideSelections = () => {
-    const visibleIds = displayedOrders.map(order => order.id);
+    // «Visibles» significa los pedidos que realmente aparecen en esta tanda.
+    const visibleIds = renderedOrders.map(order => order.id);
     const allVisibleSelected =
       visibleIds.length > 0 && visibleIds.every(id => selectedGuideIds.has(id));
 
@@ -4213,9 +4214,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
               type="button"
               className="nav-btn"
               onClick={toggleAllGuideSelections}
-              disabled={displayedOrders.length === 0}
+              disabled={renderedOrders.length === 0}
             >
-              {displayedOrders.length > 0 && displayedOrders.every(order => selectedGuideIds.has(order.id))
+              {renderedOrders.length > 0 && renderedOrders.every(order => selectedGuideIds.has(order.id))
                 ? '☐ Deseleccionar visibles'
                 : '☑ Seleccionar visibles'}
             </button>
