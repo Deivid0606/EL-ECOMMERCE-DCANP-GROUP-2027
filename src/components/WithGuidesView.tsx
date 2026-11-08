@@ -148,7 +148,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   // FILTROS EXISTENTES
   const [status2Filter, setStatus2Filter] = useState<string>('PENDIENTES');
   const [shownRows, setShownRows] = useState(120);
-  const [ordersViewMode, setOrdersViewMode] = useState<'cards' | 'table'>('cards');
+  const [ordersViewMode, setOrdersViewMode] = useState<'cards' | 'table'>('table');
   const [showHistorical, setShowHistorical] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [selectedCities, setSelectedCities] = useState<Set<string>>(new Set());
