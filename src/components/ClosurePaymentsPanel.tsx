@@ -246,7 +246,18 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
         offset += 500;
       }
 
-      setOrderList(all);
+      // Igual que el servidor: los pedidos que ya están en una rendición enviada
+      // (pendiente o aprobada) no se vuelven a rendir. Sólo cuentan los nuevos.
+      const inClosure = new Set<string>();
+      const ids = all.map(o => o.id);
+      for (let i = 0; i < ids.length; i += 200) {
+        const { data: used } = await supabase
+          .from('delivery_closure_orders' as any)
+          .select('order_id')
+          .in('order_id', ids.slice(i, i + 200));
+        (used || []).forEach((r: any) => inClosure.add(String(r.order_id)));
+      }
+      setOrderList(all.filter(o => !inClosure.has(String(o.id))));
     }
   };
 
@@ -1227,6 +1238,12 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                     El servidor verificará las tarifas y recalculará el neto. En encomiendas entregadas no se suma el valor del pedido; solo se descuenta la tarifa.
                   </p>
                 </div>
+                {!selected.length && !eligibleAttempts.length ? (
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm">
+                    ✅ <b>No tenés pedidos nuevos para rendir a este proveedor.</b> Todo lo entregado ya está en una rendición enviada. Cuando
+                    entregues más pedidos, acá se habilita de nuevo el comprobante sólo para esos.
+                  </div>
+                ) : (
                 <input
                   id="closure-new-receipt"
                   className="block w-full text-sm"
@@ -1243,6 +1260,7 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                     setNewReceipt(f);
                   }}
                 />
+                )}
                 <div className="rounded-xl bg-muted/40 p-3 text-xs">
                   {newReceipt ? `Archivo listo: ${newReceipt.name}` : 'Todos los pedidos del proveedor están incluidos. Transferí el monto neto y adjuntá el comprobante antes de finalizar.'}
                 </div>
@@ -1251,7 +1269,13 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
                   disabled={dayPending || busy || (!selected.length && !eligibleAttempts.length) || !newReceipt || Boolean(feesLoadError) || selectedMissingRate || total < 0 || orderLimitReached}
                   onClick={submit}
                 >
-                  {busy ? 'Enviando cierre...' : dayPending ? '🔒 Primero finalizá tu día (paso de arriba)' : '✅ Enviar rendición con comprobante'}
+                  {busy
+                    ? 'Enviando cierre...'
+                    : dayPending
+                      ? '🔒 Primero finalizá tu día (paso de arriba)'
+                      : !selected.length && !eligibleAttempts.length
+                        ? '✅ Nada nuevo para rendir'
+                        : `✅ Enviar rendición con comprobante (${selected.length} pedido${selected.length === 1 ? '' : 's'})`}
                 </button>
               </div>
             </div>
