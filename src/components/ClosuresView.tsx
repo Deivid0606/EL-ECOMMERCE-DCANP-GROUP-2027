@@ -1756,32 +1756,41 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
      * cargamos por páginas hasta que la última página tenga menos de 1000.
      */
     const PAGE_SIZE = 1000;
+    const PARALLEL = 6;
     const allLoadedOrders: any[] = [];
+    // Cada página es una consulta nueva con los mismos filtros (el constructor de
+    // Supabase no se puede reutilizar en paralelo).
+    const pageQuery = (from: number) => {
+      const q: any = supabase.from('orders').select('*');
+      q.url = new URL(String((query as any).url));
+      return q.range(from, from + PAGE_SIZE - 1);
+    };
+
+    // Las páginas se piden de a 6 a la vez (antes, una detrás de otra).
     let pageFrom = 0;
-
-    while (true) {
+    let done = false;
+    while (!done) {
       if (requestId !== closuresRequestRef.current) return;
-      const { data: pageData, error: pageError } = await query.range(
-        pageFrom,
-        pageFrom + PAGE_SIZE - 1,
-      );
+      const batch = Array.from({ length: PARALLEL }, (_, i) => pageFrom + i * PAGE_SIZE);
+      const results = await Promise.all(batch.map(from => pageQuery(from)));
       if (requestId !== closuresRequestRef.current) return;
 
-      if (pageError) {
-        console.error('Error cargando pedidos de cierres:', pageError);
-        toast.error(`No se pudieron cargar todos los pedidos: ${pageError.message}`);
-        break;
+      for (const { data: pageData, error: pageError } of results) {
+        if (pageError) {
+          console.error('Error cargando pedidos de cierres:', pageError);
+          toast.error(`No se pudieron cargar todos los pedidos: ${pageError.message}`);
+          done = true;
+          break;
+        }
+        const pageRows = pageData || [];
+        allLoadedOrders.push(...pageRows);
+        if (pageRows.length < PAGE_SIZE) {
+          done = true;
+          break;
+        }
       }
 
-      const pageRows = pageData || [];
-      allLoadedOrders.push(...pageRows);
-
-      if (pageRows.length < PAGE_SIZE) {
-        break;
-      }
-
-      pageFrom += PAGE_SIZE;
-
+      pageFrom += PARALLEL * PAGE_SIZE;
       // Límite defensivo alto para evitar un ciclo accidental por backend.
       if (pageFrom >= 50000) {
         console.warn('Se alcanzó el límite defensivo de 50.000 pedidos en Cierres');
