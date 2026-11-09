@@ -51,15 +51,18 @@ type StockLedgerRow = { order_id: string; qty_delivery: number; qty_global: numb
 
 const lc = (v: unknown) => String(v ?? '').trim().toLowerCase();
 
-// Igual que order_item_product() en la base de datos: id, o SKU desempatando por proveedor y título.
+// Igual que order_item_product() en la base de datos: id, SKU o (si el SKU cambió) el nombre exacto,
+// desempatando por proveedor y título.
 const findItemProduct = (item: any, products: StockProduct[]) => {
   const id = String(item?.product_id || item?.id || '');
   const sku = lc(item?.sku);
-  const candidates = products.filter(p => (id && p.id === id) || (sku && lc(p.sku) === sku));
+  const title = lc(item?.title);
+  const candidates = products.filter(p => (id && p.id === id) || (sku && lc(p.sku) === sku) || (title && lc(p.title) === title));
   const score = (p: StockProduct) =>
-    (id && p.id === id ? 4 : 0) +
+    (id && p.id === id ? 16 : 0) +
+    (sku && lc(p.sku) === sku ? 8 : 0) +
     (lc(p.provider_email) === lc(item?.provider_email) ? 2 : 0) +
-    (lc(p.title) === lc(item?.title) ? 1 : 0);
+    (lc(p.title) === title ? 1 : 0);
   return candidates.sort((a, b) => score(b) - score(a) || a.created_at.localeCompare(b.created_at))[0];
 };
 
