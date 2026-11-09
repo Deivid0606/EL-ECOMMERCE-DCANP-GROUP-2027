@@ -640,8 +640,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set());
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [settlementFilter, setSettlementFilter] = useState<'all' | 'settled' | 'pending'>((isDelivery || isSupplier || isAdmin) ? 'pending' : 'all');
-  // DELIVERY, PROVEEDOR and ADMIN start with historical unreported orders. Dates are optional.
-  const [useDeliveryDateRange, setUseDeliveryDateRange] = useState(false);
+  // Por defecto se filtra por fecha (hoy); «Todas las fechas» es opcional.
+  const [useDeliveryDateRange, setUseDeliveryDateRange] = useState(true);
   const [todayPickupCount, setTodayPickupCount] = useState<number | null>(null);
   const refreshTodayPickupCount = async () => {
     if (!(isDelivery || isSupplier || isAdmin) || !myEmail) return;
@@ -3558,11 +3558,11 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       {(isDelivery || isSupplier || isAdmin) && activeSection === 'orders' && (
         <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-background/50 p-3">
           <span className="text-sm font-bold">📅 Fechas de los pedidos:</span>
+          <button type="button" className={`nav-btn !py-1 ${useDeliveryDateRange ? 'active' : ''}`}
+            onClick={() => setUseDeliveryDateRange(true)}>📅 Por fecha</button>
           <button type="button" className={`nav-btn !py-1 ${!useDeliveryDateRange ? 'active' : ''}`}
             onClick={() => setUseDeliveryDateRange(false)}>Todas las fechas</button>
-          <button type="button" className={`nav-btn !py-1 ${useDeliveryDateRange ? 'active' : ''}`}
-            onClick={() => setUseDeliveryDateRange(true)}>Elegir fechas</button>
-          <span className="text-xs text-muted-foreground">Por defecto se muestran todos los pedidos no rendidos, incluso de días anteriores.</span>
+          <span className="text-xs text-muted-foreground">Por defecto se filtra por fecha. «Todas las fechas» muestra también los no rendidos de días anteriores (tarda más en cargar).</span>
         </div>
       )}
       <div className="flex flex-wrap gap-2 mb-3">
