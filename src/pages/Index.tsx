@@ -27,6 +27,7 @@ const RankingDeliveryView = lazy(() => import('@/components/RankingDeliveryView'
 const RendicionesPagadasView = lazy(() => import('@/components/RendicionesPagadasView'));
 const WithGuidesView = lazy(() => import('@/components/WithGuidesView'));
 const CounterView = lazy(() => import('@/components/CounterView'));
+const AttendanceView = lazy(() => import('@/components/AttendanceView'));
 const MapView = lazy(() => import('@/components/MapView'));
 const ShopifyInboxView = lazy(() => import('@/components/ShopifyInboxView'));
 const ShopifyConnectionView = lazy(() => import('@/components/ShopifyConnectionView'));
@@ -432,6 +433,9 @@ export default function Index() {
 
       case 'counter':
         return <CounterView />;
+
+      case 'attendance':
+        return <AttendanceView />;
 
       case 'mapa':
         return <MapView />;
