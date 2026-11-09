@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { compressImage, receiptExt, uploadReceipt } from '@/lib/receiptUpload';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { generateRouteLink } from '@/lib/tracking';
@@ -527,13 +528,9 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
 
   const upload = async (folder: string, id: string, file: File) => {
     if (!validFile(file)) throw new Error('Archivo inválido: JPG, PNG, WEBP o PDF hasta 8 MB');
-    const ext = file.type === 'application/pdf' ? 'pdf' : file.type.split('/')[1];
-    const path = `${folder}/${id}/${crypto.randomUUID()}.${ext}`;
-    const { error } = await supabase.storage.from('financial-receipts').upload(path, file, {
-      contentType: file.type,
-      upsert: false,
-    });
-    if (error) throw error;
+    const ready = await compressImage(file);
+    const path = `${folder}/${id}/${crypto.randomUUID()}.${receiptExt(ready)}`;
+    await uploadReceipt('financial-receipts', path, ready);
     return path;
   };
 
@@ -608,13 +605,9 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
     if (isGroup) {
       setBusy(true);
       try {
-        const ext = newReceipt.type === 'application/pdf' ? 'pdf' : newReceipt.type.split('/')[1];
-        const path = `closure-pending/${userId}/${crypto.randomUUID()}.${ext}`;
-        const { error: uploadError } = await supabase.storage.from('financial-receipts').upload(path, newReceipt, {
-          contentType: newReceipt.type,
-          upsert: false,
-        });
-        if (uploadError) throw uploadError;
+        const ready = await compressImage(newReceipt);
+        const path = `closure-pending/${userId}/${crypto.randomUUID()}.${receiptExt(ready)}`;
+        await uploadReceipt('financial-receipts', path, ready);
         const { error } = await (supabase as any).rpc('submit_delivery_closure_group', {
           p_destination_user_ids: groupDests.map(b => b.owner_user_id),
           p_order_ids: selected.map(o => o.id),
@@ -639,8 +632,8 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
 
     setBusy(true);
     try {
-      const ext = newReceipt.type === 'application/pdf' ? 'pdf' : newReceipt.type.split('/')[1];
-      const path = `closure-pending/${userId}/${crypto.randomUUID()}.${ext}`;
+      const ready = await compressImage(newReceipt);
+      const path = `closure-pending/${userId}/${crypto.randomUUID()}.${receiptExt(ready)}`;
       const { data: draft, error: draftError } = await supabase
         .from('delivery_closure_recovery' as any)
         .insert({
@@ -654,11 +647,9 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
         .single();
       if (draftError) throw draftError;
 
-      const { error: uploadError } = await supabase.storage.from('financial-receipts').upload(path, newReceipt, {
-        contentType: newReceipt.type,
-        upsert: false,
-      });
-      if (uploadError) {
+      try {
+        await uploadReceipt('financial-receipts', path, ready);
+      } catch (uploadError: any) {
         await supabase.from('delivery_closure_recovery' as any).update({ last_error: 'Falló carga: ' + uploadError.message }).eq('id', (draft as any).id);
         throw uploadError;
       }
