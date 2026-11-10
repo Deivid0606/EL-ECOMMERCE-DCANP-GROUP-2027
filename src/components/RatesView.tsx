@@ -89,10 +89,15 @@ export default function RatesView() {
   const [cpPrice, setCpPrice] = useState('');
   const [rateUsers, setRateUsers] = useState<any[]>([]);
   const [filtroDepartamento, setFiltroDepartamento] = useState('');
+  const [blocks, setBlocks] = useState<any[]>([]);
+  const [blockProvider, setBlockProvider] = useState('');
+  const [blockSearch, setBlockSearch] = useState('');
+  const [togglingCity, setTogglingCity] = useState('');
 
   const load = () => {
     supabase.from('delivery_fees').select('*').order('delivery_email').then(({ data }) => setFees(data || []));
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setPrices(data || []));
+    (supabase as any).from('provider_city_blocks').select('*').then(({ data }: any) => setBlocks(data || []));
     supabase.from('profiles').select('email, name, user_id').then(async ({ data }) => {
       const profiles = data || [];
 
@@ -316,6 +321,50 @@ export default function RatesView() {
     load();
   };
 
+  const toggleCityActive = async (p: any) => {
+    const next = p.active === false;
+    setTogglingCity(p.id);
+    const { error } = await (supabase as any).from('client_prices').update({ active: next }).eq('id', p.id);
+    setTogglingCity('');
+    if (error) return toast.error(error.message);
+    setPrices(prev => prev.map(x => (x.id === p.id ? { ...x, active: next } : x)));
+    toast.success(next ? `🟢 ${p.city}: con cobertura` : `🔴 ${p.city}: sin cobertura (no se pueden cargar pedidos nuevos)`);
+  };
+
+  const editPlatformCost = async (p: any) => {
+    const v = prompt(`Costo plataforma para el vendedor en ${p.city} (Gs):`, String(p.price_gs || 0));
+    if (v === null) return;
+    const n = Number(String(v).replace(/\D/g, ''));
+    if (!n) return toast.error('Monto no válido');
+    const { error } = await supabase.from('client_prices').update({ price_gs: n }).eq('id', p.id);
+    if (error) return toast.error(error.message);
+    setPrices(prev => prev.map(x => (x.id === p.id ? { ...x, price_gs: n } : x)));
+    toast.success(`${p.city}: ${nf(n)} Gs`);
+  };
+
+  // Proveedor: ciudades donde NO entrega.
+  const providerOptions = rateUsers.filter((u: any) => String(u.role).toUpperCase() === 'PROVEEDOR');
+  const blockOwner = (role === 'PROVEEDOR' ? myEmail : blockProvider).toLowerCase();
+  const cityKey = (c: string) => String(c || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const blockedKeys = new Set(blocks.filter(b => String(b.provider_email).toLowerCase() === blockOwner).map(b => b.city_key));
+  const toggleProviderCity = async (city: string) => {
+    if (!blockOwner) return toast.error('Elegí un proveedor');
+    const k = cityKey(city);
+    const db = (supabase as any).from('provider_city_blocks');
+    if (blockedKeys.has(k)) {
+      const { error } = await db.delete().eq('provider_email', blockOwner).eq('city_key', k);
+      if (error) return toast.error(error.message);
+      setBlocks(prev => prev.filter(b => !(String(b.provider_email).toLowerCase() === blockOwner && b.city_key === k)));
+      toast.success(`🟢 Entrega en ${city}`);
+    } else {
+      const row = { provider_email: blockOwner, city_key: k, city };
+      const { error } = await db.insert(row);
+      if (error) return toast.error(error.message);
+      setBlocks(prev => [...prev, row]);
+      toast.success(`🔴 No entrega en ${city}: no se podrán cargar pedidos de sus productos ahí`);
+    }
+  };
+
   const deleteClientPrice = async (id: string) => {
     if (!confirm('¿Eliminar este precio?')) return;
     const { error } = await supabase.from('client_prices').delete().eq('id', id);
@@ -474,7 +523,11 @@ export default function RatesView() {
 
       <hr className="border-border my-4" />
 
-      <h3 className="text-lg font-extrabold mb-3">Precio al cliente por ciudad</h3>
+      <h3 className="text-lg font-extrabold mb-1">📍 Cobertura y costo plataforma por ciudad</h3>
+      <p className="text-xs text-muted-foreground mb-3">
+        Con el interruptor apagado la ciudad deja de aparecer al cargar pedidos (formulario, Shopify, Mi Tienda y páginas) y no se pueden cargar
+        pedidos nuevos ahí. Los pedidos que ya existen siguen normal. El <b>costo plataforma</b> es lo que se le descuenta al vendedor.
+      </p>
 
       {/* Filtro por departamento */}
       <div className="mb-4 flex gap-2 items-center flex-wrap">
@@ -546,22 +599,48 @@ export default function RatesView() {
       <table className="app-table">
         <thead>
           <tr>
+            <th>Cobertura</th>
             <th>Ciudad</th>
             <th>Departamento</th>
-            <th className="text-right">Precio cliente (Gs)</th>
+            <th className="text-right">Costo plataforma (Gs)</th>
             {role === 'ADMIN' && <th>Acción</th>}
           </tr>
         </thead>
         <tbody>
           {pricesFiltrados.map(p => (
-            <tr key={p.id}>
+            <tr key={p.id} className={p.active === false ? 'opacity-50' : ''}>
+              <td>
+                {role === 'ADMIN' ? (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={p.active !== false}
+                    title={p.active === false ? 'Sin cobertura: tocá para activar' : 'Con cobertura: tocá para apagar'}
+                    disabled={togglingCity === p.id}
+                    onClick={() => void toggleCityActive(p)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${p.active === false ? 'bg-zinc-500' : 'bg-emerald-500'}`}
+                  >
+                    <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition ${p.active === false ? 'translate-x-0.5' : 'translate-x-[22px]'}`} />
+                  </button>
+                ) : (
+                  <span className="text-xs font-bold">{p.active === false ? '🔴 OFF' : '🟢 ON'}</span>
+                )}
+              </td>
               <td className="text-sm">{p.city}</td>
               <td className="text-sm">
                 <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-800">
                   {getDepartamento(p.city, p)}
                 </span>
               </td>
-              <td className="text-right text-sm font-bold">{nf(Number(p.price_gs || 0))}</td>
+              <td className="text-right text-sm font-bold">
+                {role === 'ADMIN' ? (
+                  <button type="button" className="underline decoration-dotted" title="Tocá para cambiar" onClick={() => void editPlatformCost(p)}>
+                    {nf(Number(p.price_gs || 0))}
+                  </button>
+                ) : (
+                  nf(Number(p.price_gs || 0))
+                )}
+              </td>
               {role === 'ADMIN' && (
                 <td>
                   <button 
@@ -576,13 +655,61 @@ export default function RatesView() {
           ))}
           {pricesFiltrados.length === 0 && (
             <tr>
-              <td colSpan={role === 'ADMIN' ? 4 : 3} className="text-center text-muted-foreground py-4">
+              <td colSpan={role === 'ADMIN' ? 5 : 4} className="text-center text-muted-foreground py-4">
                 Sin precios
               </td>
             </tr>
           )}
         </tbody>
       </table>
+
+      {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+        <>
+          <hr className="border-border my-4" />
+          <h3 className="text-lg font-extrabold mb-1">🚚 Ciudades donde entrega {role === 'PROVEEDOR' ? 'mi depósito' : 'cada proveedor'}</h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            Apagá las ciudades donde {role === 'PROVEEDOR' ? 'no querés' : 'el proveedor no quiere'} entregar: no se podrán cargar pedidos nuevos con
+            {role === 'PROVEEDOR' ? ' tus' : ' sus'} productos para esa ciudad.
+          </p>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {role === 'ADMIN' && (
+              <select className="app-input !w-auto" value={blockProvider} onChange={e => setBlockProvider(e.target.value)}>
+                <option value="">Elegí un proveedor…</option>
+                {providerOptions.map((u: any) => (
+                  <option key={u.email} value={String(u.email).toLowerCase()}>{u.name || u.email}</option>
+                ))}
+              </select>
+            )}
+            <input className="app-input !w-auto" placeholder="🔎 Buscar ciudad" value={blockSearch} onChange={e => setBlockSearch(e.target.value)} />
+            {blockOwner && <span className="chip text-[11px]">🔴 {blockedKeys.size} ciudad(es) apagada(s)</span>}
+          </div>
+          {blockOwner ? (
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+              {prices
+                .filter(p => p.active !== false)
+                .filter(p => !blockSearch.trim() || cityKey(p.city).includes(cityKey(blockSearch)))
+                .map(p => {
+                  const on = !blockedKeys.has(cityKey(p.city));
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => void toggleProviderCity(p.city)}
+                      className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left text-sm ${on ? 'border-emerald-500/40' : 'border-red-500/40 bg-red-500/10'}`}
+                    >
+                      <span className="min-w-0 truncate">{p.city} <span className="text-[10px] text-muted-foreground">· {getDepartamento(p.city, p)}</span></span>
+                      <span className={`relative ml-2 inline-flex h-5 w-9 shrink-0 items-center rounded-full ${on ? 'bg-emerald-500' : 'bg-zinc-500'}`}>
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${on ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">Elegí un proveedor para ver sus ciudades.</p>
+          )}
+        </>
+      )}
     </div>
   );
 }

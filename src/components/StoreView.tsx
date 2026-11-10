@@ -88,7 +88,7 @@ export default function StoreView({
       setReferenceReady(false);
       setCoverageReady(false);
       const [pricesResult, productsResult, favoritesResult, mappingsResult] = await Promise.all([
-        supabase.from("client_prices").select("city,departamento"),
+        supabase.from("client_prices").select("*"),
         supabase
           .from("products")
           .select("id,title,sku,provider_email,is_private,is_private_stock,private_to_emails"),
@@ -113,7 +113,7 @@ export default function StoreView({
 
       if (pricesResult.error) console.warn("No se pudo consultar cobertura de Mi Tienda", pricesResult.error);
       const visibleCities = (pricesResult.data || [])
-        .filter((p) => Boolean(p.city?.trim()) && Boolean(p.departamento?.trim()))
+        .filter((p: any) => p.active !== false && Boolean(p.city?.trim()) && Boolean(p.departamento?.trim()))
         .map((p) => ({ city: p.city, departamento: p.departamento }));
       if (favoritesResult.error) console.warn('No se pudieron cargar Favoritos en Mi Tienda', favoritesResult.error);
       if (mappingsResult.error) console.warn('No se pudieron cargar los SKU asociados', mappingsResult.error);

@@ -534,12 +534,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   useEffect(() => {
     supabase
       .from("client_prices")
-      .select("city, price_gs, departamento")
+      .select("*")
       .then(({ data, error }) => {
         if (error || !data?.length) return;
         setCityPrices(
           (data as any[])
-            .filter((r) => r.city && Number(r.price_gs) > 0)
+            .filter((r) => r.city && Number(r.price_gs) > 0 && r.active !== false)
             .map((r) => ({ city: String(r.city).trim(), price: Number(r.price_gs), departamento: String(r.departamento || "").trim() })),
         );
       });
