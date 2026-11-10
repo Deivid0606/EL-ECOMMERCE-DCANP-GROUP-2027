@@ -2860,6 +2860,33 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     }
   };
 
+  // ↩️ ADMIN / PROVEEDOR: quitar RENDIDO a pedidos marcados por error.
+  // No toca pedidos que ya están en un comprobante de cierre del delivery o en una rendición pagada.
+  const selectedSettledOrders = useMemo(
+    () => selectedOrders.filter(o => o.delivery_settled || String(o.status2 || '').toUpperCase() === 'RENDIDO'),
+    [selectedOrders],
+  );
+  const unmarkRendido = async (ids: string[]) => {
+    if (!(isAdmin || isSupplier) || !ids.length) return;
+    if (!confirm(`¿Quitar RENDIDO a ${ids.length} pedido(s)?\n\nVuelven a quedar SIN RENDIR.`)) return;
+    setBulkBusy(true);
+    try {
+      const { data, error } = await (supabase as any).rpc('unmark_rendido', { p_order_ids: ids });
+      if (error) throw error;
+      const updated = Number(data?.updated || 0);
+      const skipped = Number(data?.skipped || 0);
+      if (updated) toast.success(`↩️ ${updated} pedido(s) volvieron a SIN RENDIR`);
+      if (skipped)
+        toast.warning(`${skipped} pedido(s) no se cambiaron: ya están en un comprobante de cierre, en una rendición pagada o no son tuyos.`, { duration: 9000 });
+      setSelectedGuideIds(new Set());
+      await loadClosures();
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo quitar RENDIDO');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   // ADMIN / PROVEEDOR: cambiar la fecha de asignación SOLO de los pedidos seleccionados.
   const changeSelectedAssignedDate = async () => {
     if (!canManageRendicion) return;
@@ -4385,6 +4412,18 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                   ✅ Marcar como RENDIDO ({selectedRendibleOrders.length})
                 </button>
 
+                {(isAdmin || isSupplier) && selectedSettledOrders.length > 0 && (
+                  <button
+                    type="button"
+                    className="nav-btn"
+                    onClick={() => void unmarkRendido(selectedSettledOrders.map(o => o.id))}
+                    disabled={bulkBusy}
+                    title="Vuelve a SIN RENDIR los pedidos seleccionados que se marcaron como rendidos por error"
+                  >
+                    ↩️ Quitar RENDIDO ({selectedSettledOrders.length})
+                  </button>
+                )}
+
                 <input
                   type="date"
                   className="app-input !w-auto !py-2 text-xs"
@@ -4602,6 +4641,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                     <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => orderTools.openEditor(o)}>✏️ Productos</button>}
                   {canManageRendicion && !isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
                     <button type="button" className="nav-btn active !px-2 !py-1 !text-[11px]" onClick={() => markSingleRendido(o.id)}>✅ RENDIDO</button>
+                  )}
+                  {(isAdmin || isSupplier) && isSettled && (
+                    <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => void unmarkRendido([o.id])}>↩️ Quitar rendido</button>
                   )}
                 </div>
               </article>
@@ -4968,6 +5010,16 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                         )}
                         {isSettled && (
                           <span className="text-xs font-bold" style={{ color: '#4ade80' }}>RENDIDO</span>
+                        )}
+                        {isSettled && (isAdmin || isSupplier) && (
+                          <button
+                            type="button"
+                            title="Quitar RENDIDO (marcado por error)"
+                            onClick={() => void unmarkRendido([o.id])}
+                            className="nav-btn !py-1 !px-2 text-[11px]"
+                          >
+                            ↩️
+                          </button>
                         )}
                       </div>
                     </td>
