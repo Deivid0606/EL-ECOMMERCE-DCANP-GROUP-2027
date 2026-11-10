@@ -411,6 +411,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const autoRunning = useRef(false);
   const autoFailed = useRef<Set<string>>(new Set());
   const loadingRows = useRef<Set<string>>(new Set());
+  const failReason = useRef('');
 
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
@@ -854,15 +855,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const loadOrder = useCallback(async (order: SheetOrder, rowKey: string, source: "auto" | "manual" = "auto", quiet = false) => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
-    if (!matched) { if (!quiet) toast.error(`❌ Producto no detectado: "${productName}". Asignale tu SKU en 🔗 Productos ↔ SKU.`); return false; }
+    failReason.current = '';
+    if (!matched) { failReason.current = 'producto sin vincular (🔗 Productos ↔ SKU)'; if (!quiet) toast.error(`❌ Producto no detectado: "${productName}". Asignale tu SKU en 🔗 Productos ↔ SKU.`); return false; }
 
     const rawCity = order[colKeys.city] || "";
     const cityMatch = matchCity(rawCity);
     const deliveryPrice = cityMatch ? Number(cityMatch.price) || 0 : 0;
-    if (!cityMatch || !deliveryPrice) { if (!quiet) toast.warning(`⚠️ Ciudad "${rawCity}" sin cobertura`); return false; }
+    if (!cityMatch || !deliveryPrice) { failReason.current = 'ciudad sin cobertura'; if (!quiet) toast.warning(`⚠️ Ciudad "${rawCity}" sin cobertura`); return false; }
     // Se guarda el nombre oficial de la ciudad: así la tarifa del delivery y la comisión salen bien.
     const city = cityMatch.city.trim();
     if (/pago\s*anticipado/i.test(city)) {
+      failReason.current = 'interior pago anticipado (cargalo con 📮 Formulario y el comprobante)';
       if (!quiet) toast.info("📮 Interior pago anticipado: tocá «📮 Formulario» y subí el comprobante de pago.");
       return false;
     }
@@ -871,7 +874,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (!departamento && !quiet) toast.warning(`⚠️ No se pudo determinar el departamento para "${rawCity}"`);
 
     const salePrice = getAmountFromRow(order, colKeys.amount);
-    if (salePrice === 0) { if (!quiet) toast.warning(`⚠️ No se detectó monto en fila ${rowKey}`); return false; }
+    if (salePrice === 0) { failReason.current = 'sin monto'; if (!quiet) toast.warning(`⚠️ No se detectó monto en fila ${rowKey}`); return false; }
 
     // Evita cargar dos veces la misma fila (otra pestaña, otro equipo o auto-carga en curso).
     if (loadingRows.current.has(rowKey)) return false;
@@ -890,6 +893,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         updated_at: new Date().toISOString(),
       });
       if (claimError) {
+        failReason.current = 'ya estaba cargado';
         if (!quiet) toast.info(`La fila ${rowKey} ya estaba cargada.`);
         await loadStatusesFromDatabase();
         return false;
@@ -927,6 +931,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       // Se libera la fila para poder reintentar.
       await (supabase as any).from("sheet_row_statuses").delete()
         .eq("user_email", myEmail).eq("sheet_url", sheetUrl).eq("row_index", Number(rowKey)).eq("order_number", orderId);
+      const msg = String(error.message || '');
+      failReason.current = /sin stock/i.test(msg) ? msg.replace(/^.*?(sin stock)/i, 'sin stock') : msg;
       if (!quiet) toast.error("Error al guardar: " + error.message);
       return false;
     }
@@ -999,6 +1005,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const handleBulkLoad = async () => {
     let count = 0, errors = 0;
+    const reasons = new Map<string, number>();
+    const fail = (r: string) => { errors++; reasons.set(r, (reasons.get(r) || 0) + 1); };
     for (let i = 0; i < sheetOrders.length; i++) {
       const order = sheetOrders[i];
       const rowKey = getRowKey(order, i);
@@ -1006,12 +1014,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (status !== "CARGAR") continue;
       const city = order[colKeys.city] || "";
       if (!hasCoverageForCity(city)) continue;
-      if (!matchProductSafe(order[colKeys.product] || "")) { errors++; continue; }
+      if (!matchProductSafe(order[colKeys.product] || "")) { fail('producto sin vincular (🔗 Productos ↔ SKU)'); continue; }
       const success = await loadOrder(order, rowKey, "auto", true);
-      if (success) count++; else errors++;
+      if (success) count++; else fail(failReason.current || 'error desconocido');
       if (count % 3 === 0) await new Promise(r => setTimeout(r, 100));
     }
-    toast.success(`✅ ${count} cargados | ⚠️ ${errors} sin cargar (revisá 🔗 Productos ↔ SKU)`);
+    const detail = Array.from(reasons.entries()).map(([r, n]) => `• ${n} ${r}`).join('\n');
+    if (errors) toast.warning(`✅ ${count} cargados | ⚠️ ${errors} sin cargar:\n${detail}`, { duration: 15000, style: { whiteSpace: 'pre-line' } });
+    else toast.success(`✅ ${count} cargados`);
   };
 
   const toggleRowSelection = (rowKey: string) => {
