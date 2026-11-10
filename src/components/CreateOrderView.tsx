@@ -413,7 +413,7 @@ const CreateOrderView = ({
         if (pricesError) throw pricesError;
 
         // Si la tabla no tiene columna departamento, usar el mapa
-        const pricesConDepto = (pricesData || []).map((p) => ({
+        const pricesConDepto = (pricesData || []).filter((p: any) => p.active !== false).map((p) => ({
           ...p,
           departamento:
             p.departamento || ciudadDepartamentoMap[p.city] || "Sin asignar",

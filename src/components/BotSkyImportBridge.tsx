@@ -402,7 +402,7 @@ export default function BotSkyImportBridge() {
               );
 
             const cityNameMatches = (
-              cities || []
+              (cities || []).filter((c: any) => c.active !== false)
             ).filter(
               (entry) =>
                 normalizeLocation(entry.city) ===
