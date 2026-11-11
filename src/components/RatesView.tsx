@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import CoverageZonesPanel from '@/components/CoverageZonesPanel';
+import DeliveryFeesList from '@/components/DeliveryFeesList';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -79,6 +80,8 @@ export default function RatesView() {
   const [drRate, setDrRate] = useState('');
   const [rateUsers, setRateUsers] = useState<any[]>([]);
   const [blocks, setBlocks] = useState<any[]>([]);
+  const [focusDelivery, setFocusDelivery] = useState<{ email: string; n: number } | null>(null);
+  const [zonesReload, setZonesReload] = useState(0);
   const [blockProvider, setBlockProvider] = useState('');
   const [blockSearch, setBlockSearch] = useState('');
 
@@ -390,60 +393,23 @@ export default function RatesView() {
       )}
 
       <div className="border-t border-border pt-5 mb-3">
-        <h4 className="font-extrabold text-base">📋 Tarifas registradas</h4>
-        <p className="text-xs text-muted-foreground">Listado de tarifas ya guardadas, separado del formulario de configuración.</p>
+        <DeliveryFeesList
+          fees={visibleFees}
+          users={rateUsers}
+          prices={prices}
+          canManage={canManage}
+          onEdit={(email) => setFocusDelivery({ email, n: Date.now() })}
+          onDelete={(id) => void deleteRate(id).then(() => setZonesReload((n) => n + 1))}
+          onChanged={() => {
+            load();
+            setZonesReload((n) => n + 1);
+          }}
+        />
       </div>
-
-      <table className="app-table">
-        <thead>
-          <tr>
-            <th>Titular</th>
-            <th>Ciudad</th>
-            <th className="text-right">Tarifa (Gs)</th>
-            {canManage && <th>Acción</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {visibleFees.map(f => (
-            <tr key={f.id}>
-              <td className="text-sm">
-                <div className="font-bold">{f.delivery_email}</div>
-                {(() => {
-                  const user = rateUsers.find(
-                    item =>
-                      String(item.email || '').toLowerCase() ===
-                      String(f.delivery_email || '').toLowerCase(),
-                  );
-
-                  return user ? (
-                    <span className="text-[10px] text-muted-foreground">
-                      {user.role === 'PROVEEDOR' ? '🏢 PROVEEDOR' : '🚚 DELIVERY'}
-                    </span>
-                  ) : null;
-                })()}
-              </td>
-              <td className="text-sm">{f.city}</td>
-              <td className="text-right text-sm font-bold">{nf(Number(f.fee_gs || 0))}</td>
-              {canManage && (
-                <td>
-                  <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => deleteRate(f.id)}>Eliminar</button>
-                </td>
-              )}
-            </tr>
-          ))}
-          {visibleFees.length === 0 && (
-            <tr>
-              <td colSpan={canManage ? 4 : 3} className="text-center text-muted-foreground py-4">
-                Sin tarifas
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
 
       <hr className="border-border my-4" />
 
-      <CoverageZonesPanel isAdmin={role === 'ADMIN'} deliveries={rateUsers} onSaved={load} />
+      <CoverageZonesPanel isAdmin={role === 'ADMIN'} deliveries={rateUsers} onSaved={load} focusDelivery={focusDelivery} reloadKey={zonesReload} />
       {(role === 'ADMIN' || role === 'PROVEEDOR') && (
         <>
           <hr className="border-border my-4" />

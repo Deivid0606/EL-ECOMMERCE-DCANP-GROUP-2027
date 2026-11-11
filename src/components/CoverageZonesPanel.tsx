@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { PARAGUAY_LOCATIONS } from '@/lib/paraguayLocations';
@@ -31,7 +31,7 @@ const ALIASES: Record<string, string> = {
   mauriciojosetroche: 'capitanmauriciojosetroche',
   generalbernardinocaballero: 'caballero',
 };
-const canonKey = (city: string) => {
+export const canonKey = (city: string) => {
   const k = zoneKey(city);
   return ALIASES[k] || k;
 };
@@ -47,11 +47,17 @@ export default function CoverageZonesPanel({
   isAdmin,
   deliveries,
   onSaved,
+  focusDelivery,
+  reloadKey = 0,
 }: {
   isAdmin: boolean;
   deliveries: { email: string; name?: string; role?: string }[];
   onSaved?: () => void;
+  /** «✏️ Editar» de la lista: elige ese delivery y lleva la vista hasta acá. */
+  focusDelivery?: { email: string; n: number } | null;
+  reloadKey?: number;
 }) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const [prices, setPrices] = useState<PriceRow[]>([]);
   const [fees, setFees] = useState<FeeRow[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -75,7 +81,13 @@ export default function CoverageZonesPanel({
   };
   useEffect(() => {
     void load();
-  }, []);
+  }, [reloadKey]);
+  useEffect(() => {
+    if (!focusDelivery?.email) return;
+    setDelivery(focusDelivery.email.toLowerCase());
+    setShow('on');
+    rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [focusDelivery]);
 
   // Lista oficial + ciudades guardadas que no están en ella (ej. INTERIOR PAGO ANTICIPADO).
   const zones = useMemo(() => {
@@ -209,7 +221,7 @@ export default function CoverageZonesPanel({
   const deliveryName = deliveries.find((d) => d.email.toLowerCase() === delivery.toLowerCase())?.name;
 
   return (
-    <div>
+    <div ref={rootRef} className="scroll-mt-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="text-lg font-extrabold">📍 Zonas de cobertura</h3>
