@@ -2,16 +2,9 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import CoverageZonesPanel from '@/components/CoverageZonesPanel';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
-
-// Definir departamentos de Paraguay
-const DEPARTAMENTOS = [
-  "Capital", "Central", "Alto Paraná", "Itapúa", "Cordillera",
-  "Caaguazú", "Guairá", "Ñeembucú", "Concepción", "Amambay",
-  "Canindeyú", "Caazapá", "Misiones", "Paraguarí", "Presidente Hayes",
-  "Boquerón", "Alto Paraguay"
-];
 
 // Mapeo de ciudades a departamentos
 const ciudadDepartamentoMap: { [key: string]: string } = {
@@ -84,15 +77,10 @@ export default function RatesView() {
   const [showCityPicker, setShowCityPicker] = useState(true);
   const [savingRate, setSavingRate] = useState(false);
   const [drRate, setDrRate] = useState('');
-  const [cpCity, setCpCity] = useState('');
-  const [cpDepartamento, setCpDepartamento] = useState('');
-  const [cpPrice, setCpPrice] = useState('');
   const [rateUsers, setRateUsers] = useState<any[]>([]);
-  const [filtroDepartamento, setFiltroDepartamento] = useState('');
   const [blocks, setBlocks] = useState<any[]>([]);
   const [blockProvider, setBlockProvider] = useState('');
   const [blockSearch, setBlockSearch] = useState('');
-  const [togglingCity, setTogglingCity] = useState('');
 
   const load = () => {
     supabase.from('delivery_fees').select('*').order('delivery_email').then(({ data }) => setFees(data || []));
@@ -285,63 +273,6 @@ export default function RatesView() {
     }
   };
 
-  const saveClientPrice = async () => {
-    if (!cpCity || !cpPrice) { toast.error('Completá todos los campos'); return; }
-    
-    let departamento = cpDepartamento;
-    
-    // Si no escribió nada, intentar obtener del mapa automático
-    if (!departamento) {
-      departamento = ciudadDepartamentoMap[cpCity];
-    }
-    
-    if (!departamento) {
-      toast.error('Por favor escribí un departamento para esta ciudad');
-      return;
-    }
-    
-    const existing = prices.find(p => p.city?.toLowerCase() === cpCity.toLowerCase());
-    
-    if (existing) {
-      await supabase.from('client_prices').update({ 
-        price_gs: Number(cpPrice),
-        departamento: departamento 
-      }).eq('id', existing.id);
-    } else {
-      await supabase.from('client_prices').insert({ 
-        city: cpCity, 
-        price_gs: Number(cpPrice),
-        departamento: departamento 
-      });
-    }
-    toast.success('Precio guardado');
-    setCpCity('');
-    setCpDepartamento('');
-    setCpPrice('');
-    load();
-  };
-
-  const toggleCityActive = async (p: any) => {
-    const next = p.active === false;
-    setTogglingCity(p.id);
-    const { error } = await (supabase as any).from('client_prices').update({ active: next }).eq('id', p.id);
-    setTogglingCity('');
-    if (error) return toast.error(error.message);
-    setPrices(prev => prev.map(x => (x.id === p.id ? { ...x, active: next } : x)));
-    toast.success(next ? `🟢 ${p.city}: con cobertura` : `🔴 ${p.city}: sin cobertura (no se pueden cargar pedidos nuevos)`);
-  };
-
-  const editPlatformCost = async (p: any) => {
-    const v = prompt(`Costo plataforma para el vendedor en ${p.city} (Gs):`, String(p.price_gs || 0));
-    if (v === null) return;
-    const n = Number(String(v).replace(/\D/g, ''));
-    if (!n) return toast.error('Monto no válido');
-    const { error } = await supabase.from('client_prices').update({ price_gs: n }).eq('id', p.id);
-    if (error) return toast.error(error.message);
-    setPrices(prev => prev.map(x => (x.id === p.id ? { ...x, price_gs: n } : x)));
-    toast.success(`${p.city}: ${nf(n)} Gs`);
-  };
-
   // Proveedor: ciudades donde NO entrega.
   const providerOptions = rateUsers.filter((u: any) => String(u.role).toUpperCase() === 'PROVEEDOR');
   const blockOwner = (role === 'PROVEEDOR' ? myEmail : blockProvider).toLowerCase();
@@ -365,21 +296,10 @@ export default function RatesView() {
     }
   };
 
-  const deleteClientPrice = async (id: string) => {
-    if (!confirm('¿Eliminar este precio?')) return;
-    const { error } = await supabase.from('client_prices').delete().eq('id', id);
-    if (error) toast.error(error.message);
-    else { toast.success('Precio eliminado'); load(); }
-  };
-
   const getDepartamento = (ciudad: string, precioItem: any) => {
     if (precioItem.departamento) return precioItem.departamento;
     return ciudadDepartamentoMap[ciudad] || 'Sin asignar';
   };
-
-  const pricesFiltrados = filtroDepartamento
-    ? prices.filter(p => getDepartamento(p.city, p) === filtroDepartamento)
-    : prices;
 
   return (
     <div className="app-card">
@@ -523,146 +443,7 @@ export default function RatesView() {
 
       <hr className="border-border my-4" />
 
-      <h3 className="text-lg font-extrabold mb-1">📍 Cobertura y costo plataforma por ciudad</h3>
-      <p className="text-xs text-muted-foreground mb-3">
-        Con el interruptor apagado la ciudad deja de aparecer al cargar pedidos (formulario, Shopify, Mi Tienda y páginas) y no se pueden cargar
-        pedidos nuevos ahí. Los pedidos que ya existen siguen normal. El <b>costo plataforma</b> es lo que se le descuenta al vendedor.
-      </p>
-
-      {/* Filtro por departamento */}
-      <div className="mb-4 flex gap-2 items-center flex-wrap">
-        <label className="app-label mb-0">Filtrar por departamento:</label>
-        <select 
-          className="app-input !w-auto" 
-          value={filtroDepartamento} 
-          onChange={(e) => setFiltroDepartamento(e.target.value)}
-        >
-          <option value="">Todos los departamentos</option>
-          {DEPARTAMENTOS.map(depto => (
-            <option key={depto} value={depto}>{depto}</option>
-          ))}
-        </select>
-        {filtroDepartamento && (
-          <button 
-            className="nav-btn !px-2 !py-1" 
-            onClick={() => setFiltroDepartamento('')}
-          >
-            Limpiar filtro
-          </button>
-        )}
-      </div>
-
-      {role === 'ADMIN' && (
-        <div className="mb-4">
-          <div className="flex flex-wrap gap-2 mb-2 items-end">
-            <div>
-              <label className="app-label">Ciudad</label>
-              <input 
-                className="app-input" 
-                placeholder="Ej: Nueva Ciudad" 
-                value={cpCity} 
-                onChange={e => setCpCity(e.target.value)} 
-              />
-            </div>
-            
-            <div>
-              <label className="app-label">Departamento</label>
-              <input 
-                className="app-input" 
-                placeholder="Ej: Central, Capital, o cualquier nombre" 
-                value={cpDepartamento} 
-                onChange={e => setCpDepartamento(e.target.value)} 
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                💡 Puedes escribir cualquier departamento (aunque no esté en la lista)
-              </p>
-            </div>
-            
-            <div>
-              <label className="app-label">Precio (Gs)</label>
-              <input 
-                className="app-input" 
-                type="number" 
-                placeholder="Ej: 25000" 
-                value={cpPrice} 
-                onChange={e => setCpPrice(e.target.value)} 
-              />
-            </div>
-            
-            <button className="nav-btn active" onClick={saveClientPrice}>Guardar</button>
-          </div>
-          
-          <span className="chip text-[10px]">Impacta en el formulario de pedido</span>
-        </div>
-      )}
-
-      <table className="app-table">
-        <thead>
-          <tr>
-            <th>Cobertura</th>
-            <th>Ciudad</th>
-            <th>Departamento</th>
-            <th className="text-right">Costo plataforma (Gs)</th>
-            {role === 'ADMIN' && <th>Acción</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {pricesFiltrados.map(p => (
-            <tr key={p.id} className={p.active === false ? 'opacity-50' : ''}>
-              <td>
-                {role === 'ADMIN' ? (
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={p.active !== false}
-                    title={p.active === false ? 'Sin cobertura: tocá para activar' : 'Con cobertura: tocá para apagar'}
-                    disabled={togglingCity === p.id}
-                    onClick={() => void toggleCityActive(p)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${p.active === false ? 'bg-zinc-500' : 'bg-emerald-500'}`}
-                  >
-                    <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition ${p.active === false ? 'translate-x-0.5' : 'translate-x-[22px]'}`} />
-                  </button>
-                ) : (
-                  <span className="text-xs font-bold">{p.active === false ? '🔴 OFF' : '🟢 ON'}</span>
-                )}
-              </td>
-              <td className="text-sm">{p.city}</td>
-              <td className="text-sm">
-                <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-800">
-                  {getDepartamento(p.city, p)}
-                </span>
-              </td>
-              <td className="text-right text-sm font-bold">
-                {role === 'ADMIN' ? (
-                  <button type="button" className="underline decoration-dotted" title="Tocá para cambiar" onClick={() => void editPlatformCost(p)}>
-                    {nf(Number(p.price_gs || 0))}
-                  </button>
-                ) : (
-                  nf(Number(p.price_gs || 0))
-                )}
-              </td>
-              {role === 'ADMIN' && (
-                <td>
-                  <button 
-                    className="nav-btn !px-2 !py-1 !text-[10px]" 
-                    onClick={() => deleteClientPrice(p.id)}
-                  >
-                    Eliminar
-                  </button>
-                </td>
-              )}
-            </tr>
-          ))}
-          {pricesFiltrados.length === 0 && (
-            <tr>
-              <td colSpan={role === 'ADMIN' ? 5 : 4} className="text-center text-muted-foreground py-4">
-                Sin precios
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-
+      <CoverageZonesPanel isAdmin={role === 'ADMIN'} deliveries={rateUsers} onSaved={load} />
       {(role === 'ADMIN' || role === 'PROVEEDOR') && (
         <>
           <hr className="border-border my-4" />
