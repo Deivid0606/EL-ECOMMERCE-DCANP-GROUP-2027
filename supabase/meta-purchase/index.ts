@@ -58,6 +58,20 @@ const normalizePhone = (value: string) => {
 const safeString = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
 
+// Normalización según Meta: minúsculas, sin acentos ni signos de puntuación.
+const normalizeText = (value: unknown) =>
+  safeString(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+// Ciudad / departamento: además sin espacios.
+const normalizeLocation = (value: unknown) =>
+  normalizeText(value).replace(/\s/g, "");
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -223,8 +237,28 @@ Deno.serve(async (req) => {
   const userData: Record<string, unknown> = {};
 
   if (normalizedPhone) {
-    userData.ph = [await sha256(normalizedPhone)];
+    const hashedPhone = await sha256(normalizedPhone);
+    userData.ph = [hashedPhone];
+    // El teléfono identifica al cliente entre pedidos.
+    userData.external_id = [hashedPhone];
   }
+
+  // Más datos del cliente = mejor coincidencia de eventos en Meta.
+  const nameParts = normalizeText(order.customer_name).split(" ").filter(Boolean);
+  if (nameParts.length > 0) {
+    userData.fn = [await sha256(nameParts[0])];
+  }
+  if (nameParts.length > 1) {
+    userData.ln = [await sha256(nameParts[nameParts.length - 1])];
+  }
+
+  const city = normalizeLocation(order.city);
+  if (city) userData.ct = [await sha256(city)];
+
+  const department = normalizeLocation(order.department);
+  if (department) userData.st = [await sha256(department)];
+
+  userData.country = [await sha256("py")];
 
   const fbp = safeString(body.fbp);
   const fbc = safeString(body.fbc);
