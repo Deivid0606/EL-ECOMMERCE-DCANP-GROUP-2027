@@ -43,7 +43,7 @@ const navItems: NavItem[] = [
   {
     id: 'dashboard',
     label: 'Dashboard',
-    excludeRoles: ['DESPACHANTE', 'DELIVERY'],
+    excludeRoles: ['DESPACHANTE'],
   },
   { id: 'news', label: 'Novedades', excludeRoles: ['DELIVERY'] },
   { id: 'chat', label: 'Chat' },

@@ -162,11 +162,13 @@ export default function UsersView() {
             <div className="mb-2 flex items-center justify-between gap-2">
               <div>
                 <div className="text-lg font-black">🚚 {providersFor.name || providersFor.email}</div>
-                <div className="text-xs text-muted-foreground">{providersFor.email} · Marcá los proveedores que puede despachar. Se guarda al tocar.</div>
+                <div className="text-xs text-muted-foreground">
+                  {providersFor.email} · Marcá los proveedores que puede {providersFor.role === 'DELIVERY' ? 'ver en Asignar Pedidos' : 'despachar'}. Se guarda al tocar.
+                </div>
               </div>
               <button className="nav-btn !px-2 !py-1 text-xs" onClick={() => setProvidersFor(null)}>✕</button>
             </div>
-            <DispatcherProvidersPanel dispatcherEmail={providersFor.email} />
+            <DispatcherProvidersPanel dispatcherEmail={providersFor.email} kind={providersFor.role === 'DELIVERY' ? 'delivery' : 'dispatcher'} />
           </div>
         </div>
       )}
@@ -237,8 +239,12 @@ export default function UsersView() {
                         ❌ Rechazar
                       </button>
                     )}
-                    {u.role === 'DESPACHANTE' && u.approved && (
-                      <button className="nav-btn text-xs !py-1 !px-2 whitespace-nowrap" onClick={() => setProvidersFor(u)} title="Qué proveedores puede despachar">
+                    {(u.role === 'DESPACHANTE' || u.role === 'DELIVERY') && u.approved && (
+                      <button
+                        className="nav-btn text-xs !py-1 !px-2 whitespace-nowrap"
+                        onClick={() => setProvidersFor(u)}
+                        title={u.role === 'DELIVERY' ? 'Qué proveedores puede ver en Asignar Pedidos' : 'Qué proveedores puede despachar'}
+                      >
                         🚚 Proveedores
                       </button>
                     )}

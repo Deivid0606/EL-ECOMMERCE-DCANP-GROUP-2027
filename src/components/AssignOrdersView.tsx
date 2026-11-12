@@ -25,6 +25,11 @@ export default function AssignOrdersView() {
   const [idsInput, setIdsInput] = useState('');
   const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
   const [autoAssignProcessing, setAutoAssignProcessing] = useState(false);
+  // Delivery: proveedores que el admin le habilitó (vacío = ve todos, como antes).
+  const [allowedProviders, setAllowedProviders] = useState<string[]>([]);
+  const [cityFilter, setCityFilter] = useState('');
+  const [productFilter, setProductFilter] = useState('');
+  const [summaryOpen, setSummaryOpen] = useState(true);
 
   // ─── NUEVO: estado intermedio para QR ────────────────────────────────────
   const [pendingQrId, setPendingQrId] = useState<string | null>(null);
@@ -221,6 +226,14 @@ export default function AssignOrdersView() {
   }, [pendingQrId, role, profile?.email, profile?.name]);
 
   useEffect(() => {
+    if (role !== 'DELIVERY' || !profile?.email) return;
+    (supabase as any)
+      .from('delivery_providers')
+      .select('provider_email')
+      .then(({ data }: any) => setAllowedProviders((data || []).map((r: any) => String(r.provider_email || '').toLowerCase())));
+  }, [role, profile?.email]);
+
+  useEffect(() => {
     if (role === 'ADMIN' || role === 'PROVEEDOR') {
       supabase.from('profiles').select('email, name').eq('approved', true).then(({ data }) => setDeliveries(data || []));
     }
@@ -299,9 +312,11 @@ export default function AssignOrdersView() {
     return !q || email.includes(q) || (providerNames[email] || '').toLowerCase().includes(q);
   });
 
-  const filtered = orders.filter(o => {
+  const baseFiltered = orders.filter(o => {
     if (isAdmin && !orderInScope(o)) return false;
     const emails = orderProviderEmails(o);
+    // Delivery con proveedores habilitados: sólo ve pedidos libres de esos proveedores (los suyos siempre).
+    if (role === 'DELIVERY' && allowedProviders.length && !o.assigned_delivery && !emails.some(e => allowedProviders.includes(e))) return false;
     if (selectedProviders.size && !emails.some(email => selectedProviders.has(email))) return false;
     if (!search) return true;
     const q = search.toLowerCase();
@@ -309,6 +324,42 @@ export default function AssignOrdersView() {
       (o.order_number || '').toLowerCase().includes(q) ||
       (o.city || '').toLowerCase().includes(q) ||
       (o.id || '').toLowerCase().includes(q);
+  });
+
+  // 📦 Pedidos libres para tomar, por ciudad y producto.
+  const isAvailable = (o: any) => !o.assigned_delivery && ['', 'PENDIENTE', 'REAGENDADO'].includes(String(o.status || '').toUpperCase());
+  const itemsOf = (o: any): { name: string; qty: number }[] => {
+    try {
+      const raw = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : o.items_json;
+      return (Array.isArray(raw) ? raw : []).map((it: any) => ({
+        name: String(it?.title || it?.name || it?.sku || 'Producto').trim(),
+        qty: Number(it?.qty || it?.quantity || 1) || 1,
+      }));
+    } catch {
+      return [];
+    }
+  };
+  const cityLabel = (o: any) => String(o.city || 'Sin ciudad').trim() || 'Sin ciudad';
+  const availableSummary = useMemo(() => {
+    const byCity = new Map<string, { orders: number; products: Map<string, number> }>();
+    for (const o of baseFiltered) {
+      if (!isAvailable(o)) continue;
+      const c = cityLabel(o);
+      const entry = byCity.get(c) || { orders: 0, products: new Map<string, number>() };
+      entry.orders++;
+      for (const it of itemsOf(o)) entry.products.set(it.name, (entry.products.get(it.name) || 0) + it.qty);
+      byCity.set(c, entry);
+    }
+    return [...byCity.entries()]
+      .map(([city, v]) => ({ city, orders: v.orders, products: [...v.products.entries()].sort((a, b) => b[1] - a[1]) }))
+      .sort((a, b) => b.orders - a.orders);
+  }, [baseFiltered]);
+  const availableTotal = availableSummary.reduce((s, c) => s + c.orders, 0);
+
+  const filtered = baseFiltered.filter(o => {
+    if (cityFilter && cityLabel(o) !== cityFilter) return false;
+    if (productFilter && !itemsOf(o).some(it => it.name === productFilter)) return false;
+    return true;
   });
 
   const toggleSelect = async (id: string) => {
@@ -699,6 +750,51 @@ export default function AssignOrdersView() {
                 ✖ Limpiar selección
               </button>
             </>
+          )}
+        </div>
+      )}
+
+      {availableTotal > 0 && (
+        <div className="mb-3 rounded-2xl border border-border p-3">
+          <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => setSummaryOpen(v => !v)}>
+            <span className="text-sm font-extrabold">
+              📦 Pedidos disponibles para tomar: {availableTotal}
+              {role === 'DELIVERY' && allowedProviders.length > 0 && (
+                <span className="ml-1 text-[11px] font-normal text-muted-foreground">(de tus {allowedProviders.length} proveedor(es) habilitados)</span>
+              )}
+            </span>
+            <span className="text-xs text-muted-foreground">{summaryOpen ? '▾ ocultar' : '▸ ver por ciudad'}</span>
+          </button>
+          {summaryOpen && (
+            <div className="mt-2 space-y-1.5">
+              {(cityFilter || productFilter) && (
+                <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => { setCityFilter(''); setProductFilter(''); }}>
+                  ✖ Quitar filtro: {[cityFilter, productFilter].filter(Boolean).join(' · ')}
+                </button>
+              )}
+              {availableSummary.map(c => (
+                <div key={c.city} className={`flex flex-wrap items-center gap-1.5 rounded-xl border px-2 py-1.5 ${cityFilter === c.city ? 'border-primary bg-primary/10' : 'border-border/50'}`}>
+                  <button
+                    type="button"
+                    className="min-w-[8rem] text-left text-sm font-bold"
+                    onClick={() => { setCityFilter(cityFilter === c.city ? '' : c.city); setProductFilter(''); }}
+                  >
+                    📍 {c.city} <span className="text-xs text-muted-foreground">({c.orders})</span>
+                  </button>
+                  {c.products.map(([name, qty]) => (
+                    <button
+                      type="button"
+                      key={name}
+                      className={`rounded-lg border px-2 py-0.5 text-[11px] ${cityFilter === c.city && productFilter === name ? 'border-primary bg-primary/20' : 'border-border'}`}
+                      onClick={() => { setCityFilter(c.city); setProductFilter(productFilter === name && cityFilter === c.city ? '' : name); }}
+                    >
+                      {name.length > 32 ? `${name.slice(0, 32)}…` : name} <b>x{qty}</b>
+                    </button>
+                  ))}
+                </div>
+              ))}
+              <p className="text-[11px] text-muted-foreground">Según las fechas elegidas arriba. Tocá una ciudad o un producto para filtrar la lista.</p>
+            </div>
           )}
         </div>
       )}
