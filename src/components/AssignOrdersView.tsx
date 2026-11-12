@@ -29,7 +29,7 @@ export default function AssignOrdersView() {
   const [allowedProviders, setAllowedProviders] = useState<string[]>([]);
   const [cityFilter, setCityFilter] = useState('');
   const [productFilter, setProductFilter] = useState('');
-  const [summaryOpen, setSummaryOpen] = useState(true);
+  const [summaryOpen, setSummaryOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 640);
 
   // ─── NUEVO: estado intermedio para QR ────────────────────────────────────
   const [pendingQrId, setPendingQrId] = useState<string | null>(null);
@@ -355,6 +355,7 @@ export default function AssignOrdersView() {
       .sort((a, b) => b.orders - a.orders);
   }, [baseFiltered]);
   const availableTotal = availableSummary.reduce((s, c) => s + c.orders, 0);
+  const availableUnits = availableSummary.reduce((s, c) => s + c.products.reduce((t, [, q]) => t + q, 0), 0);
 
   const filtered = baseFiltered.filter(o => {
     if (cityFilter && cityLabel(o) !== cityFilter) return false;
@@ -755,48 +756,85 @@ export default function AssignOrdersView() {
       )}
 
       {availableTotal > 0 && (
-        <div className="mb-3 rounded-2xl border border-border p-3">
-          <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => setSummaryOpen(v => !v)}>
-            <span className="text-sm font-extrabold">
-              📦 Pedidos disponibles para tomar: {availableTotal}
-              {role === 'DELIVERY' && allowedProviders.length > 0 && (
-                <span className="ml-1 text-[11px] font-normal text-muted-foreground">(de tus {allowedProviders.length} proveedor(es) habilitados)</span>
-              )}
-            </span>
-            <span className="text-xs text-muted-foreground">{summaryOpen ? '▾ ocultar' : '▸ ver por ciudad'}</span>
-          </button>
-          {summaryOpen && (
-            <div className="mt-2 space-y-1.5">
-              {(cityFilter || productFilter) && (
-                <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => { setCityFilter(''); setProductFilter(''); }}>
-                  ✖ Quitar filtro: {[cityFilter, productFilter].filter(Boolean).join(' · ')}
-                </button>
-              )}
-              {availableSummary.map(c => (
-                <div key={c.city} className={`flex flex-wrap items-center gap-1.5 rounded-xl border px-2 py-1.5 ${cityFilter === c.city ? 'border-primary bg-primary/10' : 'border-border/50'}`}>
-                  <button
-                    type="button"
-                    className="min-w-[8rem] text-left text-sm font-bold"
-                    onClick={() => { setCityFilter(cityFilter === c.city ? '' : c.city); setProductFilter(''); }}
-                  >
-                    📍 {c.city} <span className="text-xs text-muted-foreground">({c.orders})</span>
-                  </button>
-                  {c.products.map(([name, qty]) => (
-                    <button
-                      type="button"
-                      key={name}
-                      className={`rounded-lg border px-2 py-0.5 text-[11px] ${cityFilter === c.city && productFilter === name ? 'border-primary bg-primary/20' : 'border-border'}`}
-                      onClick={() => { setCityFilter(c.city); setProductFilter(productFilter === name && cityFilter === c.city ? '' : name); }}
-                    >
-                      {name.length > 32 ? `${name.slice(0, 32)}…` : name} <b>x{qty}</b>
-                    </button>
-                  ))}
-                </div>
-              ))}
-              <p className="text-[11px] text-muted-foreground">Según las fechas elegidas arriba. Tocá una ciudad o un producto para filtrar la lista.</p>
+        <section className="relative mb-4 overflow-hidden rounded-3xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/15 via-slate-900/60 to-violet-500/15 p-4 shadow-2xl md:p-5">
+          <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-cyan-400/10 blur-3xl" />
+          <div className="relative flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.25em] text-cyan-300/80">Pedidos disponibles para tomar</div>
+              <div className="mt-1 text-4xl font-black leading-none text-white md:text-5xl">{availableTotal}</div>
+              <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-bold">
+                <span className="rounded-full border border-white/10 bg-slate-950/50 px-2.5 py-1 text-slate-300">📍 {availableSummary.length} ciudad(es)</span>
+                <span className="rounded-full border border-white/10 bg-slate-950/50 px-2.5 py-1 text-slate-300">📦 {availableUnits} unidad(es)</span>
+                {role === 'DELIVERY' && allowedProviders.length > 0 && (
+                  <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-emerald-300">🏢 {allowedProviders.length} proveedor(es) habilitado(s)</span>
+                )}
+              </div>
             </div>
+            <button type="button" className="rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-xs font-bold text-slate-200" onClick={() => setSummaryOpen(v => !v)}>
+              {summaryOpen ? '▾ Ocultar' : '▸ Ver por ciudad'}
+            </button>
+          </div>
+
+          {summaryOpen && (
+            <>
+              {(cityFilter || productFilter) && (
+                <div className="relative mt-3 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-slate-400">Filtrando la lista por:</span>
+                  <span className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2.5 py-1 font-bold text-cyan-200">
+                    {[cityFilter && `📍 ${cityFilter}`, productFilter && `📦 ${productFilter}`].filter(Boolean).join('  ·  ')}
+                  </span>
+                  <button type="button" className="rounded-full border border-white/10 bg-slate-950/60 px-2.5 py-1 font-bold text-slate-200" onClick={() => { setCityFilter(''); setProductFilter(''); }}>
+                    ✖ Quitar
+                  </button>
+                </div>
+              )}
+              <div className="relative mt-3 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+                {availableSummary.map(c => {
+                  const activeCity = cityFilter === c.city;
+                  const pct = Math.round((c.orders / Math.max(1, availableSummary[0]?.orders || 1)) * 100);
+                  return (
+                    <div
+                      key={c.city}
+                      className={`rounded-2xl border p-3 transition ${activeCity ? 'border-cyan-400/70 bg-cyan-500/15 shadow-lg shadow-cyan-500/10' : 'border-white/10 bg-slate-950/50 hover:border-white/25'}`}
+                    >
+                      <button
+                        type="button"
+                        className="w-full text-left"
+                        onClick={() => { setCityFilter(activeCity ? '' : c.city); setProductFilter(''); }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="min-w-0 truncate text-sm font-extrabold text-white">📍 {c.city}</span>
+                          <span className="shrink-0 rounded-full bg-cyan-500/20 px-2 py-0.5 text-xs font-black text-cyan-200">{c.orders} pedido{c.orders === 1 ? '' : 's'}</span>
+                        </div>
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                          <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-emerald-400" style={{ width: `${pct}%` }} />
+                        </div>
+                      </button>
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        {c.products.map(([name, qty]) => {
+                          const activeProduct = activeCity && productFilter === name;
+                          return (
+                            <button
+                              type="button"
+                              key={name}
+                              title={name}
+                              className={`max-w-full rounded-lg border px-2 py-1 text-[11px] font-semibold ${activeProduct ? 'border-violet-400/70 bg-violet-500/25 text-white' : 'border-white/10 bg-slate-900/70 text-slate-300 hover:border-white/25'}`}
+                              onClick={() => { setCityFilter(c.city); setProductFilter(activeProduct ? '' : name); }}
+                            >
+                              <span className="inline-block max-w-[11rem] truncate align-bottom">{name}</span>
+                              <b className="ml-1 text-violet-300">×{qty}</b>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="relative mt-3 text-[11px] text-slate-400">Según las fechas elegidas arriba. Tocá una ciudad o un producto para filtrar la lista de abajo.</p>
+            </>
           )}
-        </div>
+        </section>
       )}
 
       <div className="overflow-auto">
