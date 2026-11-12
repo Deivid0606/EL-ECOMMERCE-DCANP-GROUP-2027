@@ -5,10 +5,17 @@ import { supabase } from '@/integrations/supabase/client';
 type Person = { user_id: string; email: string; name: string };
 
 /**
- * Admin: qué proveedores puede despachar cada despachante. Un despachante sin
- * proveedores marcados ve todos los pedidos (como antes).
+ * Admin: qué proveedores puede despachar cada despachante (kind 'dispatcher') o
+ * ver cada delivery en «Asignar Pedidos» (kind 'delivery'). Sin proveedores
+ * marcados ve todos (como antes).
  */
-export default function DispatcherProvidersPanel({ dispatcherEmail }: { dispatcherEmail?: string } = {}) {
+const KINDS = {
+  dispatcher: { table: 'dispatcher_providers', col: 'dispatcher_email', role: 'DESPACHANTE', title: '🚚 Despachantes y proveedores', verb: 'despachar', who: 'despachante', none: 'No hay despachantes aprobados.', count: 'Despacha' },
+  delivery: { table: 'delivery_providers', col: 'delivery_email', role: 'DELIVERY', title: '🛵 Deliverys y proveedores', verb: 'ver en Asignar Pedidos', who: 'delivery', none: 'No hay deliverys aprobados.', count: 'Ve' },
+} as const;
+
+export default function DispatcherProvidersPanel({ dispatcherEmail, kind = 'dispatcher' }: { dispatcherEmail?: string; kind?: keyof typeof KINDS } = {}) {
+  const K = KINDS[kind];
   const [dispatchers, setDispatchers] = useState<Person[]>([]);
   const [providers, setProviders] = useState<Person[]>([]);
   const [links, setLinks] = useState<{ dispatcher_email: string; provider_email: string }[]>([]);
@@ -19,7 +26,7 @@ export default function DispatcherProvidersPanel({ dispatcherEmail }: { dispatch
     const { data: roles } = await supabase
       .from('user_roles')
       .select('user_id, role')
-      .in('role', ['DESPACHANTE', 'PROVEEDOR'])
+      .in('role', [K.role, 'PROVEEDOR'])
       .eq('approved', true);
     const ids = [...new Set((roles || []).map((r: any) => r.user_id))];
     const { data: people } = ids.length
@@ -34,10 +41,10 @@ export default function DispatcherProvidersPanel({ dispatcherEmail }: { dispatch
           return { user_id: p.user_id, email: String(p.email || '').toLowerCase(), name: p.name || p.email };
         })
         .sort((a, b) => a.name.localeCompare(b.name));
-    setDispatchers(pick('DESPACHANTE'));
+    setDispatchers(pick(K.role));
     setProviders(pick('PROVEEDOR'));
-    const { data: l } = await (supabase as any).from('dispatcher_providers').select('dispatcher_email, provider_email');
-    setLinks((l || []).map((x: any) => ({ dispatcher_email: String(x.dispatcher_email).toLowerCase(), provider_email: String(x.provider_email).toLowerCase() })));
+    const { data: l } = await (supabase as any).from(K.table).select(`${K.col}, provider_email`);
+    setLinks((l || []).map((x: any) => ({ dispatcher_email: String(x[K.col]).toLowerCase(), provider_email: String(x.provider_email).toLowerCase() })));
   };
 
   useEffect(() => {
@@ -58,8 +65,8 @@ export default function DispatcherProvidersPanel({ dispatcherEmail }: { dispatch
     setBusy(true);
     const on = assigned.has(providerEmail);
     const { error } = on
-      ? await (supabase as any).from('dispatcher_providers').delete().eq('dispatcher_email', selected).eq('provider_email', providerEmail)
-      : await (supabase as any).from('dispatcher_providers').insert({ dispatcher_email: selected, provider_email: providerEmail });
+      ? await (supabase as any).from(K.table).delete().eq(K.col, selected).eq('provider_email', providerEmail)
+      : await (supabase as any).from(K.table).insert({ [K.col]: selected, provider_email: providerEmail });
     setBusy(false);
     if (error) {
       toast.error(error.message);
@@ -74,12 +81,12 @@ export default function DispatcherProvidersPanel({ dispatcherEmail }: { dispatch
 
   return (
     <section className="mb-4 rounded-2xl border border-border p-4 shadow-sm">
-      <h4 className="text-lg font-black">🚚 Despachantes y proveedores</h4>
+      <h4 className="text-lg font-black">{K.title}</h4>
       <p className="mb-3 text-xs text-muted-foreground">
-        Elegí qué proveedores puede despachar cada despachante. Si no marcás ninguno, ve todos los pedidos.
+        Elegí qué proveedores puede {K.verb} cada {K.who}. Si no marcás ninguno, ve todos los pedidos.
       </p>
       {!dispatchers.length ? (
-        <div className="text-sm text-muted-foreground">No hay despachantes aprobados.</div>
+        <div className="text-sm text-muted-foreground">{K.none}</div>
       ) : (
         <>
           {!dispatcherEmail && <select className="app-input mb-3 max-w-md" value={selected} onChange={(e) => setSelected(e.target.value)}>
@@ -90,7 +97,7 @@ export default function DispatcherProvidersPanel({ dispatcherEmail }: { dispatch
             ))}
           </select>}
           <div className="mb-2 text-xs font-bold">
-            {assigned.size ? `Despacha ${assigned.size} proveedor(es)` : 'Sin restricción: ve todos los proveedores'}
+            {assigned.size ? `${K.count} ${assigned.size} proveedor(es)` : 'Sin restricción: ve todos los proveedores'}
           </div>
           <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
             {providers.map((p) => (

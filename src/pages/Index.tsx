@@ -10,6 +10,7 @@ import AuthView from '@/components/AuthView';
 
 // Cada pantalla se descarga recién cuando se abre (la app inicial pesa mucho menos).
 const DashboardView = lazy(() => import('@/components/DashboardView'));
+const DeliveryDashboard = lazy(() => import('@/components/DeliveryDashboard'));
 const OrdersView = lazy(() => import('@/components/OrdersView'));
 const NewsView = lazy(() => import('@/components/NewsView'));
 const ProductsView = lazy(() => import('@/components/ProductsView'));
@@ -355,6 +356,7 @@ export default function Index() {
     }
     switch (currentView) {
       case 'dashboard':
+        if (String(profile?.role || '') === 'DELIVERY') return <DeliveryDashboard />;
         return <DashboardView />;
 
       case 'orders':
