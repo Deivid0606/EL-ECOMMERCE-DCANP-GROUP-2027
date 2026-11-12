@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import { pyDaysAgo, pyToday, pyStart, pyEnd } from '@/lib/pyTime';
+import { pyToday } from '@/lib/pyTime';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -30,8 +31,6 @@ export default function CommissionRequestsView() {
   const [showForm, setShowForm] = useState(false);
   const [newProvider, setNewProvider] = useState('');
   const [newNote, setNewNote] = useState('');
-  const [newFrom, setNewFrom] = useState(() => pyDaysAgo(30));
-  const [newTo, setNewTo] = useState(() => pyToday());
   // Perfil completo (datos, cobro, cédula y selfie) para poder pedir el cobro.
   const [payout, setPayout] = useState<{ ready: boolean; missing: string[] } | null>(null);
   useEffect(() => {
@@ -53,11 +52,10 @@ export default function CommissionRequestsView() {
 
   useEffect(() => { load(); }, []);
 
+ // Todas las ventas del vendedor, sin importar la fecha (paginado: más de 1.000 pedidos).
   const loadBalanceOrders = async () => {
-    const { data } = await supabase.from('orders').select('*')
-      .gte('created_at', pyStart(newFrom))
-      .lte('created_at', pyEnd(newTo))
-      .eq('created_by', myEmail);
+    const { data, error } = await fetchAllRows('orders', (q: any) => q.eq('created_by', myEmail).order('created_at', { ascending: true }));
+    if (error) toast.error('No se pudieron cargar todas tus ventas: ' + error.message);
     
     const rendidos = (data || []).filter(o => {
       return isElegible(o.status, o.status2);
@@ -68,7 +66,7 @@ export default function CommissionRequestsView() {
 
   useEffect(() => { 
     if (showForm && role === 'VENDEDOR') loadBalanceOrders(); 
-  }, [showForm, newFrom, newTo]);
+  }, [showForm]);
 
   const skuProviderMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -217,6 +215,11 @@ export default function CommissionRequestsView() {
     sumPendientes: filtered.filter(r => r.status === 'PENDIENTE').reduce((s, r) => s + Number(r.amount_gs || 0), 0),
   }), [filtered]);
 
+  const requestRange = (ids: string[]) => {
+    const days = orders.filter(o => ids.includes(o.id)).map(o => String(o.created_at || '').slice(0, 10)).filter(Boolean).sort();
+    return { from: days[0] || pyToday(), to: days[days.length - 1] || pyToday() };
+  };
+
   const createRequest = async () => {
     if (!newProvider) { toast.error('Elegí un proveedor'); return; }
     if (payout && !payout.ready) {
@@ -242,8 +245,9 @@ export default function CommissionRequestsView() {
       provider_email: newProvider,
       amount_gs: available,
       note: newNote,
-      range_from: newFrom,
-      range_to: newTo,
+      // Rango real de las ventas incluidas en la solicitud.
+      range_from: requestRange(balance.orderIds).from,
+      range_to: requestRange(balance.orderIds).to,
       requested_by: myEmail,
       status: 'PENDIENTE',
       meta_json: {
@@ -366,14 +370,7 @@ export default function CommissionRequestsView() {
         <div className="app-card !p-4 mb-4">
           <h4 className="font-bold mb-3">Nueva solicitud de comisión</h4>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-            <div>
-              <label className="app-label">Desde</label>
-              <input type="date" className="app-input" value={newFrom} onChange={e => setNewFrom(e.target.value)} />
-            </div>
-            <div>
-              <label className="app-label">Hasta</label>
-              <input type="date" className="app-input" value={newTo} onChange={e => setNewTo(e.target.value)} />
-            </div>
+            <div className="md:col-span-2 self-end text-xs font-bold text-muted-foreground">📅 Se toman todas tus ventas rendidas sin cobrar, sin importar la fecha.</div>
             <div>
               <label className="app-label">Proveedor</label>
               <select className="app-input" value={newProvider} onChange={e => { setNewProvider(e.target.value); }}>

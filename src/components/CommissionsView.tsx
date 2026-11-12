@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useProviderScope } from '@/lib/providerScope';
 import { supabase } from '@/integrations/supabase/client';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import { pyDaysAgo, pyToday, pyStart, pyEnd } from '@/lib/pyTime';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -70,8 +70,6 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [productsRaw, setProducts] = useState<any[]>([]);
   const products = useMemo(() => productsRaw.filter(productInScope), [productsRaw, productInScope]);
   const [commissionRequests, setCommissionRequests] = useState<any[]>([]);
-  const [dateFrom, setDateFrom] = useState(() => pyDaysAgo(30));
-  const [dateTo, setDateTo] = useState(() => pyToday());
 
   useEffect(() => {
     Promise.all([
@@ -86,21 +84,15 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     });
   }, []);
 
+  // Todas las comisiones, sin importar la fecha (paginado: más de 1.000 pedidos).
   const loadCommissions = async () => {
-    let query = supabase.from('orders').select('*')
-      .gte('created_at', pyStart(dateFrom))
-      .lte('created_at', pyEnd(dateTo))
-      .order('created_at', { ascending: false });
-
-    if (role === 'VENDEDOR') {
-      query = query.eq('created_by', profile?.email);
-    }
-    
-    if (role === 'PROVEEDOR' && profile?.email) {
-      query = query.ilike('provider_emails_list', `%${profile.email}%`);
-    }
-
-    const { data } = await query;
+    const { data, error } = await fetchAllRows('orders', (q: any) => {
+      let query = q.in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA', 'GUIA GENERADA']).order('created_at', { ascending: false });
+      if (role === 'VENDEDOR') query = query.eq('created_by', profile?.email);
+      if (role === 'PROVEEDOR' && profile?.email) query = query.ilike('provider_emails_list', `%${profile.email}%`);
+      return query;
+    });
+    if (error) toast.error('No se pudieron cargar todas las comisiones: ' + error.message);
 
     setOrders((data || []).filter(o => {
       const e1 = normalizar(o.status);
@@ -112,7 +104,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     }));
   };
 
-  useEffect(() => { loadCommissions(); }, [dateFrom, dateTo]);
+  useEffect(() => { loadCommissions(); }, []);
 
   const baseFiltered = orders.filter(o => {
     if (filterVendor && o.created_by?.toLowerCase() !== filterVendor.toLowerCase()) return false;
@@ -142,14 +134,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     if ((role === 'ADMIN' || role === 'PROVEEDOR') && filterVendor && req.vendor_email?.toLowerCase() !== filterVendor.toLowerCase()) return false;
     if (role === 'ADMIN' && filterProvider && req.provider_email?.toLowerCase() !== filterProvider.toLowerCase()) return false;
 
-    const rawDate = req.approved_at || req.requested_at;
-    if (!rawDate) return true;
-
-    const d = new Date(rawDate);
-    const from = new Date(pyStart(dateFrom));
-    const to = new Date(pyEnd(dateTo));
-
-    return d >= from && d <= to;
+    return true;
   });
 
   const approvedByProvider = useMemo(() => {
@@ -344,11 +329,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       </h3>
 
       <div className="flex flex-wrap gap-2 mb-3">
-        <label className="app-label !mt-0">Desde</label>
-        <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-        <label className="app-label !mt-0">Hasta</label>
-        <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        
+        <span className="self-center text-xs font-bold text-muted-foreground">📅 Todas las fechas</span>
         {(role === 'ADMIN' || role === 'PROVEEDOR') && (
           <select className="app-input !w-auto min-w-[200px]" value={filterVendor} onChange={e => setFilterVendor(e.target.value)}>
             <option value="">Todos los vendedores</option>
