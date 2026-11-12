@@ -77,6 +77,30 @@ function DeliveryAttendance({ myEmail, now }: { myEmail: string; now: number }) 
   }, [myEmail, load]);
 
   const todayRows = rows.filter((r) => r.day === today);
+  // Jornada de un día anterior que quedó abierta (se olvidó marcar la salida).
+  const pastOpen = rows.find((r) => r.status === 'TRABAJANDO' && !r.ended_at && r.day < today);
+  const [pastEnd, setPastEnd] = useState('');
+  useEffect(() => {
+    if (!pastOpen?.started_at) return;
+    // Hora sugerida: 8 horas después de la entrada (como máximo 23:59 de ese día).
+    const start = new Date(pastOpen.started_at);
+    const startPy = new Date(start.getTime() - 3 * 3600_000);
+    const mins = Math.min(startPy.getUTCHours() * 60 + startPy.getUTCMinutes() + 8 * 60, 23 * 60 + 59);
+    setPastEnd(`${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`);
+  }, [pastOpen?.id, pastOpen?.started_at]);
+
+  const closePast = async () => {
+    if (!pastEnd) return toast.error('Elegí a qué hora terminaste');
+    setBusy(true);
+    const { error } = await (supabase as any).rpc('attendance_close_past', { p_end_time: pastEnd });
+    setBusy(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success(`✅ Jornada del ${dayName(pastOpen!.day)} finalizada. Ya podés marcar la entrada de hoy.`);
+    void load();
+  };
   const open = todayRows.find((r) => r.status === 'TRABAJANDO' && !r.ended_at);
   const absent = todayRows.find((r) => r.status === 'NO_ASISTE');
   const total = worked(todayRows, now);
@@ -105,8 +129,29 @@ function DeliveryAttendance({ myEmail, now }: { myEmail: string; now: number }) 
     <>
       <p className="mb-4 text-xs text-muted-foreground">Marcá tu entrada al empezar a trabajar y la salida al terminar. Si hoy no trabajás, avisá con «No asistiré hoy».</p>
 
+      {pastOpen && (
+        <div className="mx-auto mb-4 max-w-md rounded-3xl border border-amber-500/50 bg-amber-500/10 p-5 text-center shadow-xl">
+          <div className="text-sm font-black text-amber-300">⚠️ Quedó abierta tu jornada del {dayName(pastOpen.day)}</div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Entraste a las {time(pastOpen.started_at)} y no marcaste la salida. Finalizala para poder marcar la entrada de hoy.
+          </p>
+          <label className="mt-3 flex items-center justify-center gap-2 text-sm">
+            ¿A qué hora terminaste ese día?
+            <input type="time" className="app-input !w-auto !py-1" value={pastEnd} onChange={(e) => setPastEnd(e.target.value)} />
+          </label>
+          <button
+            type="button"
+            className="mt-3 w-full rounded-2xl bg-rose-600 py-4 text-lg font-black text-white disabled:opacity-50"
+            disabled={busy || !pastEnd}
+            onClick={() => void closePast()}
+          >
+            ⏹ Finalizar jornada del {pastOpen.day.slice(8, 10)}/{pastOpen.day.slice(5, 7)}
+          </button>
+        </div>
+      )}
+
       <div
-        className={`mx-auto max-w-md rounded-3xl border p-6 text-center shadow-xl ${
+        className={`mx-auto max-w-md rounded-3xl border p-6 text-center shadow-xl ${pastOpen ? 'pointer-events-none opacity-50' : ''} ${
           open ? 'border-emerald-500/50 bg-emerald-500/10' : absent ? 'border-rose-500/40 bg-rose-500/10' : 'border-border bg-card/60'
         }`}
       >
