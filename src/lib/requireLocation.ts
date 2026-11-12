@@ -3,6 +3,14 @@ import { supabase } from '@/integrations/supabase/client';
 
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 
+/** PC o notebook: no es celular ni tablet (el iPad nuevo se hace pasar por Mac, pero tiene pantalla táctil). */
+export const isDesktopDevice = () => {
+  const ua = navigator.userAgent || '';
+  if (/android|iphone|ipad|ipod|mobile|tablet|silk|kindle|opera mini/i.test(ua)) return false;
+  if (/macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1) return false;
+  return true;
+};
+
 export const LOCATION_HELP = isIOS()
   ? 'Activala en Ajustes › Privacidad › Localización (encendida) y en Ajustes › Safari › Ubicación › Permitir. Después volvé a intentar.'
   : 'Tocá el 🔒 junto a la dirección de la página › Permisos › Ubicación › Permitir, y encendé el GPS del celular. Después volvé a intentar.';
@@ -16,6 +24,13 @@ export const cleanLocationError = (msg: string) =>
  * actual y la envía. Si no se puede, avisa cómo activarla y devuelve false.
  */
 export async function requireDeliveryLocation(): Promise<boolean> {
+  // Desde una PC / notebook se reporta sin ubicación: se avisa al servidor que es una computadora.
+  if (isDesktopDevice()) {
+    const { error } = await (supabase as any).rpc('report_delivery_desktop', { p_user_agent: navigator.userAgent });
+    if (!error) return true;
+    toast.error(`No se pudo verificar tu equipo: ${error.message}`);
+    return false;
+  }
   if (!('geolocation' in navigator)) {
     toast.error('📍 Este celular no permite compartir la ubicación: no podés reportar pedidos desde acá.', { duration: 10000 });
     return false;
