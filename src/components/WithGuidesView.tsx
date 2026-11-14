@@ -710,13 +710,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       toast.success('Estado 2 actualizado');
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
       void loadStock(orders);
-      if (val === 'GUIA GENERADA') {
-        setSelectedIds(prev => {
-          const next = new Set(prev);
-          next.delete(orderId);
-          return next;
-        });
-      }
+      // El pedido queda seleccionado: así se puede asignar a un delivery enseguida.
     }
   };
 
@@ -940,13 +934,15 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       if (errors.length > 0) {
         toast.error(`${errors.length} error${errors.length > 1 ? 'es' : ''} al actualizar`, { id: toastId });
       } else {
-        toast.success(`${selected.length} pedido${selected.length > 1 ? 's' : ''} marcado${selected.length > 1 ? 's' : ''} como GUIA GENERADA`, { id: toastId });
-        
-        setOrders(prev => prev.map(o => 
+        toast.success(
+          `${selected.length} pedido${selected.length > 1 ? 's' : ''} marcado${selected.length > 1 ? 's' : ''} como GUIA GENERADA. Siguen seleccionados por si querés asignarlos a un delivery.`,
+          { id: toastId, duration: 6000 },
+        );
+
+        setOrders(prev => prev.map(o =>
           selectedIds.has(o.id) ? { ...o, status2: 'GUIA GENERADA' } : o
         ));
-        
-        setSelectedIds(new Set());
+        // La selección se mantiene para poder asignar estos pedidos a un delivery.
       }
       void loadStock(orders);
     } catch (error) {
