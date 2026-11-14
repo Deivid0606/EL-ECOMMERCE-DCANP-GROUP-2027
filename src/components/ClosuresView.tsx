@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { pyToday, pyStart, pyEnd, pyDateKey } from '@/lib/pyTime';
 import { useOrderEditTools } from '@/components/OrderEditTools';
 import DispatcherProvidersPanel from '@/components/DispatcherProvidersPanel';
+import DeliveryStockPanel from '@/components/DeliveryStockPanel';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -686,7 +687,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [selectedGuideIds, setSelectedGuideIds] = useState<Set<string>>(new Set());
   const [updatingContactedIds, setUpdatingContactedIds] = useState<Set<string>>(new Set());
   const [activeSection, setActiveSection] = useState<'orders' | 'team' | 'teamClosures'>('orders');
-  const [closureTab, setClosureTab] = useState<'resumen' | 'pedidos' | 'repetidos' | 'pagos' | 'historial' | 'config'>('resumen');
+  const [closureTab, setClosureTab] = useState<'resumen' | 'pedidos' | 'repetidos' | 'stock' | 'pagos' | 'historial' | 'config'>('resumen');
   const [bulkStatus, setBulkStatus] = useState<string>('EN RUTA');
   const [bulkRetiroStatus, setBulkRetiroStatus] = useState<string>('REALIZADO');
   const [bulkTeamUserId, setBulkTeamUserId] = useState<string>('');
@@ -3225,6 +3226,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           ['resumen', '📊', 'Resumen'],
           ['pedidos', '📦', 'Pedidos'],
           ['repetidos', '🔁', 'Repetidos'],
+          ['stock', '📦', 'Stock delivery'],
           ['pagos', '💳', 'Pagos de cierre'],
           ['historial', '🧾', 'Historial'],
           ['config', '⚙️', 'Configuración'],
@@ -3527,7 +3529,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         </div>
       )}
 
-      <div className={(closureTab === 'resumen' || closureTab === 'pedidos' || closureTab === 'repetidos') && (activeSection === 'orders' || activeSection === 'teamClosures') ? '' : 'hidden'}>
+      <div className={(closureTab === 'resumen' || closureTab === 'pedidos' || closureTab === 'repetidos' || closureTab === 'stock') && (activeSection === 'orders' || activeSection === 'teamClosures') ? '' : 'hidden'}>
 
       {activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin) && (
         <div className="mb-3 app-card !p-3 border border-violet-500/30 bg-violet-500/5">
@@ -3927,6 +3929,13 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       </details>
 
 
+      {closureTab === 'stock' && (
+        <DeliveryStockPanel
+          deliveries={isDelivery ? [myEmail] : selectedDeliveryList}
+          providers={isAdmin ? selectedSupplierList : []}
+          onlyProvider={isSupplier ? myEmail : undefined}
+        />
+      )}
       <div className={closureTab === 'resumen' ? '' : 'hidden'}>
       <div className="closure-section-heading"><span className="closure-section-number">02</span><div><h3>Resumen del período</h3><p>Indicadores, estados y posibles pedidos repetidos</p></div></div>
       <section className="closure-premium-overview" aria-label="Resumen ejecutivo de cierres">
