@@ -3154,7 +3154,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     printWindow.focus();
   };
 
-  const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
+  const state2Opts = ['--', 'GUIA GENERADA', 'DESPACHADO POR REPARTIDOR', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
   const retiroOpts = ['', 'PENDIENTE', 'REALIZADO', 'CANCELADO'];
   
   let deliveryName = '';
