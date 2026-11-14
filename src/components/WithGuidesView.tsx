@@ -115,6 +115,11 @@ const pillInputCls = "bg-[#070b18] border border-slate-700/80 rounded-xl px-3 py
 const proBtnCls = "rounded-xl px-4 py-2 text-sm font-black text-white transition hover:scale-[1.02] active:scale-[.98] shadow-lg";
 
 
+// Estado 2 de pedidos despachados: con guía (sale del depósito) o por repartidor (sale de su stock).
+const REPARTIDOR = 'DESPACHADO POR REPARTIDOR';
+const DISPATCHED = ['GUIA GENERADA', REPARTIDOR];
+const isDispatched = (s: unknown) => DISPATCHED.includes(String(s || '').toUpperCase());
+
 export default function WithGuidesView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
@@ -302,7 +307,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         if (status2Filter === 'PENDIENTES') {
           q = q.or('status2.is.null,status2.eq.--');
         } else if (status2Filter === 'CON_GUIA') {
-          q = q.eq('status2', 'GUIA GENERADA');
+          q = q.in('status2', DISPATCHED);
           // Fetch only today's generated guides by default. Older ones are
           // accessible with the explicit historical switch.
           if (!showHistorical) {
@@ -379,7 +384,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     }
 
     // Descuentos vigentes sólo de los pedidos con guía (donde se usa el botón).
-    const ids = rows.filter(o => o.status2 === 'GUIA GENERADA').map(o => o.id);
+    const ids = rows.filter(o => isDispatched(o.status2)).map(o => o.id);
     const ledger = new Map<string, StockLedgerRow[]>();
     for (let i = 0; i < ids.length; i += 200) {
       const { data } = await supabase
@@ -649,7 +654,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
 
   const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
-  const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
+  const withGuides = filtered.filter(o => isDispatched(o.status2));
   const visibleOrders = filtered;
   const pageOrders = useMemo(() => visibleOrders.slice(0, shownRows), [visibleOrders, shownRows]);
   const assignedEmails = useMemo(() => [...new Set(pageOrders
@@ -700,7 +705,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const repeatedClientsCount = repeatedClients.length;
   const repeatedGuidesCount = repeatedClients.reduce((sum, item) => sum + item.count, 0);
 
-  const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
+  const state2Opts = ['--', 'GUIA GENERADA', REPARTIDOR, 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
 
   const updateStatus2 = async (orderId: string, status2: string) => {
     const val = status2 === '--' ? null : status2;
@@ -911,7 +916,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     toast.success(`${selected.length} guías copiadas`);
   };
 
-  const bulkMarkAsGuiaGenerada = async () => {
+  const bulkMarkAsGuiaGenerada = async (value: string = 'GUIA GENERADA') => {
     const selected = getSelectedOrders();
     
     if (selected.length === 0) {
@@ -922,9 +927,9 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     
     try {
       const updates = selected.map(order => 
-        supabase.from('orders').update({ 
-          status2: 'GUIA GENERADA', 
-          updated_at: new Date().toISOString() 
+        supabase.from('orders').update({
+          status2: value,
+          updated_at: new Date().toISOString()
         }).eq('id', order.id)
       );
       
@@ -935,12 +940,12 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         toast.error(`${errors.length} error${errors.length > 1 ? 'es' : ''} al actualizar`, { id: toastId });
       } else {
         toast.success(
-          `${selected.length} pedido${selected.length > 1 ? 's' : ''} marcado${selected.length > 1 ? 's' : ''} como GUIA GENERADA. Siguen seleccionados por si querés asignarlos a un delivery.`,
+          `${selected.length} pedido${selected.length > 1 ? 's' : ''} marcado${selected.length > 1 ? 's' : ''} como ${value}${value === REPARTIDOR ? ' (se descuenta del stock del repartidor)' : ' (se descuenta del depósito)'}. Siguen seleccionados por si querés asignarlos a un delivery.`,
           { id: toastId, duration: 6000 },
         );
 
         setOrders(prev => prev.map(o =>
-          selectedIds.has(o.id) ? { ...o, status2: 'GUIA GENERADA' } : o
+          selectedIds.has(o.id) ? { ...o, status2: value } : o
         ));
         // La selección se mantiene para poder asignar estos pedidos a un delivery.
       }
@@ -2039,8 +2044,11 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           <div className="text-sm font-bold text-green-400 mr-2 self-center">
             ✅ {selectedIds.size} seleccionado{selectedIds.size > 1 ? 's' : ''}:
           </div>
-          <button className="nav-btn" style={{ background: '#10b981', color: 'white' }} onClick={bulkMarkAsGuiaGenerada}>
+          <button className="nav-btn" style={{ background: '#10b981', color: 'white' }} onClick={() => void bulkMarkAsGuiaGenerada('GUIA GENERADA')} title="Sale del depósito: se descuenta del stock del proveedor">
             🚀 Marcar como GUIA GENERADA
+          </button>
+          <button className="nav-btn" style={{ background: '#7c3aed', color: 'white' }} onClick={() => void bulkMarkAsGuiaGenerada(REPARTIDOR)} title="Sale del stock del repartidor: se descuenta sólo de su stock">
+            🛵 Despachado por repartidor
           </button>
           {selectedIds.size >= 2 && (
             <button className="nav-btn" style={{ background: '#f59e0b', color: 'white' }} onClick={() => void orderTools.mergeOrders(getSelectedOrders())}>
@@ -2307,12 +2315,14 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                             </div>
                           );
                         })}
-                        {o.status2 === 'GUIA GENERADA' && (applied ? (
+                        {isDispatched(o.status2) && (applied ? (
                           <span className="inline-flex rounded-full border border-emerald-400/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
                             ✅ Descontado ({applied.reduce((n, r) => n + r.qty_delivery + r.qty_global, 0)})
                           </span>
                         ) : (
-                          <span className="text-[10px] text-slate-400">Se descuenta al entregar</span>
+                          <span className="text-[10px] text-slate-400">
+                            {String(o.status2 || '').toUpperCase() === REPARTIDOR ? '🛵 Se descuenta del repartidor al entregar' : '🏬 Se descuenta del depósito al entregar'}
+                          </span>
                         ))}
                       </div>
                     );
