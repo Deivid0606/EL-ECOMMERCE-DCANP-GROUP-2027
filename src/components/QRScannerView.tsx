@@ -28,10 +28,25 @@ type Order = {
   items_json: any;
   assigned_delivery: string | null;
   assigned_at: string | null;
+  qr_scanned_at?: string | null;
+};
+type Flash = { ok: boolean; title: string; lines: string[] };
+type ScanResult = {
+  ok: boolean;
+  reason?: 'not_found' | 'already' | 'other_delivery' | 'not_yours' | 'closed';
+  order_number?: string;
+  customer_name?: string;
+  city?: string;
+  total_gs?: number;
+  delivery?: string;
+  scanned_at?: string;
+  scanned_by?: string;
+  status?: string;
+  code?: string;
 };
 type Scan = { id: string; ok: boolean; text: string; at: number };
 
-const SELECT = 'id, order_number, customer_name, phone, city, street, status, status2, total_gs, items_json, assigned_delivery, assigned_at';
+const SELECT = 'id, order_number, customer_name, phone, city, street, status, status2, total_gs, items_json, assigned_delivery, assigned_at, qr_scanned_at';
 
 async function findOrder(code: string): Promise<Order | null> {
   if (isUuid(code)) {
@@ -68,49 +83,59 @@ export default function QRScannerView() {
   const [deliveries, setDeliveries] = useState<{ email: string; name: string }[]>([]);
   const [target, setTarget] = useState('');
   const [names, setNames] = useState<Record<string, string>>({});
+  const [flash, setFlash] = useState<Flash | null>(null);
 
   const nameOf = (email: string | null) => (email ? names[lc(email)] || deliveries.find((d) => d.email === lc(email))?.name || email : '');
 
   const log = (id: string, ok: boolean, text: string) => setScans((prev) => [{ id, ok, text, at: Date.now() }, ...prev].slice(0, 30));
 
-  // Delivery: asignarse el pedido escaneado.
+  const when = (iso?: string) =>
+    iso ? new Date(iso).toLocaleString('es-PY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+
+  // Muestra el resultado grande en pantalla (y en la lista de escaneados).
+  const showResult = useCallback((res: ScanResult, code: string) => {
+    const label = res.order_number || code;
+    if (res.ok) {
+      setFlash({
+        ok: true,
+        title: '✅ Pedido registrado exitosamente',
+        lines: [label, [res.customer_name, res.city].filter(Boolean).join(' · '), `🛵 ${res.delivery || ''} · EN RUTA`],
+      });
+      log(label, true, [res.customer_name, res.city].filter(Boolean).join(' · '));
+      return;
+    }
+    const msg =
+      res.reason === 'already'
+        ? { title: '⛔ Este pedido ya fue escaneado', lines: [label, `El ${when(res.scanned_at)} por ${res.scanned_by || '—'}`, `🛵 Asignado a ${res.delivery || '—'}`] }
+        : res.reason === 'other_delivery'
+          ? { title: '⛔ Pedido de otro delivery', lines: [label, `Está asignado a ${res.delivery || 'otro delivery'}`] }
+          : res.reason === 'closed'
+            ? { title: '⛔ Pedido cerrado', lines: [label, `Estado: ${res.status}`] }
+            : res.reason === 'not_yours'
+              ? { title: '⛔ No es un pedido tuyo', lines: [label] }
+              : { title: '❌ Pedido no encontrado', lines: [label] };
+    setFlash({ ok: false, ...msg });
+    log(label, false, msg.title.replace(/^\S+\s/, ''));
+  }, []);
+
+  useEffect(() => {
+    if (!flash) return;
+    const t = window.setTimeout(() => setFlash(null), flash.ok ? 2500 : 4500);
+    return () => window.clearTimeout(t);
+  }, [flash]);
+
+  // Delivery: el pedido escaneado se le asigna (una sola vez por QR).
   const assignToMe = useCallback(
     async (code: string) => {
-      const order = await findOrder(code);
-      if (!order) {
-        toast.error(`❌ Pedido ${code} no encontrado`);
-        log(code, false, 'No encontrado');
-        return;
-      }
-      const label = order.order_number || code;
-      if (order.assigned_delivery && lc(order.assigned_delivery) !== myEmail) {
-        toast.error(`❌ ${label} ya está asignado a otro delivery`, { duration: 6000 });
-        log(label, false, 'Asignado a otro delivery');
-        return;
-      }
-      if (lc(order.assigned_delivery) === myEmail) {
-        toast.info(`ℹ️ ${label} ya era tuyo`);
-        log(label, true, 'Ya era tuyo');
-        return;
-      }
-      const { data, error } = await supabase
-        .from('orders')
-        .update({ assigned_delivery: profile?.email, assigned_at: new Date().toISOString(), status: 'EN RUTA' })
-        .eq('id', order.id)
-        .is('assigned_delivery', null)
-        .select('id');
+      const { data, error } = await (supabase as any).rpc('scan_order_qr', { p_code: code });
       if (error) {
-        toast.error(`❌ ${label}: ${error.message}`);
-        log(label, false, error.message);
-      } else if (!data?.length) {
-        toast.error(`❌ ${label}: lo tomó otro delivery recién`);
-        log(label, false, 'Lo tomó otro delivery');
-      } else {
-        toast.success(`✅ ${label} asignado a vos · EN RUTA`);
-        log(label, true, `${order.customer_name || ''} · ${order.city || ''}`);
+        toast.error(error.message);
+        log(code, false, error.message);
+        return;
       }
+      showResult(data as ScanResult, code);
     },
-    [myEmail, profile?.email],
+    [showResult],
   );
 
   const handleCode = useCallback(
@@ -170,19 +195,11 @@ export default function QRScannerView() {
 
   const assignToTarget = async () => {
     if (!current || !target) return toast.error('Elegí un delivery');
-    const chosen = deliveries.find((d) => d.email === target);
-    if (current.assigned_delivery && lc(current.assigned_delivery) !== target) {
-      if (!confirm(`${current.order_number} ya está asignado a ${nameOf(current.assigned_delivery)}. ¿Pasarlo a ${chosen?.name || target}?`)) return;
-    }
     setBusy(true);
-    const { error } = await supabase
-      .from('orders')
-      .update({ assigned_delivery: target, assigned_at: new Date().toISOString(), status: 'EN RUTA' })
-      .eq('id', current.id);
+    const { data, error } = await (supabase as any).rpc('scan_order_qr', { p_code: current.id, p_delivery: target });
     setBusy(false);
     if (error) return toast.error(error.message);
-    toast.success(`✅ ${current.order_number} asignado a ${chosen?.name || target} · EN RUTA`);
-    log(current.order_number || current.id, true, `→ ${chosen?.name || target}`);
+    showResult(data as ScanResult, current.order_number || current.id);
     setCurrent(null);
   };
 
@@ -201,7 +218,27 @@ export default function QRScannerView() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <QrCameraScanner onResult={(id) => void handleCode(id)} paused={busy || Boolean(current)} />
+        <div className="relative">
+          <QrCameraScanner onResult={(id) => void handleCode(id)} paused={busy || Boolean(current) || Boolean(flash)} />
+          {flash && (
+            <button
+              type="button"
+              onClick={() => setFlash(null)}
+              className={`absolute inset-x-0 top-0 mx-auto flex aspect-square w-full max-w-md flex-col items-center justify-center gap-2 rounded-3xl p-6 text-center shadow-2xl backdrop-blur-sm ${
+                flash.ok ? 'bg-emerald-600/90' : 'bg-rose-700/90'
+              }`}
+            >
+              <div className="text-6xl">{flash.ok ? '✅' : '⛔'}</div>
+              <div className="text-xl font-black text-white">{flash.title.replace(/^\S+\s/, '')}</div>
+              {flash.lines.filter(Boolean).map((l, i) => (
+                <div key={i} className={i === 0 ? 'text-2xl font-black text-white' : 'text-sm font-semibold text-white/90'}>
+                  {l}
+                </div>
+              ))}
+              <div className="mt-2 text-[11px] text-white/70">Tocá para seguir escaneando</div>
+            </button>
+          )}
+        </div>
 
         <div className="space-y-3">
           {current && (
@@ -220,7 +257,10 @@ export default function QRScannerView() {
                   <div key={i}>📦 {it.title || it.sku} ×{it.qty || it.quantity || 1}</div>
                 ))}
                 <div className="font-black text-white">💰 Gs {nf(Number(current.total_gs || 0))}</div>
-                {current.assigned_delivery && <div className="text-amber-300">🛵 Ya asignado a {nameOf(current.assigned_delivery)}</div>}
+                {current.assigned_delivery && <div className="text-amber-300">🛵 Asignado a {nameOf(current.assigned_delivery)}</div>}
+                {current.qr_scanned_at && (
+                  <div className="font-bold text-rose-300">⛔ Ya fue escaneado el {when(current.qr_scanned_at)}: no se puede volver a registrar.</div>
+                )}
               </div>
               <select className="app-input mt-3" value={target} onChange={(e) => setTarget(e.target.value)}>
                 <option value="">Elegí el delivery…</option>
@@ -231,7 +271,7 @@ export default function QRScannerView() {
                 ))}
               </select>
               <div className="mt-2 flex gap-2">
-                <button type="button" className="nav-btn active flex-1" disabled={busy || !target} onClick={() => void assignToTarget()}>
+                <button type="button" className="nav-btn active flex-1" disabled={busy || !target || Boolean(current.qr_scanned_at)} onClick={() => void assignToTarget()}>
                   🚚 Asignar y poner EN RUTA
                 </button>
                 <button type="button" className="nav-btn" onClick={() => setCurrent(null)}>

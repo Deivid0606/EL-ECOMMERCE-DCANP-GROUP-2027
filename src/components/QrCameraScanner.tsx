@@ -242,7 +242,7 @@ export default function QrCameraScanner({
           <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => void fromPhoto(e.target.files?.[0])} />
         </label>
         <form
-          className="flex gap-2"
+          className="flex min-w-0 gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             if (manual.trim()) {
@@ -252,7 +252,7 @@ export default function QrCameraScanner({
             }
           }}
         >
-          <input className="app-input !py-2" placeholder="o escribí el N° de pedido" value={manual} onChange={(e) => setManual(e.target.value)} />
+          <input className="app-input min-w-0 !py-2" placeholder="o escribí el N° de pedido" value={manual} onChange={(e) => setManual(e.target.value)} />
           <button type="submit" className="nav-btn active !px-3">
             OK
           </button>
