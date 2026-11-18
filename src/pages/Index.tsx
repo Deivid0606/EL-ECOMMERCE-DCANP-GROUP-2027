@@ -39,6 +39,7 @@ const BotSkyImportBridge = lazy(() => import('@/components/BotSkyImportBridge'))
 const TrackingPage = lazy(() => import('@/components/TrackingPage'));
 const RoutePage = lazy(() => import('@/components/RoutePage'));
 const LiveLocationSharer = lazy(() => import('@/components/LiveLocationSharer'));
+const ClosureReminderBanner = lazy(() => import('@/components/ClosureReminderBanner'));
 const LocationDialogHost = lazy(() => import('@/components/LocationDialog'));
 const StoreOrderTabBridge = lazy(() =>
   import('@/components/StoreOrdersView').then((m) => ({ default: m.StoreOrderTabBridge }))
@@ -512,6 +513,12 @@ export default function Index() {
 
       {/* Todas las secciones originales */}
       {['orders', 'closures', 'withGuides', 'dashboard', 'products', 'commissions', 'earnings', 'mapa'].includes(String(currentView)) && <ProviderScopeBar />}
+      {String(profile.role || '') === 'DELIVERY' && (
+        <Suspense fallback={null}>
+          <ClosureReminderBanner userId={user?.id || ''} onGo={() => setCurrentView('closures')} />
+        </Suspense>
+      )}
+
       <ViewErrorBoundary resetKey={currentView}>
         <Suspense fallback={<ViewFallback />}>
           {renderView()}

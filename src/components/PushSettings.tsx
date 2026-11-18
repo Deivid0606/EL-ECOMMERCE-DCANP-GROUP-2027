@@ -14,6 +14,7 @@ type Prefs = {
   new_products: boolean;
   commissions: boolean;
   all_orders: boolean;
+  closures: boolean;
 };
 
 const DEFAULT_PREFS: Prefs = {
@@ -26,6 +27,7 @@ const DEFAULT_PREFS: Prefs = {
   new_products: true,
   commissions: true,
   all_orders: false,
+  closures: true,
 };
 
 // Estados reales de la tabla orders.
@@ -201,6 +203,22 @@ export default function PushSettings() {
                 onChange={v => set('store_sales', v)}
               />
               <Toggle label="Comisiones" hint="Solicitudes y cambios de estado de comisiones." checked={prefs.commissions} onChange={v => set('commissions', v)} />
+            </>
+          )}
+
+          {(isDelivery || isAdmin || isProvider) && (
+            <>
+              <div className="pt-3 text-xs uppercase tracking-wider font-black text-primary">🧾 Cierres</div>
+              <Toggle
+                label={isDelivery ? 'Recordatorio de cierre (20:00)' : 'Cierres de los deliverys'}
+                hint={
+                  isDelivery
+                    ? 'A las 20:00, si todavía no finalizaste tu día o tenés pedidos entregados para rendir.'
+                    : 'Cuando un delivery envía su comprobante de cierre.'
+                }
+                checked={prefs.closures}
+                onChange={v => set('closures', v)}
+              />
             </>
           )}
 
