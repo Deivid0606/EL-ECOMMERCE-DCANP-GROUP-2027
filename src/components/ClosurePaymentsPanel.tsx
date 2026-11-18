@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { compressImage, receiptExt, uploadReceipt } from '@/lib/receiptUpload';
 import { supabase } from '@/integrations/supabase/client';
@@ -106,6 +107,14 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
   const [historyStatusFilter, setHistoryStatusFilter] = useState<'TODOS' | 'PENDIENTE' | 'APROBADO' | 'RECHAZADO'>('TODOS');
   const [historySearch, setHistorySearch] = useState('');
   const [preview, setPreview] = useState<ReceiptPreview | null>(null);
+  const [previewZoom, setPreviewZoom] = useState(false);
+  // Esc cierra la vista previa del comprobante.
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPreview(null); setPreviewZoom(false); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [preview]);
 
   const emptyBank = { bank_name: '', bank_account: '', bank_holder: '', bank_ci: '', bank_alias: '' };
   const [bank, setBank] = useState(emptyBank);
@@ -1443,28 +1452,48 @@ export default function ClosurePaymentsPanel({ role, email, userId, view = 'pago
         </div>
       </section>}
 
-      {preview && (
-        <div className="closure-preview-overlay fixed inset-0 z-[100] bg-black/80 p-4 flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Vista previa del comprobante">
-          <div className="w-full max-w-5xl max-h-[92vh] rounded-2xl bg-background border border-border shadow-2xl overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between gap-3 p-4 border-b border-border">
+      {preview && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/85 p-3 backdrop-blur-sm sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Vista previa del comprobante"
+          onClick={() => { setPreview(null); setPreviewZoom(false); }}
+        >
+          <div
+            className="flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-950 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-slate-900/80 px-4 py-3">
               <div className="min-w-0">
-                <h6 className="font-black">Vista previa del comprobante</h6>
-                <p className="text-xs text-muted-foreground break-all">{preview.path}</p>
+                <div className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-300/80">Comprobante de cierre</div>
+                <div className="truncate text-sm font-bold text-white">{preview.isPdf ? '📄 PDF' : '🖼️ Imagen'}</div>
               </div>
-              <div className="flex gap-2 shrink-0">
-                <button className="nav-btn" onClick={() => { void seeReceipt(preview.path); }}>Abrir</button>
-                <button className="nav-btn active" onClick={() => setPreview(null)}>Cerrar</button>
+              <div className="flex shrink-0 gap-2">
+                {!preview.isPdf && (
+                  <button type="button" className="nav-btn !py-1.5" onClick={() => setPreviewZoom((z) => !z)}>
+                    {previewZoom ? '🔍 Ajustar' : '🔍 Ampliar'}
+                  </button>
+                )}
+                <button type="button" className="nav-btn !py-1.5" onClick={() => { void seeReceipt(preview.path); }}>↗ Abrir</button>
+                <button type="button" className="nav-btn active !py-1.5" onClick={() => { setPreview(null); setPreviewZoom(false); }} aria-label="Cerrar">✕</button>
               </div>
             </div>
-            <div className="flex-1 min-h-[55vh] bg-black/40 overflow-auto">
+            <div className="flex flex-1 items-start justify-center overflow-auto bg-slate-900/60 p-3 sm:p-5">
               {preview.isPdf ? (
-                <iframe title="Vista previa del comprobante" src={preview.url} className="w-full h-[75vh]" />
+                <iframe title="Vista previa del comprobante" src={preview.url} className="h-[80vh] w-full rounded-xl bg-white" />
               ) : (
-                <img src={preview.url} alt="Comprobante" className="max-w-full mx-auto object-contain" />
+                <img
+                  src={preview.url}
+                  alt="Comprobante"
+                  onClick={() => setPreviewZoom((z) => !z)}
+                  className={`rounded-xl shadow-xl ${previewZoom ? 'max-w-none cursor-zoom-out' : 'max-h-[80vh] max-w-full cursor-zoom-in object-contain'}`}
+                />
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
