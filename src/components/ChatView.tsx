@@ -243,8 +243,8 @@ export default function ChatView() {
     if (isAdminOrDespachante) return true;
     if (isProvider) return true;
     if (isSeller) {
-      const isProviderPeer = PROVIDERS_LIST.some(p => p.email.toLowerCase() === peerEmail.toLowerCase());
-      return isProviderPeer;
+      const peer = peerEmail.toLowerCase();
+      return PROVIDERS_LIST.some(p => p.email.toLowerCase() === peer) || contacts.some(c => c.email?.toLowerCase() === peer);
     }
     return true;
   };
@@ -254,8 +254,8 @@ export default function ChatView() {
     if (isAdminOrDespachante) return true;
     if (isProvider) return true;
     if (isSeller) {
-      const isProviderPeer = PROVIDERS_LIST.some(p => p.email.toLowerCase() === peerEmail.toLowerCase());
-      return isProviderPeer;
+      const peer = peerEmail.toLowerCase();
+      return PROVIDERS_LIST.some(p => p.email.toLowerCase() === peer) || contacts.some(c => c.email?.toLowerCase() === peer);
     }
     return true;
   };
@@ -1833,7 +1833,7 @@ export default function ChatView() {
               )}
             </div>
 
-            <div className="chat-composer">
+            <div className="chat-composer !items-end">
               <input ref={fileInputRef} type="file" hidden onChange={handleFileInput} accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" />
 
               <button
@@ -1881,7 +1881,15 @@ export default function ChatView() {
                 )}
               </div>
 
-              <input
+              <textarea
+                ref={(el) => {
+                  // Crece con el texto (hasta ~6 renglones).
+                  if (el) {
+                    el.style.height = 'auto';
+                    el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
+                  }
+                }}
+                rows={1}
                 value={text}
                 placeholder={
                   isPublicChannel 
@@ -1892,13 +1900,16 @@ export default function ChatView() {
                 }
                 onChange={(event) => trackTyping(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
+                  // Enter envía; Shift + Enter agrega un renglón.
+                  if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
                     send();
                   }
                 }}
                 disabled={(isDMChannel || tab === 'dm') && !selectedPeer}
-                className="chat-input"
+                className="chat-input !h-auto resize-none py-3 leading-snug"
+                style={{ maxHeight: 150 }}
+                title="Enter para enviar · Shift + Enter para otro renglón"
               />
 
               <button
