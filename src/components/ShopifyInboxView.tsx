@@ -926,7 +926,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       provider_emails_list: matched.provider_email || "",
     };
 
-    const { error } = await supabase.from("orders").insert(payload);
+    // La base le pone el número corto de 6 dígitos; se usa ése para mostrar.
+    const { data: inserted, error } = await supabase.from("orders").insert(payload).select("order_number").maybeSingle();
     if (error) {
       // Se libera la fila para poder reintentar.
       await (supabase as any).from("sheet_row_statuses").delete()
@@ -937,9 +938,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return false;
     }
 
+    const shortNumber = (inserted as any)?.order_number || orderId;
     setRowStatuses(prev => ({ ...prev, [rowKey]: newStatus }));
-    setRowOrderNumbers(prev => ({ ...prev, [rowKey]: orderId }));
-    if (!quiet) toast.success(`✅ Pedido ${orderId} cargado | ${city} · Delivery: ${nf(deliveryPrice)} Gs`);
+    setRowOrderNumbers(prev => ({ ...prev, [rowKey]: shortNumber }));
+    if (!quiet) toast.success(`✅ Pedido ${shortNumber} cargado | ${city} · Delivery: ${nf(deliveryPrice)} Gs`);
     return true;
     } finally {
       loadingRows.current.delete(rowKey);
