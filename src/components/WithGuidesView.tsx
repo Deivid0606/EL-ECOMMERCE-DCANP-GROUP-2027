@@ -261,14 +261,16 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       return !emails.includes(providerEmail);
     });
     if(unauthorized){toast.error('Solo podés asignar pedidos de tu proveedor');return;}
+    // Los que ya tienen delivery se omiten; se asignan los demás.
     const assigned = selected.filter(o=>String(o.assigned_delivery||'').trim());
-    if(assigned.length){toast.error(`${assigned.length} pedidos ya tienen delivery. Quitalos de la selección antes de asignar.`);return;}
-    if(!confirm(`¿Asignar ${selected.length} pedidos sin delivery a ${chosen.name||chosen.email}? Esta acción es opcional y no genera guías.`))return;
+    const free = selected.filter(o=>!String(o.assigned_delivery||'').trim());
+    if(!free.length){toast.error(`Los ${assigned.length} pedido(s) seleccionados ya tienen delivery.`);return;}
+    if(!confirm(`¿Asignar ${free.length} pedido(s) a ${chosen.name||chosen.email}?`+(assigned.length?`\n\n${assigned.length} pedido(s) que ya tienen delivery se omiten.`:'')))return;
     setAssigningBulk(true);
     try{
       let success=0;
       const errors:string[]=[];
-      for(const o of selected){
+      for(const o of free){
         const {data,error}=await supabase.from('orders')
           .update({assigned_delivery:chosen.email,assigned_at:new Date().toISOString()})
           .eq('id',o.id)
@@ -279,7 +281,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         else success++;
       }
       if(success){
-        toast.success(`${success} pedido(s) asignados a ${chosen.name||chosen.email}`);
+        toast.success(`${success} pedido(s) asignados a ${chosen.name||chosen.email}`+(assigned.length?` · ${assigned.length} omitido(s) porque ya tenían delivery`:''),{duration:7000});
         setSelectedIds(new Set());
         await load();
       }
