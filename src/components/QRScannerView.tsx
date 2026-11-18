@@ -1,305 +1,267 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { toast } from 'sonner';
+import QrCameraScanner, { orderIdFromQr } from '@/components/QrCameraScanner';
 
-const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
+/**
+ * 📷 QR Delivery: escanear la guía con la cámara desde la app.
+ * - DELIVERY: el pedido se le asigna solo (EN RUTA) y puede seguir escaneando.
+ * - ADMIN / PROVEEDOR / DESPACHANTE: ve el pedido y elige a qué delivery asignarlo.
+ * También funciona si se abre el link del QR (#/qr?id=…).
+ */
+
+const nf = (n: number) => new Intl.NumberFormat('es-PY').format(Math.round(Number(n) || 0));
+const lc = (v: unknown) => String(v ?? '').trim().toLowerCase();
+const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
+type Order = {
+  id: string;
+  order_number: string | null;
+  customer_name: string | null;
+  phone: string | null;
+  city: string | null;
+  street: string | null;
+  status: string | null;
+  status2: string | null;
+  total_gs: number | null;
+  items_json: any;
+  assigned_delivery: string | null;
+  assigned_at: string | null;
+};
+type Scan = { id: string; ok: boolean; text: string; at: number };
+
+const SELECT = 'id, order_number, customer_name, phone, city, street, status, status2, total_gs, items_json, assigned_delivery, assigned_at';
+
+async function findOrder(code: string): Promise<Order | null> {
+  if (isUuid(code)) {
+    const { data } = await supabase.from('orders').select(SELECT).eq('id', code).maybeSingle();
+    if (data) return data as any;
+  }
+  const exact = await supabase.from('orders').select(SELECT).eq('order_number', code).maybeSingle();
+  if (exact.data) return exact.data as any;
+  const ci = await supabase.from('orders').select(SELECT).ilike('order_number', code).maybeSingle();
+  if (ci.data) return ci.data as any;
+  const ref = await (supabase as any).from('orders').select(SELECT).eq('source_ref', code).maybeSingle();
+  return (ref.data as Order) || null;
+}
+
+const itemsOf = (o: Order) => {
+  try {
+    const raw = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : o.items_json;
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+};
 
 export default function QRScannerView() {
   const { profile } = useAuth();
-  const role = profile?.role || '';
-  const userEmail = profile?.email || '';
+  const role = String(profile?.role || '').toUpperCase();
+  const myEmail = lc(profile?.email);
+  const isDelivery = role === 'DELIVERY';
+  const canAssignOthers = ['ADMIN', 'PROVEEDOR', 'DESPACHANTE'].includes(role);
 
-  const [orderData, setOrderData] = useState<any>(null);
-  const [deliveryUsers, setDeliveryUsers] = useState<any[]>([]);
-  const [selectedDelivery, setSelectedDelivery] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [idFromUrl, setIdFromUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [scans, setScans] = useState<Scan[]>([]);
+  const [current, setCurrent] = useState<Order | null>(null);
+  const [deliveries, setDeliveries] = useState<{ email: string; name: string }[]>([]);
+  const [target, setTarget] = useState('');
+  const [names, setNames] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    console.log('=== QRScannerView CARGADO ===');
-    console.log('URL completa:', window.location.href);
-    console.log('Hash:', window.location.hash);
+  const nameOf = (email: string | null) => (email ? names[lc(email)] || deliveries.find((d) => d.email === lc(email))?.name || email : '');
 
-    const hash = window.location.hash;
-    const match = hash.match(/[?&]id=([^&]+)/);
+  const log = (id: string, ok: boolean, text: string) => setScans((prev) => [{ id, ok, text, at: Date.now() }, ...prev].slice(0, 30));
 
-    if (match && match[1]) {
-      const orderId = decodeURIComponent(match[1])
-        .trim()
-        .replace(/\s+/g, '');
-      console.log('✅ ID encontrado en URL:', orderId);
-      setIdFromUrl(orderId);
-      loadOrderByNumber(orderId);
-    } else {
-      console.log('❌ No se encontró ID en la URL');
-      setError('No se encontró número de pedido en el QR. Asegúrate de escanear el QR de Delivery.');
-    }
-  }, []);
-
-  const loadOrderByNumber = async (orderNumber: string) => {
-    setLoading(true);
-    setError('');
-
-    const cleanOrderNumber = decodeURIComponent(orderNumber || '')
-      .trim()
-      .replace(/\s+/g, '');
-
-    console.log('🔍 QR ORIGINAL:', orderNumber);
-    console.log('🔍 QR LIMPIO:', cleanOrderNumber);
-
-    try {
-      let foundOrder = null;
-
-      const exact = await supabase
-        .from('orders')
-        .select('*')
-        .eq('order_number', cleanOrderNumber)
-        .maybeSingle();
-
-      if (exact.data) {
-        foundOrder = exact.data;
+  // Delivery: asignarse el pedido escaneado.
+  const assignToMe = useCallback(
+    async (code: string) => {
+      const order = await findOrder(code);
+      if (!order) {
+        toast.error(`❌ Pedido ${code} no encontrado`);
+        log(code, false, 'No encontrado');
+        return;
       }
+      const label = order.order_number || code;
+      if (order.assigned_delivery && lc(order.assigned_delivery) !== myEmail) {
+        toast.error(`❌ ${label} ya está asignado a otro delivery`, { duration: 6000 });
+        log(label, false, 'Asignado a otro delivery');
+        return;
+      }
+      if (lc(order.assigned_delivery) === myEmail) {
+        toast.info(`ℹ️ ${label} ya era tuyo`);
+        log(label, true, 'Ya era tuyo');
+        return;
+      }
+      const { data, error } = await supabase
+        .from('orders')
+        .update({ assigned_delivery: profile?.email, assigned_at: new Date().toISOString(), status: 'EN RUTA' })
+        .eq('id', order.id)
+        .is('assigned_delivery', null)
+        .select('id');
+      if (error) {
+        toast.error(`❌ ${label}: ${error.message}`);
+        log(label, false, error.message);
+      } else if (!data?.length) {
+        toast.error(`❌ ${label}: lo tomó otro delivery recién`);
+        log(label, false, 'Lo tomó otro delivery');
+      } else {
+        toast.success(`✅ ${label} asignado a vos · EN RUTA`);
+        log(label, true, `${order.customer_name || ''} · ${order.city || ''}`);
+      }
+    },
+    [myEmail, profile?.email],
+  );
 
-      if (!foundOrder) {
-        const insensitive = await supabase
-          .from('orders')
-          .select('*')
-          .ilike('order_number', cleanOrderNumber)
-          .maybeSingle();
-
-        if (insensitive.data) {
-          foundOrder = insensitive.data;
+  const handleCode = useCallback(
+    async (raw: string) => {
+      const code = orderIdFromQr(raw);
+      if (!code || busy) return;
+      setBusy(true);
+      try {
+        if (isDelivery) await assignToMe(code);
+        else {
+          const order = await findOrder(code);
+          if (!order) {
+            toast.error(`❌ Pedido ${code} no encontrado`);
+            log(code, false, 'No encontrado');
+          } else {
+            setCurrent(order);
+            setTarget(lc(order.assigned_delivery));
+            if (order.assigned_delivery && !names[lc(order.assigned_delivery)]) {
+              const { data } = await supabase.from('profiles').select('email, name').ilike('email', order.assigned_delivery).maybeSingle();
+              if (data) setNames((n) => ({ ...n, [lc(data.email)]: data.name || data.email }));
+            }
+          }
         }
+      } finally {
+        setBusy(false);
       }
+    },
+    [busy, isDelivery, assignToMe, names],
+  );
 
-      if (!foundOrder) {
-        setError(`Pedido ${cleanOrderNumber} no encontrado`);
-        return;
-      }
-
-      console.log('✅ Pedido encontrado:', foundOrder);
-      setOrderData(foundOrder);
-
-    } catch (err) {
-      console.error(err);
-      setError('Error al cargar el pedido');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadDeliveryUsers = async () => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('email, full_name')
-      .eq('role', 'DELIVERY')
-      .eq('approved', true)
-      .eq('active', true);
-
-    if (!error && data) {
-      setDeliveryUsers(data || []);
-    }
-  };
-
-  const assignOrder = async () => {
-    if (!orderData) return;
-
-    console.log('📦 Asignando pedido:', orderData.order_number);
-
-    if (role === 'DELIVERY') {
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          assigned_delivery: userEmail,
-          assigned_at: new Date().toISOString(),
-          status: 'EN RUTA',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', orderData.id);
-
-      if (error) {
-        console.error('❌ Error al asignar:', error);
-        toast.error('Error al asignar pedido');
-      } else {
-        console.log('✅ Pedido asignado exitosamente');
-        toast.success('✅ Pedido asignado y Estado 1 cambiado a EN RUTA');
-        setTimeout(() => {
-          window.location.href = '#/cierres';
-        }, 1500);
-      }
-    } else if (role === 'ADMIN' || role === 'PROVEEDOR') {
-      if (!selectedDelivery) {
-        toast.error('Selecciona un repartidor');
-        return;
-      }
-
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          assigned_delivery: selectedDelivery,
-          assigned_at: new Date().toISOString(),
-          status: 'EN RUTA',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', orderData.id);
-
-      if (error) {
-        console.error('❌ Error al asignar:', error);
-        toast.error('Error al asignar pedido');
-      } else {
-        console.log('✅ Pedido asignado exitosamente a:', selectedDelivery);
-        toast.success(`✅ Pedido asignado a ${selectedDelivery} y Estado 1 cambiado a EN RUTA`);
-        setTimeout(() => {
-          window.location.href = '#/cierres';
-        }, 1500);
-      }
-    }
-  };
-
+  // Link del QR abierto con la cámara del celular: #/qr?id=…
   useEffect(() => {
-    if (role === 'ADMIN' || role === 'PROVEEDOR') {
-      loadDeliveryUsers();
+    const m = window.location.hash.match(/[?&]id=([^&]+)/);
+    if (m && profile?.email) {
+      void handleCode(decodeURIComponent(m[1]));
+      window.history.replaceState(null, '', window.location.pathname + window.location.search + window.location.hash.split('?')[0]);
     }
-  }, [role]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.email]);
 
-  const renderGuideDetails = (order: any) => {
-    const items =
-      typeof order.items_json === 'string'
-        ? JSON.parse(order.items_json || '[]')
-        : order.items_json || [];
+  // Lista de deliverys para admin / proveedor / despachante.
+  useEffect(() => {
+    if (!canAssignOthers) return;
+    (async () => {
+      const { data: roles } = await supabase.from('user_roles').select('user_id').eq('role', 'DELIVERY').eq('approved', true);
+      const ids = (roles || []).map((r: any) => r.user_id);
+      if (!ids.length) return;
+      const { data } = await supabase.from('profiles').select('email, name').in('user_id', ids);
+      setDeliveries(
+        (data || [])
+          .filter((p: any) => p.email)
+          .map((p: any) => ({ email: lc(p.email), name: p.name || p.email }))
+          .sort((a, b) => a.name.localeCompare(b.name, 'es')),
+      );
+    })();
+  }, [canAssignOthers]);
 
-    return (
-      <div className="space-y-3">
-        <div className="border-b pb-2">
-          <h3 className="font-bold text-xl">📋 GUÍA DE ENVÍO — {order.order_number}</h3>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <p><span className="font-semibold">Cliente:</span> {order.customer_name}</p>
-          <p><span className="font-semibold">Teléfono:</span> {order.phone}</p>
-          <p><span className="font-semibold">Email:</span> {order.email || '—'}</p>
-          <p><span className="font-semibold">Departamento:</span> {order.departamento || '—'}</p>
-          <p><span className="font-semibold">Ciudad:</span> {order.city || '—'}</p>
-          <p>
-            <span className="font-semibold">Dirección:</span> {order.street || ''}{' '}
-            {order.district ? `- ${order.district}` : ''}
-          </p>
-        </div>
-
-        <div className="border-t pt-2">
-          <p className="font-semibold">📦 Productos:</p>
-          {items.map((item: any, idx: number) => (
-            <p key={idx} className="text-sm pl-2">
-              {idx + 1}. {item.title || item.sku} x{item.qty} — Gs{' '}
-              {nf(Number(item.sale_gs || 0) * Number(item.qty || 1))}
-            </p>
-          ))}
-        </div>
-
-        <div className="border-t pt-2">
-          <p className="font-semibold">💰 Total: Gs {nf(Number(order.total_gs || 0))}</p>
-        </div>
-
-        <div className="border-t pt-2 text-sm">
-          <p><span className="font-semibold">👤 Vendedor:</span> {order.created_by || '—'}</p>
-          <p>
-            <span className="font-semibold">🏢 Proveedor:</span>{' '}
-            {order.provider_emails_list || order.provider_email || '—'}
-          </p>
-        </div>
-      </div>
-    );
+  const assignToTarget = async () => {
+    if (!current || !target) return toast.error('Elegí un delivery');
+    const chosen = deliveries.find((d) => d.email === target);
+    if (current.assigned_delivery && lc(current.assigned_delivery) !== target) {
+      if (!confirm(`${current.order_number} ya está asignado a ${nameOf(current.assigned_delivery)}. ¿Pasarlo a ${chosen?.name || target}?`)) return;
+    }
+    setBusy(true);
+    const { error } = await supabase
+      .from('orders')
+      .update({ assigned_delivery: target, assigned_at: new Date().toISOString(), status: 'EN RUTA' })
+      .eq('id', current.id);
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success(`✅ ${current.order_number} asignado a ${chosen?.name || target} · EN RUTA`);
+    log(current.order_number || current.id, true, `→ ${chosen?.name || target}`);
+    setCurrent(null);
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-100 p-4 flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
-          <p className="mt-2 text-gray-500">Cargando pedido...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error && !orderData) {
-    return (
-      <div className="min-h-screen bg-gray-100 p-4">
-        <div className="max-w-2xl mx-auto">
-          <div className="bg-white rounded-xl shadow-lg p-6 text-center">
-            <div className="text-red-500 text-6xl mb-4">❌</div>
-            <h2 className="text-xl font-bold mb-2">Error</h2>
-            <p className="text-gray-600 mb-4">{error}</p>
-            <p className="text-sm text-gray-500 mb-4">
-              ID detectado: {idFromUrl || 'ninguno'}
-            </p>
-            <button
-              className="bg-purple-500 text-white px-4 py-2 rounded-lg"
-              onClick={() => window.location.href = '#/pedidos'}
-            >
-              Volver a Pedidos
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (orderData) {
-    return (
-      <div className="min-h-screen bg-gray-100 p-4">
-        <div className="max-w-2xl mx-auto">
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h2 className="text-2xl font-bold text-center mb-6">🚚 Asignar Pedido</h2>
-
-            <div className="border-2 border-purple-300 rounded-lg p-4 bg-purple-50">
-              {renderGuideDetails(orderData)}
-
-              <div className="mt-4">
-                {role === 'DELIVERY' ? (
-                  <button
-                    className="w-full bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600 transition"
-                    onClick={assignOrder}
-                  >
-                    ✅ Asignarme este pedido
-                  </button>
-                ) : (role === 'ADMIN' || role === 'PROVEEDOR') && (
-                  <>
-                    <select
-                      className="w-full p-2 border rounded-lg mb-2"
-                      value={selectedDelivery}
-                      onChange={(e) => setSelectedDelivery(e.target.value)}
-                    >
-                      <option value="">Seleccionar repartidor...</option>
-                      {deliveryUsers.map(user => (
-                        <option key={user.email} value={user.email}>
-                          {user.full_name || user.email}
-                        </option>
-                      ))}
-                    </select>
-
-                    <button
-                      className="w-full bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600 transition"
-                      onClick={assignOrder}
-                    >
-                      🚚 Asignar pedido
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const okCount = scans.filter((s) => s.ok).length;
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4 flex items-center justify-center">
-      <div className="text-center">
-        <p className="text-gray-500">Inicializando...</p>
+    <div className="space-y-4">
+      <div className="relative overflow-hidden rounded-3xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/15 via-slate-900/60 to-violet-500/10 p-5 shadow-2xl">
+        <div className="text-[10px] font-black uppercase tracking-[0.25em] text-cyan-300/80">QR Delivery</div>
+        <h2 className="text-2xl font-black text-white">📷 Escanear guías</h2>
+        <p className="mt-1 text-xs text-slate-400">
+          {isDelivery
+            ? 'Escaneá el QR de cada guía: el pedido se te asigna y queda EN RUTA. Podés escanear uno tras otro.'
+            : 'Escaneá el QR de una guía para ver el pedido y asignarlo a un delivery.'}
+        </p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <QrCameraScanner onResult={(id) => void handleCode(id)} paused={busy || Boolean(current)} />
+
+        <div className="space-y-3">
+          {current && (
+            <div className="rounded-3xl border border-violet-500/30 bg-slate-950/70 p-4 shadow-xl">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-wider text-violet-300">Pedido escaneado</div>
+                  <div className="text-xl font-black text-white">{current.order_number}</div>
+                </div>
+                <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-black text-slate-200">{current.status || 'PENDIENTE'}</span>
+              </div>
+              <div className="mt-2 space-y-0.5 text-sm text-slate-300">
+                <div>👤 {current.customer_name} · {current.phone}</div>
+                <div>📍 {current.city}{current.street ? ` · ${current.street}` : ''}</div>
+                {itemsOf(current).map((it: any, i: number) => (
+                  <div key={i}>📦 {it.title || it.sku} ×{it.qty || it.quantity || 1}</div>
+                ))}
+                <div className="font-black text-white">💰 Gs {nf(Number(current.total_gs || 0))}</div>
+                {current.assigned_delivery && <div className="text-amber-300">🛵 Ya asignado a {nameOf(current.assigned_delivery)}</div>}
+              </div>
+              <select className="app-input mt-3" value={target} onChange={(e) => setTarget(e.target.value)}>
+                <option value="">Elegí el delivery…</option>
+                {deliveries.map((d) => (
+                  <option key={d.email} value={d.email}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-2 flex gap-2">
+                <button type="button" className="nav-btn active flex-1" disabled={busy || !target} onClick={() => void assignToTarget()}>
+                  🚚 Asignar y poner EN RUTA
+                </button>
+                <button type="button" className="nav-btn" onClick={() => setCurrent(null)}>
+                  Escanear otro
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-3xl border border-white/10 bg-slate-950/70 p-4 shadow-xl">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Escaneados en esta sesión</div>
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-black text-emerald-300">✅ {okCount}</span>
+            </div>
+            {scans.length === 0 ? (
+              <p className="text-sm text-slate-500">Todavía no escaneaste ninguna guía.</p>
+            ) : (
+              <div className="max-h-80 space-y-1.5 overflow-y-auto">
+                {scans.map((s, i) => (
+                  <div key={`${s.id}-${s.at}-${i}`} className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm ${s.ok ? 'bg-emerald-500/10' : 'bg-rose-500/10'}`}>
+                    <span className="min-w-0 truncate">
+                      {s.ok ? '✅' : '❌'} <b>{s.id}</b> <span className="text-xs text-slate-400">{s.text}</span>
+                    </span>
+                    <span className="shrink-0 text-[10px] text-slate-500">{new Date(s.at).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

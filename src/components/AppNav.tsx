@@ -104,8 +104,8 @@ const navItems: NavItem[] = [
   },
   {
     id: 'qrScanner',
-    label: '📷 QR Delivery',
-    roles: ['ADMIN', 'PROVEEDOR'],
+    label: '📷 Escanear QR',
+    roles: ['ADMIN', 'PROVEEDOR', 'DESPACHANTE', 'DELIVERY'],
   },
   {
     id: 'rates',
