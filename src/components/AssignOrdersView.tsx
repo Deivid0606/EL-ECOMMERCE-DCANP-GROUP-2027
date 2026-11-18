@@ -151,39 +151,26 @@ export default function AssignOrdersView() {
         const deliveryEmail = profile?.email || '';
         const deliveryName = profile?.name || deliveryEmail;
 
-        // Doble verificación antes de asignar
-        const { data: freshOrder } = await supabase
-          .from('orders')
-          .select('assigned_delivery, assigned_at')
-          .eq('id', orderData.id)
-          .single();
-
-        if (freshOrder?.assigned_delivery && freshOrder.assigned_delivery !== deliveryEmail) {
-          const otherDeliveryName = await getDeliveryName(freshOrder.assigned_delivery);
-          const fechaAsignacion = formatAssignedDate(freshOrder.assigned_at);
-          toast.error(`❌ El pedido ${displayId} está asignado a ${otherDeliveryName} desde el ${fechaAsignacion}`, { duration: 6000 });
-          setPendingQrId(null);
-          setAutoAssignProcessing(false);
-          return;
-        }
-
-        const { error } = await supabase
-          .from('orders')
-          .update({
-            assigned_delivery: deliveryEmail,
-            assigned_at: new Date().toISOString(),
-            status: 'EN RUTA',
-          })
-          .eq('id', orderData.id);
-
+        // Se registra con la misma regla que «Escanear QR»: cada QR una sola vez.
+        const { data: res, error } = await (supabase as any).rpc('scan_order_qr', { p_code: orderData.id });
+        const r: any = res || {};
         if (error) {
           toast.error('❌ Error al asignar: ' + error.message);
-        } else {
-          toast.success(`✅ Pedido ${displayId} asignado correctamente a ${deliveryName}`);
+        } else if (r.ok) {
+          toast.success(`✅ Pedido ${displayId} registrado exitosamente · asignado a ${deliveryName} · EN RUTA`, { duration: 5000 });
           load();
           setTimeout(() => {
             window.location.href = '/';
-          }, 2000);
+          }, 2500);
+        } else if (r.reason === 'already') {
+          const at = r.scanned_at ? formatAssignedDate(r.scanned_at) : '';
+          toast.error(`⛔ El pedido ${displayId} ya fue escaneado el ${at} por ${r.scanned_by || '—'}`, { duration: 7000 });
+        } else if (r.reason === 'other_delivery') {
+          toast.error(`❌ El pedido ${displayId} está asignado a ${r.delivery || 'otro delivery'}`, { duration: 6000 });
+        } else if (r.reason === 'closed') {
+          toast.error(`⛔ El pedido ${displayId} ya está cerrado (${r.status})`, { duration: 6000 });
+        } else {
+          toast.error(`❌ Pedido ${displayId} no encontrado`);
         }
 
         setPendingQrId(null);
