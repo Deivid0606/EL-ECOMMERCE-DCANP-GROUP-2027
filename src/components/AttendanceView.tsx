@@ -12,7 +12,27 @@ type Row = {
   started_at: string | null;
   ended_at: string | null;
   note: string | null;
+  plan?: 'EN_CAMINO' | 'PENDIENTES' | null;
+  eta_at?: string | null;
 };
+
+const PLANS = {
+  EN_CAMINO: { icon: '🛵', title: 'Ya estoy en camino', short: 'En camino', eta: 'llego aprox. a las' },
+  PENDIENTES: { icon: '📦', title: 'Sigo con mis pedidos pendientes y después paso', short: 'Con pendientes', eta: 'paso aprox. a las' },
+} as const;
+type Plan = keyof typeof PLANS;
+
+/** Hora de Paraguay «HH:MM» dentro de `mins` minutos (redondeada a 5). */
+const pyTimeIn = (mins: number) => {
+  const d = new Date(Date.now() - 3 * 3600_000 + mins * 60_000);
+  const m = Math.ceil(d.getUTCMinutes() / 5) * 5;
+  d.setUTCMinutes(m, 0, 0);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+};
+/** «HH:MM» (24 h, hora de Paraguay) de una fecha, para el selector de hora. */
+const pyHM = (iso: string) => new Date(new Date(iso).getTime() - 3 * 3600_000).toISOString().slice(11, 16);
+const planText = (r?: { plan?: string | null; eta_at?: string | null } | null) =>
+  r?.plan && PLANS[r.plan as Plan] ? `${PLANS[r.plan as Plan].icon} ${PLANS[r.plan as Plan].short}${r.eta_at ? ` · ${PLANS[r.plan as Plan].eta.replace('aprox. a las', '~')} ${time(r.eta_at)}` : ''}` : '';
 type Person = { email: string; name: string };
 
 const lc = (v: unknown) => String(v ?? '').trim().toLowerCase();
@@ -60,6 +80,9 @@ export default function AttendanceView() {
 function DeliveryAttendance({ myEmail, now }: { myEmail: string; now: number }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [busy, setBusy] = useState(false);
+  const [choosing, setChoosing] = useState<null | 'start' | 'change'>(null);
+  const [plan, setPlan] = useState<Plan>('EN_CAMINO');
+  const [eta, setEta] = useState(pyTimeIn(30));
   const today = pyToday();
 
   const load = useCallback(async () => {
@@ -119,6 +142,25 @@ function DeliveryAttendance({ myEmail, now }: { myEmail: string; now: number }) 
     void load();
   };
 
+  // Marcar entrada (o cambiar) con «cómo vengo» y la hora aproximada.
+  const confirmPlan = async () => {
+    setBusy(true);
+    if (choosing === 'start') {
+      const { error } = await (supabase as any).rpc('attendance_action', { p_action: 'start', p_note: null });
+      if (error) {
+        setBusy(false);
+        toast.error(error.message);
+        return;
+      }
+    }
+    const { error } = await (supabase as any).rpc('attendance_set_plan', { p_plan: plan, p_eta: eta || null });
+    setBusy(false);
+    if (error) toast.error(error.message);
+    else toast.success(choosing === 'start' ? `▶ Entrada marcada · ${PLANS[plan].icon} ${PLANS[plan].short}${eta ? ` (${eta})` : ''}` : 'Listo, avisado');
+    setChoosing(null);
+    void load();
+  };
+
   const history = useMemo(() => {
     const byDay = new Map<string, Row[]>();
     rows.filter((r) => r.day !== today).forEach((r) => byDay.set(r.day, [...(byDay.get(r.day) || []), r]));
@@ -169,17 +211,75 @@ function DeliveryAttendance({ myEmail, now }: { myEmail: string; now: number }) 
           )}
         </div>
 
-        {open ? (
+        {open && (
+          <div className="mb-3 flex items-center justify-between gap-2 rounded-2xl border border-white/10 bg-slate-950/40 px-3 py-2 text-left text-sm">
+            <span className="font-bold">{planText(open) || '❔ No avisaste cómo venís'}</span>
+            <button
+              type="button"
+              className="nav-btn !px-2 !py-1 !text-[11px]"
+              onClick={() => {
+                setPlan((open.plan as Plan) || 'EN_CAMINO');
+                setEta(open.eta_at ? pyHM(open.eta_at) : pyTimeIn(30));
+                setChoosing('change');
+              }}
+            >
+              {open.plan ? 'Cambiar' : 'Avisar'}
+            </button>
+          </div>
+        )}
+
+        {choosing && (
+          <div className="mb-3 space-y-2 rounded-2xl border border-cyan-500/40 bg-cyan-500/10 p-3 text-left">
+            <div className="text-sm font-black">¿Cómo venís?</div>
+            {(Object.keys(PLANS) as Plan[]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => {
+                  setPlan(k);
+                  setEta(pyTimeIn(k === 'EN_CAMINO' ? 30 : 120));
+                }}
+                className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm font-bold ${plan === k ? 'border-cyan-400 bg-cyan-500/20' : 'border-white/10'}`}
+              >
+                <span className="text-2xl">{PLANS[k].icon}</span>
+                <span>{PLANS[k].title}</span>
+              </button>
+            ))}
+            <label className="flex items-center justify-between gap-2 text-sm">
+              <span>⏰ {PLANS[plan].eta}</span>
+              <input type="time" className="app-input !w-auto !py-1" value={eta} onChange={(e) => setEta(e.target.value)} />
+            </label>
+            <div className="flex gap-2">
+              <button type="button" className="flex-1 rounded-xl bg-emerald-600 py-3 font-black text-white disabled:opacity-50" disabled={busy} onClick={() => void confirmPlan()}>
+                {choosing === 'start' ? '▶ Marcar entrada' : 'Guardar'}
+              </button>
+              <button type="button" className="rounded-xl border border-white/15 px-4 font-bold" onClick={() => setChoosing(null)}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {choosing ? null : open ? (
           <button type="button" className="w-full rounded-2xl bg-rose-600 py-4 text-lg font-black text-white disabled:opacity-50" disabled={busy} onClick={() => void act('stop')}>
             ⏹ Marcar salida
           </button>
         ) : (
-          <button type="button" className="w-full rounded-2xl bg-emerald-600 py-4 text-lg font-black text-white disabled:opacity-50" disabled={busy} onClick={() => void act('start')}>
+          <button
+            type="button"
+            className="w-full rounded-2xl bg-emerald-600 py-4 text-lg font-black text-white disabled:opacity-50"
+            disabled={busy}
+            onClick={() => {
+              setPlan('EN_CAMINO');
+              setEta(pyTimeIn(30));
+              setChoosing('start');
+            }}
+          >
             ▶ {todayRows.some((r) => r.started_at) ? 'Volver a marcar entrada' : 'Marcar entrada'}
           </button>
         )}
 
-        {!open && !todayRows.some((r) => r.started_at) && (
+        {!choosing && !open && !todayRows.some((r) => r.started_at) && (
           absent ? (
             <button type="button" className="mt-3 text-xs text-muted-foreground underline" disabled={busy} onClick={() => void act('undo_absent')}>
               Me equivoqué, sí voy a trabajar
@@ -377,7 +477,17 @@ function TeamAttendance({ userId, now }: { userId: string; now: number }) {
                 </td>
                 <td className="text-sm">
                   {state === 'working' ? (
-                    <span className="font-bold text-emerald-300">🟢 Trabajando</span>
+                    <span>
+                      <span className="font-bold text-emerald-300">🟢 Trabajando</span>
+                      {open?.plan && (
+                        <span
+                          className={`ml-1 block text-[11px] font-bold ${open.eta_at && new Date(open.eta_at).getTime() < now ? 'text-amber-300' : 'text-cyan-300'}`}
+                        >
+                          {planText(open)}
+                          {open.eta_at && new Date(open.eta_at).getTime() < now ? ' · ⏰ ya pasó la hora' : ''}
+                        </span>
+                      )}
+                    </span>
                   ) : state === 'done' ? (
                     <span className="font-bold text-sky-300">✅ Terminó</span>
                   ) : state === 'absent' ? (
