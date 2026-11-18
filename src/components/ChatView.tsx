@@ -225,22 +225,17 @@ export default function ChatView() {
 
   // Contactos disponibles para el selector
   const availableContacts = useMemo(() => {
+    // La lista ya viene filtrada por rol desde la base (chat_contacts):
+    // vendedor y delivery → admin, proveedores y despachantes; el resto → todos.
+    const list = contacts.filter(c => c.email && c.email.toLowerCase() !== String(myEmail || '').toLowerCase());
     if (isSeller) {
-      // Vendedor: mostrar los proveedores de la lista manual
-      const providers = PROVIDERS_LIST.map(p => ({
-        email: p.email,
-        name: p.name,
-        role: p.role,
-      }));
-      return providers;
+      // Se suman los proveedores de la lista manual que no estén.
+      const have = new Set(list.map(c => c.email.toLowerCase()));
+      PROVIDERS_LIST.forEach(p => {
+        if (!have.has(p.email.toLowerCase())) list.push({ email: p.email, name: p.name, role: p.role } as any);
+      });
     }
-    
-    if (isAdminOrDespachante || isProvider) {
-      // Admin, Despachante o Proveedor: todos los contactos
-      return contacts.filter(c => c.email !== myEmail);
-    }
-    
-    return [];
+    return list;
   }, [contacts, myEmail, isSeller, isAdminOrDespachante, isProvider]);
 
   const canViewChat = (peerEmail: string): boolean => {
@@ -388,6 +383,12 @@ export default function ChatView() {
     setLoadingContacts(true);
     
     try {
+      // A quién le puede escribir cada uno (lo decide la base según el rol).
+      const { data: allowed, error: allowedError } = await (supabase as any).rpc('chat_contacts');
+      if (!allowedError && Array.isArray(allowed)) {
+        setContacts(allowed.map((c: any) => ({ email: c.email, name: c.name, role: c.role })));
+        return;
+      }
       const [profRes, rolesRes] = await Promise.all([
         supabase.from('profiles').select('email, name, user_id').eq('approved', true),
         supabase.from('user_roles').select('user_id, role').eq('approved', true),
