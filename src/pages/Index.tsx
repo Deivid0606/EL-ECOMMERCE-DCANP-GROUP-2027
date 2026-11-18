@@ -99,7 +99,7 @@ function hasStoreOrderParams() {
 const NOTIFICATION_VIEWS = ['chat', 'store', 'orders', 'products', 'profile'];
 
 // Estas pantallas no se ofrecen ni se pueden abrir desde la interfaz DELIVERY.
-const DELIVERY_HIDDEN_VIEWS: ViewName[] = ['rankingDelivery', 'mapa', 'qrScanner', 'news'];
+const DELIVERY_HIDDEN_VIEWS: ViewName[] = ['rankingDelivery', 'mapa', 'news'];
 
 function isSpecialOrderLink() {
   return isBotSkyImportLink() || isCreateOrderLink();
