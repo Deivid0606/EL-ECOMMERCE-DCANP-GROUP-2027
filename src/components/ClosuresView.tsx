@@ -15,6 +15,7 @@ import { pyToday, pyStart, pyEnd, pyDateKey } from '@/lib/pyTime';
 import { useOrderEditTools } from '@/components/OrderEditTools';
 import DispatcherProvidersPanel from '@/components/DispatcherProvidersPanel';
 import DeliveryStockPanel from '@/components/DeliveryStockPanel';
+import IncentivesPanel from '@/components/IncentivesPanel';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -687,7 +688,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   const [selectedGuideIds, setSelectedGuideIds] = useState<Set<string>>(new Set());
   const [updatingContactedIds, setUpdatingContactedIds] = useState<Set<string>>(new Set());
   const [activeSection, setActiveSection] = useState<'orders' | 'team' | 'teamClosures'>('orders');
-  const [closureTab, setClosureTab] = useState<'resumen' | 'pedidos' | 'repetidos' | 'stock' | 'pagos' | 'historial' | 'config'>('resumen');
+  const [closureTab, setClosureTab] = useState<'resumen' | 'pedidos' | 'repetidos' | 'stock' | 'incentivos' | 'pagos' | 'historial' | 'config'>('resumen');
   const [bulkStatus, setBulkStatus] = useState<string>('EN RUTA');
   const [bulkRetiroStatus, setBulkRetiroStatus] = useState<string>('REALIZADO');
   const [bulkTeamUserId, setBulkTeamUserId] = useState<string>('');
@@ -3227,6 +3228,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           ['pedidos', '📦', 'Pedidos'],
           ['repetidos', '🔁', 'Repetidos'],
           ['stock', '📦', 'Stock delivery'],
+          ['incentivos', '🏆', 'Incentivos'],
           ['pagos', '💳', 'Pagos de cierre'],
           ['historial', '🧾', 'Historial'],
           ['config', '⚙️', 'Configuración'],
@@ -3239,6 +3241,14 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           </button>
         ))}
       </nav>
+      {closureTab === 'incentivos' && (
+        <IncentivesPanel
+          canManage={isAdmin || isSupplier}
+          isAdmin={isAdmin}
+          myEmail={myEmail}
+          deliveries={(deliveries || []).map((d: any) => ({ email: String(d.email || ''), name: d.name }))}
+        />
+      )}
       {isAdmin && closureTab === 'config' && <DispatcherProvidersPanel />}
       {canViewRendicion && (closureTab === 'pagos' || closureTab === 'historial' || closureTab === 'config') && (
         <ClosurePaymentsPanel role={myRole} email={myEmail} userId={profile?.user_id} view={closureTab} />
