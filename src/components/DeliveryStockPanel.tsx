@@ -102,7 +102,17 @@ export default function DeliveryStockPanel({
     const wantProv = new Set(providers.map(lc));
     const q = lc(search);
     const map = new Map<string, { email: string; name: string; logo: string | null; total: number; committed: number; items: any[] }>();
-    for (const row of stock) {
+    // Stock cargado + productos comprometidos en pedidos «Despachado por repartidor» aunque
+    // el delivery no tenga stock de ese producto (aparecen con 0 y ⚠️ faltan).
+    const rowsAll = [...stock];
+    const have = new Set(stock.map((x) => `${lc(x.delivery_email)}|${x.product_id}`));
+    committed.forEach((qty, key) => {
+      if (qty > 0 && !have.has(key)) {
+        const [delivery_email, product_id] = key.split('|');
+        rowsAll.push({ delivery_email, product_id, quantity: 0 });
+      }
+    });
+    for (const row of rowsAll) {
       const email = lc(row.delivery_email);
       if (wantDel.size && !wantDel.has(email)) continue;
       const prod = products.get(row.product_id);
@@ -116,12 +126,17 @@ export default function DeliveryStockPanel({
       const com = committed.get(`${email}|${prod.id}`) || 0;
       const g = map.get(email) || { email, name: info?.name || email, logo: info?.logo || null, total: 0, committed: 0, items: [] };
       g.total += qty;
-      g.committed += Math.min(com, qty);
+      g.committed += com;
       g.items.push({ ...prod, qty, com, free: qty - com });
       map.set(email, g);
     }
     return [...map.values()]
-      .map((g) => ({ ...g, items: g.items.sort((a, b) => b.qty - a.qty) }))
+      .map((g) => ({
+        ...g,
+        missing: g.items.reduce((n, it) => n + Math.max(0, -it.free), 0),
+        // Primero lo que falta, después de mayor a menor stock.
+        items: g.items.sort((a, b) => Number(b.free < 0) - Number(a.free < 0) || b.qty - a.qty),
+      }))
       .sort((a, b) => b.total - a.total);
   }, [stock, products, people, committed, deliveries, providers, onlyProvider, search]);
 
@@ -160,6 +175,12 @@ export default function DeliveryStockPanel({
                   <div className="truncate font-black">{d.name}</div>
                   <div className="truncate text-xs text-slate-500">{d.email}</div>
                 </div>
+                {d.missing > 0 && (
+                  <div className="rounded-xl bg-rose-500/15 px-3 py-2 text-center">
+                    <div className="text-[10px] font-black uppercase text-rose-400">⚠️ Faltan</div>
+                    <div className="text-xl font-black text-rose-300">{nf(d.missing)}</div>
+                  </div>
+                )}
                 {d.committed > 0 && (
                   <div className="rounded-xl bg-amber-500/10 px-3 py-2 text-center">
                     <div className="text-[10px] font-black uppercase text-amber-400">Comprom.</div>
@@ -186,8 +207,10 @@ export default function DeliveryStockPanel({
                       <div className="truncate text-sm font-black">{p.title}</div>
                       <div className="truncate text-xs text-slate-500">SKU: {p.sku || 'Sin SKU'}</div>
                       {p.com > 0 && (
-                        <div className="mt-0.5 text-[11px] font-bold text-amber-300">
-                          {nf(p.com)} comprometido(s) · {p.free >= 0 ? `${nf(p.free)} libre(s)` : `⚠️ faltan ${nf(-p.free)}`}
+                        <div className={`mt-0.5 text-[11px] font-bold ${p.free < 0 ? 'text-rose-300' : 'text-amber-300'}`}>
+                          {p.qty === 0
+                            ? `Stock 0 · ⚠️ faltan ${nf(-p.free)} (${nf(p.com)} en pedidos despachados)`
+                            : `${nf(p.com)} comprometido(s) · ${p.free >= 0 ? `${nf(p.free)} libre(s)` : `⚠️ faltan ${nf(-p.free)}`}`}
                         </div>
                       )}
                     </div>
