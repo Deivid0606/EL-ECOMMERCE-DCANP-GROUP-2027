@@ -1892,11 +1892,20 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     if (!searchTerm.trim()) return base;
 
     const term = searchTerm.toLowerCase().trim();
+    // Celular escrito de cualquier forma: 0981 123 456, 0981-123456, +595 981 123456…
+    const phoneKey = (v: unknown) => {
+      let d = String(v ?? '').replace(/\D/g, '');
+      if (d.startsWith('595')) d = d.slice(3);
+      return d.replace(/^0+/, '');
+    };
+    const termPhone = phoneKey(term);
     return base.filter(order => {
+      const phones = [order.phone, order.customer_phone].map(phoneKey).filter(Boolean);
       return (
         (order.customer_name && order.customer_name.toLowerCase().includes(term)) ||
-        (order.customer_phone && order.customer_phone.toLowerCase().includes(term)) ||
+        (termPhone.length >= 4 && phones.some(p => p.includes(termPhone))) ||
         (order.order_number && order.order_number.toLowerCase().includes(term)) ||
+        (order.source_ref && String(order.source_ref).toLowerCase().includes(term)) ||
         (order.id && order.id.toLowerCase().includes(term)) ||
         (order.city && order.city.toLowerCase().includes(term))
       );
