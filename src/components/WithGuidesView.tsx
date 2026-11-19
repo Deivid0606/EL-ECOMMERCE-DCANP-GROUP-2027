@@ -305,7 +305,18 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         if (status2Filter === 'TODOS' && !showHistorical && !search.trim()) {
           q = q.gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString());
         }
-        if (search && search.trim()) q = q.ilike('order_number', `%${search.trim()}%`);
+        if (search && search.trim()) {
+          // Pedido, celular (escrito de cualquier forma), cliente o número de origen.
+          const t = search.trim().replace(/[,()*%]/g, ' ').trim();
+          let digits = t.replace(/\D/g, '');
+          if (digits.startsWith('595')) digits = digits.slice(3);
+          digits = digits.replace(/^0+/, '');
+          const parts = [`order_number.ilike.%${t}%`, `customer_name.ilike.%${t}%`, `source_ref.ilike.%${t}%`];
+          if (digits.length >= 4) parts.push(`phone.ilike.%${digits}%`);
+          // También los guardados con espacio: «981 850502».
+          if (digits.length >= 7) parts.push(`phone.ilike.%${digits.slice(0, 3)}%${digits.slice(3)}%`);
+          q = q.or(parts.join(','));
+        }
         if (status2Filter === 'PENDIENTES') {
           q = q.or('status2.is.null,status2.eq.--');
         } else if (status2Filter === 'CON_GUIA') {
@@ -1769,7 +1780,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       )}
       {/* Filtros segunda línea */}
       <div className={cardCls + " flex flex-wrap gap-2 mb-3 p-3"}>
-        <input className={pillInputCls + " flex-1 min-w-[240px]"} placeholder="🔎 Buscar por order_number..."
+        <input className={pillInputCls + " flex-1 min-w-[240px]"} placeholder="🔎 Buscar por N° de pedido, celular o cliente..."
           value={search} onChange={e => setSearch(e.target.value)} />
         
         <div className="relative">
