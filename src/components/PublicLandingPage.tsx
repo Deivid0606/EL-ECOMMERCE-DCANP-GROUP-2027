@@ -147,6 +147,11 @@ const normalizePublicConfig = (raw: any): LandingConfig => {
 
   return {
     ...raw,
+    deliveryOptions: Array.isArray(raw?.deliveryOptions)
+      ? raw.deliveryOptions
+          .filter((o: any) => o && String(o.label || "").trim())
+          .map((o: any) => ({ id: String(o.id || o.label), label: String(o.label), description: String(o.description || ""), priceGs: Math.max(0, Number(o.priceGs || 0)) }))
+      : [],
     imageFit: raw?.imageFit === "cover" ? "cover" : "contain",
     buyButtonEnabled: raw?.buyButtonEnabled !== false,
     whatsappEnabled: raw?.whatsappEnabled === true,
@@ -342,6 +347,7 @@ export default function PublicLandingPage({
   const [platformCoverage, setPlatformCoverage] = useState<ParaguayDepartment[]>([]);
   const [platformCoverageStatus, setPlatformCoverageStatus] = useState<"loading" | "ready" | "error">("loading");
   const [selectedOfferId, setSelectedOfferId] = useState("");
+  const [deliveryOptionId, setDeliveryOptionId] = useState("");
   const [form, setForm] = useState({
     full_name: "",
     phone: "",
@@ -621,6 +627,12 @@ export default function PublicLandingPage({
     [product?.price, quantity, selectedOfferId, selectedOffer?.priceGs],
   );
 
+  // Opción de entrega elegida (la primera por defecto) y su costo.
+  const deliveryOptions: { id: string; label: string; description: string; priceGs: number }[] = config?.deliveryOptions || [];
+  const deliveryOption = deliveryOptions.find((o) => o.id === deliveryOptionId) || deliveryOptions[0] || null;
+  const shippingGs = deliveryOption ? Number(deliveryOption.priceGs || 0) : 0;
+  const grandTotal = total + shippingGs;
+
   useEffect(() => {
     if (!checkoutOpen) return;
     if (selectedOfferId) return;
@@ -684,13 +696,16 @@ export default function PublicLandingPage({
         product_title: product.title,
         quantity,
         unit_price_gs: product.price,
-        total_gs: total,
+        total_gs: grandTotal,
         customer_name: form.full_name.trim(),
         phone: form.phone.trim(),
         department: form.department.trim(),
         city: form.city.trim(),
         address: form.address.trim(),
-        reference: form.reference.trim(),
+        // La entrega elegida queda a la vista en el pedido (observaciones).
+        reference: [deliveryOption ? `🚚 ${deliveryOption.label}${shippingGs ? ` (+Gs ${nf(shippingGs)})` : ""}` : "", form.reference.trim()]
+          .filter(Boolean)
+          .join(" · "),
         source: "landing_page",
         status: "nuevo",
         raw_payload: {
@@ -698,6 +713,8 @@ export default function PublicLandingPage({
           sku: product.sku,
           quantity_offer_id: selectedOffer?.id || null,
           quantity_offer_label: selectedOffer?.label || null,
+          delivery_option: deliveryOption ? { label: deliveryOption.label, price_gs: shippingGs } : null,
+          products_total_gs: total,
         },
       });
 
@@ -1801,8 +1818,8 @@ export default function PublicLandingPage({
 
             <div className="sky-summary">
               <div><span>Subtotal</span><b>Gs. {nf(total)}</b></div>
-              <div><span>Envío</span><b>A confirmar</b></div>
-              <div style={{ borderTop: "1px solid #ddd", paddingTop: 7 }}><b>Total</b><b>Gs. {nf(total)}</b></div>
+              <div><span>Envío</span><b>{deliveryOption ? (shippingGs ? `Gs. ${nf(shippingGs)}` : "Gratis") : "A confirmar"}</b></div>
+              <div style={{ borderTop: "1px solid #ddd", paddingTop: 7 }}><b>Total</b><b>Gs. {nf(grandTotal)}</b></div>
             </div>
 
             {renderCheckoutSections("before_offers")}
@@ -1971,9 +1988,53 @@ export default function PublicLandingPage({
             {renderCheckoutSections("after_offers")}
             {renderCheckoutSections("before_shipping")}
 
-            <div className="sky-delivery">
-              <b>◉ {config.shippingText}</b><br /><br />☆ {config.expressText}
-            </div>
+            {deliveryOptions.length > 0 ? (
+              <div style={{ display: "grid", gap: 8, margin: "10px 0" }}>
+                <div style={{ fontWeight: 900, fontSize: 13 }}>🚚 Elegí tu entrega</div>
+                {deliveryOptions.map((o) => {
+                  const active = (deliveryOption?.id || "") === o.id;
+                  return (
+                    <button
+                      key={o.id}
+                      type="button"
+                      onClick={() => setDeliveryOptionId(o.id)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        textAlign: "left",
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        border: active ? "2px solid #16a34a" : "1px solid #d4d4d8",
+                        background: active ? "#ecfdf3" : "#fff",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: "50%",
+                          border: active ? "6px solid #16a34a" : "2px solid #a1a1aa",
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <b style={{ display: "block", fontSize: 13, color: "#111" }}>{o.label}</b>
+                        {o.description && <span style={{ fontSize: 11, color: "#555" }}>{o.description}</span>}
+                      </span>
+                      <b style={{ fontSize: 13, color: o.priceGs ? "#111" : "#16a34a", whiteSpace: "nowrap" }}>
+                        {o.priceGs ? `+ Gs. ${nf(o.priceGs)}` : "GRATIS"}
+                      </b>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="sky-delivery">
+                <b>◉ {config.shippingText}</b><br /><br />☆ {config.expressText}
+              </div>
+            )}
 
             {renderCheckoutSections("before_form")}
 

@@ -254,6 +254,8 @@ export type LandingConfig = {
   checkoutTitle: string;
   shippingText: string;
   expressText: string;
+  /** Opciones de entrega que elige el cliente (ej. normal gratis / express con costo). */
+  deliveryOptions: DeliveryOption[];
   sections: {
     timeline: boolean;
     description: boolean;
@@ -267,6 +269,8 @@ export type LandingConfig = {
   faq: { question: string; answer: string }[];
   contentBlocks: LandingContentBlock[];
 };
+
+type DeliveryOption = { id: string; label: string; description: string; priceGs: number };
 
 const MEDIA_BUCKET = "landing-media";
 
@@ -355,6 +359,7 @@ const defaultConfig = (): LandingConfig => ({
   checkoutTitle: "PAGAS EN TU CASA AL RECIBIR ✅",
   shippingText: "Envío gratis · Periodo de entrega de 2 a 4 días 🚚",
   expressText: "Entrega express 24 horas ⚡ válido según cobertura",
+  deliveryOptions: [],
   sections: {
     timeline: true,
     description: true,
@@ -466,6 +471,16 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
           imageUrl: offer.imageUrl || "",
           highlight: Boolean(offer.highlight),
         }))
+      : [],
+    deliveryOptions: Array.isArray((raw as any)?.deliveryOptions)
+      ? (raw as any).deliveryOptions
+          .map((o: any) => ({
+            id: o?.id || uid(),
+            label: String(o?.label || "").slice(0, 80),
+            description: String(o?.description || "").slice(0, 160),
+            priceGs: Math.max(0, Number(o?.priceGs || 0)),
+          }))
+          .filter((o: DeliveryOption) => o.label.trim())
       : [],
     checkoutSections: Array.isArray(raw?.checkoutSections)
       ? raw!.checkoutSections!.map((section: any) => ({
@@ -4115,6 +4130,51 @@ export default function WebPageBuilder({
                 </div>
               ))}
               <button className="nav-btn active w-full" onClick={()=>{const quantity=config.quantityOffers.length+1;const unit=config.productSnapshots[0]?.price||0;setConfig((p)=>({...p,quantityOffers:[...p.quantityOffers,{id:uid(),quantity,priceGs:unit*quantity,compareAtPriceGs:unit*quantity,title:`PROMO ${quantity} UNIDAD${quantity>1?"ES":""}`,description:"",label:"",badge:p.quantityOffers.length===1?"MÁS VENDIDO 🔥":"",imageUrl:p.productSnapshots[0]?.media?.find((item)=>item.type==="image")?.url||"",highlight:p.quantityOffers.length===0}]}));}}>＋ Agregar otra oferta</button>
+            </div>
+
+            <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-4">
+              <div>
+                <div className="font-black">🚚 Opciones de entrega (las elige el cliente)</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  Ej.: «📦 Envío normal (2 a 4 días)» gratis y «⚡ Entrega express 24 horas» con costo. El costo se suma al total que paga el cliente.
+                  Si no cargás ninguna, se muestran los textos de envío de siempre.
+                </div>
+              </div>
+              {config.deliveryOptions.map((opt, index) => (
+                <div key={opt.id} className="rounded-xl border border-border p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <b>Opción {index + 1}{index === 0 ? " · se elige por defecto" : ""}</b>
+                    <button className="nav-btn !text-xs" onClick={() => setConfig((p) => ({ ...p, deliveryOptions: p.deliveryOptions.filter((o) => o.id !== opt.id) }))}>✕ Eliminar</button>
+                  </div>
+                  <input className="app-input" placeholder="Nombre: ⚡ Entrega express 24 horas" value={opt.label} onChange={(e) => setConfig((p) => ({ ...p, deliveryOptions: p.deliveryOptions.map((o) => (o.id === opt.id ? { ...o, label: e.target.value } : o)) }))} />
+                  <input className="app-input" placeholder="Detalle (opcional): llega mañana, según cobertura" value={opt.description} onChange={(e) => setConfig((p) => ({ ...p, deliveryOptions: p.deliveryOptions.map((o) => (o.id === opt.id ? { ...o, description: e.target.value } : o)) }))} />
+                  <div>
+                    <label className="app-label">Costo para el cliente (Gs) · 0 = Gratis</label>
+                    <input type="number" min="0" className="app-input" value={opt.priceGs} onChange={(e) => setConfig((p) => ({ ...p, deliveryOptions: p.deliveryOptions.map((o) => (o.id === opt.id ? { ...o, priceGs: Math.max(0, Number(e.target.value || 0)) } : o)) }))} />
+                  </div>
+                </div>
+              ))}
+              <div className="flex flex-wrap gap-2">
+                {config.deliveryOptions.length === 0 && (
+                  <button
+                    className="nav-btn active"
+                    onClick={() =>
+                      setConfig((p) => ({
+                        ...p,
+                        deliveryOptions: [
+                          { id: uid(), label: "📦 Envío normal (2 a 4 días)", description: "Pagás al recibir", priceGs: 0 },
+                          { id: uid(), label: "⚡ Entrega express 24 horas", description: "Válido según cobertura", priceGs: 15000 },
+                        ],
+                      }))
+                    }
+                  >
+                    ⚡ Agregar «Normal gratis» + «Express»
+                  </button>
+                )}
+                <button className="nav-btn" onClick={() => setConfig((p) => ({ ...p, deliveryOptions: [...p.deliveryOptions, { id: uid(), label: "", description: "", priceGs: 0 }] }))}>
+                  ＋ Agregar opción
+                </button>
+              </div>
             </div>
 
             <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-4">
