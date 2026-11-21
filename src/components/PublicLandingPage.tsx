@@ -156,6 +156,8 @@ const normalizePublicConfig = (raw: any): LandingConfig => {
     buyButtonEnabled: raw?.buyButtonEnabled !== false,
     whatsappEnabled: raw?.whatsappEnabled === true,
     whatsappNumber: String(raw?.whatsappNumber || "").slice(0, 25),
+    whatsappCaption: String(raw?.whatsappCaption || "").slice(0, 120),
+    whatsappButtonText: String(raw?.whatsappButtonText || "PEDIR POR WHATSAPP").slice(0, 60),
     mainButtonTextColor: raw?.mainButtonTextColor || "#ffffff",
     mainButtonBorderColor: raw?.mainButtonBorderColor || "#000000",
     mainButtonBorderWidth: Number.isFinite(Number(raw?.mainButtonBorderWidth))
@@ -1685,6 +1687,11 @@ export default function PublicLandingPage({
           </button>
           )}
 
+          {config.whatsappEnabled && normalizeStoreWhatsAppNumber(config.whatsappNumber) && String(config.whatsappCaption || "").trim() && (
+            <div style={{ marginTop: 12, marginBottom: -4, textAlign: "center", fontWeight: 900, fontSize: 15, color: "#111" }}>
+              {config.whatsappCaption}
+            </div>
+          )}
           {config.whatsappEnabled && normalizeStoreWhatsAppNumber(config.whatsappNumber) && (
             <a className="sky-whatsapp-buy sky-whatsapp-shake" target="_blank" rel="noopener noreferrer"
               href={buildStoreWhatsAppLink({
@@ -1696,7 +1703,7 @@ export default function PublicLandingPage({
               }) || undefined}
               aria-label="Consultar y pedir este producto por WhatsApp">
               <WhatsAppLogo size={28}/>
-              <span>💬 PEDIR POR WHATSAPP</span>
+              <span>💬 {config.whatsappButtonText || "PEDIR POR WHATSAPP"}</span>
             </a>
           )}
 

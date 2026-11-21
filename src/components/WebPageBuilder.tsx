@@ -233,6 +233,10 @@ export type LandingConfig = {
   buyButtonEnabled: boolean;
   whatsappEnabled: boolean;
   whatsappNumber: string;
+  /** Texto entre el botón de compra y el de WhatsApp (ej. «¿Sos del interior? Pedí por acá 👇»). */
+  whatsappCaption: string;
+  /** Texto del botón de WhatsApp. */
+  whatsappButtonText: string;
   mainButtonTextColor: string;
   mainButtonBorderColor: string;
   mainButtonBorderWidth: number;
@@ -337,6 +341,8 @@ const defaultConfig = (): LandingConfig => ({
   buyButtonEnabled: true,
   whatsappEnabled: false,
   whatsappNumber: "",
+  whatsappCaption: "",
+  whatsappButtonText: "PEDIR POR WHATSAPP",
   mainButtonTextColor: "#ffffff",
   mainButtonBorderColor: "#000000",
   mainButtonBorderWidth: 5,
@@ -436,6 +442,8 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
     buyButtonEnabled: raw?.buyButtonEnabled !== false,
     whatsappEnabled: raw?.whatsappEnabled === true,
     whatsappNumber: String(raw?.whatsappNumber || "").slice(0, 25),
+    whatsappCaption: String((raw as any)?.whatsappCaption || "").slice(0, 120),
+    whatsappButtonText: String((raw as any)?.whatsappButtonText || "PEDIR POR WHATSAPP").slice(0, 60),
     mainButtonTextColor: raw?.mainButtonTextColor || "#ffffff",
     mainButtonBorderColor: raw?.mainButtonBorderColor || "#000000",
     mainButtonBorderWidth: Number.isFinite(Number(raw?.mainButtonBorderWidth))
@@ -4058,14 +4066,39 @@ export default function WebPageBuilder({
                     <p className="mt-1 text-xs text-rose-400">Revisá el número: agregá el código de país si no es de Paraguay.</p>
                   )}
                 </div>
+                <div>
+                  <label className="app-label">Texto arriba del botón (opcional)</label>
+                  <input className="app-input" maxLength={120}
+                    placeholder="Ej.: 📍 ¿Sos del interior? Pedí por acá 👇"
+                    value={config.whatsappCaption}
+                    onChange={(e) => setConfig(prev => ({ ...prev, whatsappCaption: e.target.value }))}/>
+                  {!config.whatsappCaption && (
+                    <button type="button" className="nav-btn !mt-1 !py-1 !text-xs"
+                      onClick={() => setConfig(prev => ({ ...prev, whatsappCaption: "📍 ¿Sos del interior? Pedí por acá 👇" }))}>
+                      Usar «¿Sos del interior? Pedí por acá 👇»
+                    </button>
+                  )}
+                </div>
+                <div>
+                  <label className="app-label">Texto del botón</label>
+                  <input className="app-input" maxLength={60}
+                    placeholder="PEDIR POR WHATSAPP"
+                    value={config.whatsappButtonText}
+                    onChange={(e) => setConfig(prev => ({ ...prev, whatsappButtonText: e.target.value }))}/>
+                </div>
                 <p className="text-xs text-muted-foreground">
                   El cliente abrirá WhatsApp con producto, cantidad, precio y enlace de la página.
                   No se registra como pedido confirmado automáticamente.
                 </p>
                 {config.whatsappEnabled && normalizeStoreWhatsAppNumber(config.whatsappNumber) && (
-                  <div className="sky-builder-whatsapp-shake flex items-center justify-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-black text-white shadow-md">
-                    <WhatsAppLogo size={22}/> PEDIR POR WHATSAPP
-                  </div>
+                  <>
+                    {config.whatsappCaption.trim() && (
+                      <div className="text-center text-sm font-black">{config.whatsappCaption}</div>
+                    )}
+                    <div className="sky-builder-whatsapp-shake flex items-center justify-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-black text-white shadow-md">
+                      <WhatsAppLogo size={22}/> {config.whatsappButtonText || "PEDIR POR WHATSAPP"}
+                    </div>
+                  </>
                 )}
               </div>
               <div>
@@ -4792,6 +4825,9 @@ function ShrinePreview({
                 </button>
               )}
 
+              {config.whatsappEnabled && normalizeStoreWhatsAppNumber(config.whatsappNumber) && config.whatsappCaption.trim() && (
+                <div style={{ marginTop: 12, textAlign: "center", fontWeight: 900, fontSize: 14, color: "#111" }}>{config.whatsappCaption}</div>
+              )}
               {config.whatsappEnabled && normalizeStoreWhatsAppNumber(config.whatsappNumber) && (
                 <div className="sky-builder-whatsapp-shake" style={{
                   width: "100%", display: "flex", justifyContent: "center", alignItems: "center", gap: 12,
@@ -4799,7 +4835,7 @@ function ShrinePreview({
                   background: "#25D366", color: "#fff", fontWeight: 900,
                   boxShadow: "0 5px 15px rgba(0,0,0,.2)",
                 }}>
-                  <WhatsAppLogo size={28}/> PEDIR POR WHATSAPP
+                  <WhatsAppLogo size={28}/> {config.whatsappButtonText || "PEDIR POR WHATSAPP"}
                 </div>
               )}
 
