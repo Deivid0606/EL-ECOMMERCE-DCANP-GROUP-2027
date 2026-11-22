@@ -53,14 +53,17 @@ type PackedOrder = {
 
 /** Etiqueta «📦 Empaquetado · Gs 3.500» (la ven vendedor, proveedor, despachante y admin). */
 export function PackingBadge({ order, compact = false }: { order: PackedOrder; compact?: boolean }) {
+  const { profile } = useAuth();
   if (!order.packed_at) return null;
-  const state = order.packing_paid_at ? '✅ pagado' : order.packing_request_id ? '⏳ cobro solicitado' : '';
+  // El vendedor sólo ve que ya está empaquetado, sin el costo ni el estado del cobro.
+  const showCost = ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'].includes(profile?.role || '');
+  const state = !showCost ? '' : order.packing_paid_at ? '✅ pagado' : order.packing_request_id ? '⏳ cobro solicitado' : '';
   return (
     <span
       className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-orange-400/40 bg-orange-500/15 px-2 py-0.5 text-[10px] font-black text-orange-200"
-      title={`Empaquetado ${fmtDateTime(order.packed_at)} por ${order.packed_by || '—'}`}
+      title={showCost ? `Empaquetado ${fmtDateTime(order.packed_at)} por ${order.packed_by || '—'}` : `Empaquetado ${fmtDateTime(order.packed_at)}`}
     >
-      📦 Empaquetado · Gs {nf(Number(order.packing_gs || 0))}
+      📦 Empaquetado{showCost && ` · Gs ${nf(Number(order.packing_gs || 0))}`}
       {!compact && state && <span className="font-bold text-orange-300/80">· {state}</span>}
     </span>
   );
