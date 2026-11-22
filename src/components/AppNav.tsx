@@ -30,7 +30,8 @@ export type ViewName =
   | 'shopifyConnection'
   | 'mapa'
   | 'qrScanner'
-  | 'attendance';
+  | 'attendance'
+  | 'packing';
 
 interface NavItem {
   id: ViewName;
@@ -51,6 +52,11 @@ const navItems: NavItem[] = [
   {
     id: 'withGuides',
     label: 'Despacho',
+    roles: ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'],
+  },
+  {
+    id: 'packing',
+    label: '📦 Cobro de empaques',
     roles: ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'],
   },
   {

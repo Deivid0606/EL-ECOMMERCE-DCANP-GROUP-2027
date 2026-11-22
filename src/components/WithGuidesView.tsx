@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useProviderScope } from '@/lib/providerScope';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchAllRows } from '@/lib/fetchAllRows';
+import { PackButton, PackingBadge, packOrders } from '@/components/PackingView';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { pyToday, pyStart, pyEnd } from '@/lib/pyTime';
@@ -2063,6 +2064,10 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           <button className="nav-btn" style={{ background: '#7c3aed', color: 'white' }} onClick={() => void bulkMarkAsGuiaGenerada(REPARTIDOR)} title="Sale del stock del repartidor: se descuenta sólo de su stock">
             🛵 Despachado por repartidor
           </button>
+          <button className="nav-btn" style={{ background: '#f97316', color: 'white' }} title="Marca los pedidos seleccionados como empaquetados (suma al cobro de empaques)"
+            onClick={async () => { if (await packOrders(getSelectedOrders().map(o => o.id), true)) void load(); }}>
+            📦 Empaquetado
+          </button>
           {selectedIds.size >= 2 && (
             <button className="nav-btn" style={{ background: '#f59e0b', color: 'white' }} onClick={() => void orderTools.mergeOrders(getSelectedOrders())}>
               🔗 Fusionar {selectedIds.size} pedidos (un solo delivery)
@@ -2173,6 +2178,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                 </div>
                 <div className="mb-2 flex flex-wrap gap-1">
                   {isRepeat && <span className="rounded-full bg-amber-500/20 px-2 py-1 text-[10px] font-black text-amber-300">⚠️ Repetido</span>}
+                  <PackingBadge order={o} />
                   {o.rescheduled_for && (!o.status2 || o.status2 === '--') && !o.assigned_delivery &&
                     <span className="rounded-full bg-sky-500/20 px-2 py-1 text-[10px] text-sky-300">📅 Reagendado {dayLabel(String(o.rescheduled_for))}</span>}
                   {o.shipping_type === 'ENCOMIENDA' && (
@@ -2223,6 +2229,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                 <div className="flex flex-wrap gap-1.5 border-t border-slate-700 pt-2">
                   <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => orderTools.openEditor(o)}>✏️ Editar</button>
                   <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => openGuideModal(o)}>📄 Guía QR</button>
+                  <PackButton order={o} onChanged={() => void load()} />
                   <button type="button" className="nav-btn !px-2 !py-1 !text-[11px]" onClick={() => {
                     navigator.clipboard.writeText(buildGuideText(o)).then(() => toast.success('Copiada')).catch(() => toast.error('No se pudo copiar'));
                   }}>📋 Copiar</button>
@@ -2273,6 +2280,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">
                   {o.order_number || o.id.slice(0, 8)}
+                  {o.packed_at && <div className="mt-1"><PackingBadge order={o} compact /></div>}
+                  <div className="mt-1"><PackButton order={o} onChanged={() => void load()} /></div>
                   {o.rescheduled_for && (!o.status2 || o.status2 === '--') && !o.assigned_delivery && (
                     <div className="mt-1 whitespace-nowrap text-[10px] font-bold text-sky-300">📅 Reagendado {dayLabel(String(o.rescheduled_for))} · aprobar despacho</div>
                   )}

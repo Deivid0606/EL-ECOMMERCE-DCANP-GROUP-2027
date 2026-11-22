@@ -1,3 +1,4 @@
+import { PackingRequestsPanel } from '@/components/PackingView';
 import { useState, useEffect, useMemo } from 'react';
 import { useProviderScope } from '@/lib/providerScope';
 import { supabase } from '@/integrations/supabase/client';
@@ -323,6 +324,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
   };
 
   return (
+    <div className="space-y-4">
+    {(role === 'ADMIN' || role === 'PROVEEDOR') && <PackingRequestsPanel mode="approve" />}
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">
         {role === 'VENDEDOR' ? '💰 Mis Comisiones' : role === 'PROVEEDOR' ? '💰 Comisiones a Pagar' : '💰 Pago de comisiones'}
@@ -611,6 +614,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
           </tbody>
         </table>
       </div>
+    </div>
     </div>
   );
 }

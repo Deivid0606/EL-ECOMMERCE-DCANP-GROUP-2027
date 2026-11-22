@@ -7,6 +7,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 import { generateTrackingLink } from '@/lib/tracking';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { PackingBadge } from '@/components/PackingView';
 import { pyDateKey, pyDaysAgo, pyToday } from '@/lib/pyTime';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
@@ -1391,6 +1392,7 @@ export default function OrdersView() {
                   <div className="min-w-0">
                     <strong className="break-all text-sm">📦 {o.order_number || o.id.slice(0, 8)}</strong>
                     <p className="text-[11px] text-muted-foreground">{dateShown}</p>
+                    <PackingBadge order={o} />
                   </div>
                   <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)}
                     aria-label={`Seleccionar pedido ${o.order_number || o.id}`} />
@@ -1529,7 +1531,7 @@ export default function OrdersView() {
                     <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
                   </td>
                   <td className="whitespace-nowrap text-xs">{dateShown}</td>
-                  <td className="font-bold text-xs">{o.order_number || o.id.slice(0, 8)}</td>
+                  <td className="font-bold text-xs">{o.order_number || o.id.slice(0, 8)}{o.packed_at && <div className="mt-1"><PackingBadge order={o} compact /></div>}</td>
                   <td className="text-xs">{o.city}</td>
                   <td className="text-xs">{o.customer_name}</td>
                   <td className="text-xs">{o.created_by}</td>
@@ -1675,6 +1677,7 @@ export default function OrdersView() {
                 <div>
                   <div className="font-bold text-sm">{o.order_number || o.id.slice(0, 8)}</div>
                   <div className="text-xs text-muted-foreground">{dateShown}</div>
+                  <PackingBadge order={o} />
                 </div>
                 <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
               </div>
