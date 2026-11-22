@@ -20,6 +20,7 @@ const CreateOrderView = lazy(() => import('@/components/CreateOrderView'));
 const RatesView = lazy(() => import('@/components/RatesView'));
 const CommissionsView = lazy(() => import('@/components/CommissionsView'));
 const CommissionRequestsView = lazy(() => import('@/components/CommissionRequestsView'));
+const PackingView = lazy(() => import('@/components/PackingView'));
 const ClosuresView = lazy(() => import('@/components/ClosuresView'));
 const EarningsView = lazy(() => import('@/components/EarningsView'));
 const ChatView = lazy(() => import('@/components/ChatView'));
@@ -455,6 +456,9 @@ export default function Index() {
 
       case 'qrScanner':
         return <QRScannerView />;
+
+      case 'packing':
+        return <PackingView />;
 
       default:
         return <DashboardView />;
