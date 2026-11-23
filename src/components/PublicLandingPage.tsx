@@ -329,6 +329,28 @@ const getBrowserCookie = (name: string) => {
 };
 
 
+/**
+ * Los clientes buscan Asunción dentro de Central: Central va primero y Asunción es la
+ * primera ciudad de Central (al cargar, Asunción se reconoce sin importar el departamento).
+ */
+const plainKey = (v: string) =>
+  String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+function asuncionInCentral<T extends { department: string; cities: string[] }>(list: T[]): T[] {
+  const isAsu = (d: string) => ["asuncion", "capital"].includes(plainKey(d));
+  const asuDeps = list.filter((d) => isAsu(d.department));
+  const asuCities = asuDeps.flatMap((d) => d.cities).filter((c) => plainKey(c) === "asuncion");
+  const central = list.find((d) => plainKey(d.department) === "central");
+  if (!central || !asuCities.length) {
+    return central ? [central, ...list.filter((d) => d !== central)] : list;
+  }
+  const rest = list.filter((d) => d !== central && !isAsu(d.department));
+  const otherAsu = asuDeps
+    .map((d) => ({ ...d, cities: d.cities.filter((c) => plainKey(c) !== "asuncion") }))
+    .filter((d) => d.cities.length);
+  const centralCities = central.cities.filter((c) => plainKey(c) !== "asuncion");
+  return [{ ...central, cities: [asuCities[0], ...centralCities] }, ...otherAsu, ...rest];
+}
+
 export default function PublicLandingPage({
   slug,
   pageId,
@@ -532,7 +554,7 @@ export default function PublicLandingPage({
   const activeMedia = media[mediaIndex] || media[0];
   const firstImage = media.find((m) => m.type === "image")?.url || "";
 
-  const availableLocations = useMemo(() => {
+  const availableLocations = useMemo(() => asuncionInCentral((() => {
     if (!config) return PARAGUAY_LOCATIONS;
     if (config.coverageMode === "platform") {
       return platformCoverage;
@@ -547,7 +569,7 @@ export default function PublicLandingPage({
         .filter((dep) => dep.cities.length > 0);
     }
     return PARAGUAY_LOCATIONS;
-  }, [config?.coverageMode, JSON.stringify(config?.hiddenDepartments || []), JSON.stringify(config?.hiddenCities || []), platformCoverage]);
+  })()), [config?.coverageMode, JSON.stringify(config?.hiddenDepartments || []), JSON.stringify(config?.hiddenCities || []), platformCoverage]);
 
   const availableCities =
     availableLocations.find((dep) => dep.department === form.department)?.cities || [];
