@@ -2097,6 +2097,9 @@ export default function PublicLandingPage({
                 <label>Referencia</label>
                 <input value={form.reference} onChange={(e) => setForm((p) => ({ ...p, reference: e.target.value }))} placeholder="Ej: casa de rejas blancas, frente al súper" />
               </div>
+              <div role="note" style={{margin:"4px 0 12px",padding:"10px 12px",borderRadius:10,background:"#fff7e0",border:"1px solid #f2c94c",color:"#6b4e00",fontSize:13,lineHeight:1.4,fontWeight:600}}>
+                ⚠️ Verificá que tu <b>número de celular</b> y tu <b>dirección</b> estén correctos: así podemos contactarte y agilizar la entrega de tu pedido.
+              </div>
 
               {renderCheckoutSections("after_form")}
 
