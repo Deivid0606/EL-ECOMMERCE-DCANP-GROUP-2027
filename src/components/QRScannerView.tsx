@@ -3,6 +3,9 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import QrCameraScanner, { orderIdFromQr } from '@/components/QrCameraScanner';
+import { customerMessageVariant } from '@/lib/waMessages';
+import { orderLocationText } from '@/lib/orderLocation';
+import { ensureTrackingUrl } from '@/lib/tracking';
 
 /**
  * 📷 QR Delivery: escanear la guía con la cámara desde la app.
@@ -30,9 +33,10 @@ type Order = {
   assigned_at: string | null;
   qr_scanned_at?: string | null;
 };
-type Flash = { ok: boolean; title: string; lines: string[] };
+type Flash = { ok: boolean; title: string; lines: string[]; order?: any };
 type ScanResult = {
   ok: boolean;
+  id?: string;
   reason?: 'not_found' | 'already' | 'other_delivery' | 'not_yours' | 'closed';
   order_number?: string;
   customer_name?: string;
@@ -44,7 +48,7 @@ type ScanResult = {
   status?: string;
   code?: string;
 };
-type Scan = { id: string; ok: boolean; text: string; at: number };
+type Scan = { id: string; ok: boolean; text: string; at: number; order?: any };
 
 const SELECT = 'id, order_number, customer_name, phone, city, street, status, status2, total_gs, items_json, assigned_delivery, assigned_at, qr_scanned_at';
 
@@ -60,6 +64,14 @@ async function findOrder(code: string): Promise<Order | null> {
   const ref = await (supabase as any).from('orders').select(SELECT).eq('source_ref', code).maybeSingle();
   return (ref.data as Order) || null;
 }
+
+const waPhone = (raw: string) => {
+  const d = String(raw || '').replace(/\D/g, '');
+  if (d.startsWith('595')) return d;
+  if (d.startsWith('0')) return `595${d.slice(1)}`;
+  if (d.startsWith('9') && d.length >= 9) return `595${d}`;
+  return d;
+};
 
 const itemsOf = (o: Order) => {
   try {
@@ -87,21 +99,51 @@ export default function QRScannerView() {
 
   const nameOf = (email: string | null) => (email ? names[lc(email)] || deliveries.find((d) => d.email === lc(email))?.name || email : '');
 
-  const log = (id: string, ok: boolean, text: string) => setScans((prev) => [{ id, ok, text, at: Date.now() }, ...prev].slice(0, 30));
+  const log = (id: string, ok: boolean, text: string, order?: any) => setScans((prev) => [{ id, ok, text, at: Date.now(), order }, ...prev].slice(0, 30));
+
+  // 💬 Abre WhatsApp con el cliente y el mismo mensaje de Cierres (detalle, ubicación y seguimiento).
+  const writeClient = async (o: any) => {
+    const raw = String(o?.customer_phone || o?.phone || '').trim();
+    const phone = waPhone(raw);
+    if (!phone) return toast.error('El pedido no tiene celular del cliente');
+    // La pestaña se abre con el toque para que el celular no la bloquee; el link se completa enseguida.
+    const tab = window.open('', '_blank');
+    const now = new Date().toISOString();
+    if (!o.contacted) {
+      const patch = { contacted: true, contacted_at: now, contacted_by: myEmail };
+      void supabase.from('orders').update({ ...patch, updated_at: now } as any).eq('id', o.id).then(() => undefined);
+      setScans((prev) => prev.map((s) => (s.order?.id === o.id ? { ...s, order: { ...s.order, ...patch } } : s)));
+      setFlash((f) => (f?.order?.id === o.id ? { ...f, order: { ...f.order, ...patch } } : f));
+    }
+    const track = await Promise.race([ensureTrackingUrl(o), new Promise<null>((r) => setTimeout(() => r(null), 8000))]);
+    const text = customerMessageVariant(o, raw, Math.floor(Math.random() * 7), track, Boolean(orderLocationText(o)));
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+    if (tab) tab.location.href = url;
+    else window.location.href = url;
+  };
+
+  // Pedido completo después de asignarlo (para el mensaje al cliente).
+  const loadFullOrder = async (res: ScanResult) => {
+    let q: any = supabase.from('orders').select('*');
+    q = res.id ? q.eq('id', res.id) : q.eq('order_number', res.order_number || '');
+    const { data } = await q.maybeSingle();
+    return data || null;
+  };
 
   const when = (iso?: string) =>
     iso ? new Date(iso).toLocaleString('es-PY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
 
   // Muestra el resultado grande en pantalla (y en la lista de escaneados).
-  const showResult = useCallback((res: ScanResult, code: string) => {
+  const showResult = useCallback((res: ScanResult, code: string, order?: any) => {
     const label = res.order_number || code;
     if (res.ok) {
       setFlash({
         ok: true,
         title: '✅ Pedido registrado exitosamente',
         lines: [label, [res.customer_name, res.city].filter(Boolean).join(' · '), `🛵 ${res.delivery || ''} · EN RUTA`],
+        order,
       });
-      log(label, true, [res.customer_name, res.city].filter(Boolean).join(' · '));
+      log(label, true, [res.customer_name, res.city].filter(Boolean).join(' · '), order);
       return;
     }
     const msg =
@@ -120,7 +162,8 @@ export default function QRScannerView() {
 
   useEffect(() => {
     if (!flash) return;
-    const t = window.setTimeout(() => setFlash(null), flash.ok ? 2500 : 4500);
+    // Con el botón «Escribir al cliente» el cartel queda más tiempo.
+    const t = window.setTimeout(() => setFlash(null), flash.ok ? (flash.order ? 9000 : 2500) : 4500);
     return () => window.clearTimeout(t);
   }, [flash]);
 
@@ -133,8 +176,10 @@ export default function QRScannerView() {
         log(code, false, error.message);
         return;
       }
-      showResult(data as ScanResult, code);
+      const res = data as ScanResult;
+      showResult(res, code, res.ok ? await loadFullOrder(res) : undefined);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [showResult],
   );
 
@@ -199,7 +244,8 @@ export default function QRScannerView() {
     const { data, error } = await (supabase as any).rpc('scan_order_qr', { p_code: current.id, p_delivery: target });
     setBusy(false);
     if (error) return toast.error(error.message);
-    showResult(data as ScanResult, current.order_number || current.id);
+    const res = data as ScanResult;
+    showResult(res, current.order_number || current.id, res.ok ? await loadFullOrder({ ...res, id: res.id || current.id }) : undefined);
     setCurrent(null);
   };
 
@@ -221,8 +267,9 @@ export default function QRScannerView() {
         <div className="relative">
           <QrCameraScanner onResult={(id) => void handleCode(id)} paused={busy || Boolean(current) || Boolean(flash)} />
           {flash && (
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               onClick={() => setFlash(null)}
               className={`absolute inset-x-0 top-0 mx-auto flex aspect-square w-full max-w-md flex-col items-center justify-center gap-2 rounded-3xl p-6 text-center shadow-2xl backdrop-blur-sm ${
                 flash.ok ? 'bg-emerald-600/90' : 'bg-rose-700/90'
@@ -235,8 +282,20 @@ export default function QRScannerView() {
                   {l}
                 </div>
               ))}
-              <div className="mt-2 text-[11px] text-white/70">Tocá para seguir escaneando</div>
-            </button>
+              {flash.ok && flash.order && (
+                <button
+                  type="button"
+                  className="mt-3 rounded-2xl bg-white px-6 py-3 text-base font-black text-emerald-700 shadow-xl"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void writeClient(flash.order);
+                  }}
+                >
+                  💬 Escribir al cliente{flash.order.contacted ? ' (✅ ya contactado)' : ''}
+                </button>
+              )}
+              <div className="mt-2 text-[11px] text-white/70">Tocá afuera del botón para seguir escaneando</div>
+            </div>
           )}
         </div>
 
@@ -295,7 +354,19 @@ export default function QRScannerView() {
                     <span className="min-w-0 truncate">
                       {s.ok ? '✅' : '❌'} <b>{s.id}</b> <span className="text-xs text-slate-400">{s.text}</span>
                     </span>
-                    <span className="shrink-0 text-[10px] text-slate-500">{new Date(s.at).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      {s.ok && s.order && (
+                        <button
+                          type="button"
+                          className={`rounded-lg px-2 py-1 text-[11px] font-black ${s.order.contacted ? 'bg-emerald-500/20 text-emerald-200' : 'bg-green-600 text-white'}`}
+                          onClick={() => void writeClient(s.order)}
+                          title="Escribir al cliente por WhatsApp"
+                        >
+                          {s.order.contacted ? '✅ 💬' : '💬 Escribir'}
+                        </button>
+                      )}
+                      <span className="text-[10px] text-slate-500">{new Date(s.at).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })}</span>
+                    </span>
                   </div>
                 ))}
               </div>
