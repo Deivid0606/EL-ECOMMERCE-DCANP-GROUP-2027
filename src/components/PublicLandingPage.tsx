@@ -662,6 +662,12 @@ export default function PublicLandingPage({
       alert("Completá nombre, teléfono y ciudad.");
       return;
     }
+    // La dirección es lo más importante para que el delivery llegue.
+    const addr = form.address.trim();
+    if (addr.length < 6 || !/[a-zA-ZáéíóúñÁÉÍÓÚÑ]{3}/.test(addr)) {
+      alert("Escribí tu dirección completa (calle y número, o calle y esquina) para que el delivery pueda llegar.");
+      return;
+    }
 
     if (!preview && config?.coverageMode === "platform") {
       if (platformCoverageStatus !== "ready") {
@@ -716,6 +722,7 @@ export default function PublicLandingPage({
           quantity_offer_id: selectedOffer?.id || null,
           quantity_offer_label: selectedOffer?.label || null,
           delivery_option: deliveryOption ? { label: deliveryOption.label, price_gs: shippingGs } : null,
+          customer_reference: form.reference.trim() || null,
           products_total_gs: total,
         },
       });
@@ -2083,12 +2090,12 @@ export default function PublicLandingPage({
                 </select>
               </div>
               <div className="sky-field">
-                <label>Calle principal</label>
-                <input value={form.address} onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))} placeholder="Calle principal" />
+                <label>Dirección *</label>
+                <input required value={form.address} onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))} placeholder="Calle y número, o calle y esquina" />
               </div>
               <div className="sky-field">
                 <label>Referencia</label>
-                <input value={form.reference} onChange={(e) => setForm((p) => ({ ...p, reference: e.target.value }))} placeholder="Alguna referencia o característica" />
+                <input value={form.reference} onChange={(e) => setForm((p) => ({ ...p, reference: e.target.value }))} placeholder="Ej: casa de rejas blancas, frente al súper" />
               </div>
 
               {renderCheckoutSections("after_form")}
