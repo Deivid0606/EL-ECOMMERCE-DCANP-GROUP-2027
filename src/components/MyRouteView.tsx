@@ -290,7 +290,12 @@ export default function MyRouteView() {
     L.control.zoom({ position: 'topright' }).addTo(mapRef.current);
     layer.current = L.layerGroup().addTo(mapRef.current);
     mapRef.current.on('dragstart', () => setFollow(false));
+    // El contenedor cambia de tamaño (navegación, rotar el celular): Leaflet tiene que recalcular.
+    const map = mapRef.current;
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => map.invalidateSize()) : null;
+    if (mapEl.current) ro?.observe(mapEl.current);
     return () => {
+      ro?.disconnect();
       mapRef.current?.remove();
       mapRef.current = null;
     };
@@ -570,7 +575,10 @@ export default function MyRouteView() {
       <div className="grid gap-3 lg:grid-cols-[1.3fr_1fr]">
         {/* Mapa */}
         <div className="relative min-w-0 overflow-hidden rounded-3xl border border-white/10 shadow-2xl">
-          <div ref={mapEl} className={`w-full lg:h-[calc(100vh-260px)] ${navOrder ? 'h-[75vh]' : 'h-[52vh]'}`} style={{ minHeight: 320 }} />
+          {/* La altura va en el contenedor: Leaflet agrega sus propias clases al div del mapa y React no debe pisarlas. */}
+          <div className={`w-full lg:h-[calc(100vh-260px)] ${navOrder ? 'h-[75vh]' : 'h-[52vh]'}`} style={{ minHeight: 320 }}>
+            <div ref={mapEl} className="h-full w-full" />
+          </div>
           <div className="pointer-events-none absolute left-3 top-3 z-[500] flex flex-col gap-1">
             {!myPos && <span className="rounded-full bg-black/70 px-3 py-1 text-[11px] font-bold text-amber-200">📍 Activá la ubicación para ordenar desde donde estás</span>}
             {locating > 0 && <span className="rounded-full bg-black/70 px-3 py-1 text-[11px] font-bold text-white">Ubicando pedidos… ({locating})</span>}
