@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { toast } from 'sonner';
@@ -30,6 +30,15 @@ const OPEN = ['PENDIENTE', 'EN RUTA', 'NO CONTESTA', 'REAGENDADO'];
 const DONE_OK = ['ENTREGADO', 'ENCOMIENDA ENTREGADA'];
 const OTHER_STATUSES = ['NO CONTESTA', 'REAGENDADO', 'CANCELADO', 'CANCELÓ POR WHATSAPP'];
 const GEO_KEY = 'dcanp_route_geo_v1';
+const addDays = (key: string, n: number) => {
+  const [y, m, d] = key.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + n));
+  return dt.toISOString().slice(0, 10);
+};
+const dayLabel = (key: string) => {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('es-PY', { weekday: 'long', day: '2-digit', month: '2-digit' });
+};
 const POLL_MS = 60_000;
 
 type Coord = LatLng & { level: 'exact' | 'street' | 'city' };
@@ -53,6 +62,7 @@ type RouteOrder = {
   contacted: boolean | null;
   shipping_type: string | null;
   dest: LatLng | null;
+  day?: string;
 };
 
 const statusOf = (o: RouteOrder) => String(o.status || 'PENDIENTE').toUpperCase();
@@ -186,29 +196,45 @@ export default function MyRouteView() {
   const mapRef = useRef<L.Map | null>(null);
   const layer = useRef<L.LayerGroup | null>(null);
   const fitted = useRef(false);
+  // Al cambiar de fecha o pestaña el mapa se acomoda a esos pedidos.
+  const fitKey = useRef('');
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const reschedule = useRescheduleDialog(() => setReload((n) => n + 1));
+
+  // 📅 Hoy (ruta en vivo), un día puntual o todas las fechas.
+  const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Asuncion' });
+  const [range, setRange] = useState<{ mode: 'today' } | { mode: 'day'; day: string } | { mode: 'all' }>({ mode: 'today' });
+  const isToday = range.mode === 'today' || (range.mode === 'day' && range.day === todayKey);
+  const rangeKey = range.mode === 'day' ? range.day : range.mode;
 
   // Pedidos + tarifas.
   useEffect(() => {
     let alive = true;
     let timer: number | undefined;
+    const live = isToday;
     const load = async () => {
-      const [r, f] = await Promise.all([sb.rpc('my_route_orders'), sb.rpc('get_closure_delivery_fees')]);
+      const req =
+        live
+          ? sb.rpc('my_route_orders')
+          : sb.rpc('my_route_history', range.mode === 'day' ? { p_from: range.day, p_to: range.day } : { p_from: null, p_to: null });
+      const [r, f] = await Promise.all([req, sb.rpc('get_closure_delivery_fees')]);
       if (!alive) return;
       if (r.error) toast.error(r.error.message);
       setOrders((r.data || []) as RouteOrder[]);
       setFees(f.data || []);
       setLoading(false);
-      timer = window.setTimeout(load, POLL_MS);
+      if (live) timer = window.setTimeout(load, POLL_MS);
     };
+    setLoading(true);
+    fitKey.current = '';
     void load();
     return () => {
       alive = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, [reload]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reload, rangeKey]);
 
   // Mi ubicación en vivo (si el celular la comparte).
   useEffect(() => {
@@ -282,6 +308,11 @@ export default function MyRouteView() {
 
   const stops = useMemo(() => {
     const open = orders.filter(isOpen).map((o) => ({ o, coord: coordOf[o.id] }));
+    if (!isToday) {
+      return open
+        .sort((a, b) => String(b.o.day || '').localeCompare(String(a.o.day || '')) || String(a.o.assigned_at || '').localeCompare(String(b.o.assigned_at || '')))
+        .map((s, i) => ({ ...s, n: i + 1 }));
+    }
     const auto = nearestOrder(open, myPos);
     if (!manual.length) return auto.map((s, i) => ({ ...s, n: i + 1 }));
     // Orden manual: primero los que acomodó el delivery, después los nuevos en orden automático.
@@ -289,8 +320,25 @@ export default function MyRouteView() {
     const known = auto.filter((s) => pos.has(s.o.id)).sort((a, b) => (pos.get(a.o.id) as number) - (pos.get(b.o.id) as number));
     const fresh = auto.filter((s) => !pos.has(s.o.id));
     return [...known, ...fresh].map((s, i) => ({ ...s, n: i + 1 }));
-  }, [orders, coordOf, myPos, manual]);
+  }, [orders, coordOf, myPos, manual, isToday]);
   const done = useMemo(() => orders.filter((o) => !isOpen(o)), [orders]);
+  const dayStats = useMemo(() => {
+    const m = new Map<string, { total: number; ok: number; failed: number; open: number; collected: number; earned: number }>();
+    for (const o of orders) {
+      const d = o.day || todayKey;
+      const x = m.get(d) || { total: 0, ok: 0, failed: 0, open: 0, collected: 0, earned: 0 };
+      x.total++;
+      if (DONE_OK.includes(statusOf(o))) {
+        x.ok++;
+        x.collected += Number(o.total_gs || 0);
+        x.earned += feeOf(o);
+      } else if (isOpen(o)) x.open++;
+      else x.failed++;
+      m.set(d, x);
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, fees]);
   const delivered = useMemo(() => done.filter((o) => DONE_OK.includes(statusOf(o))), [done]);
   const failed = useMemo(() => done.filter((o) => !DONE_OK.includes(statusOf(o))), [done]);
 
@@ -380,11 +428,12 @@ export default function MyRouteView() {
       if (tab === 'route') line.push([s.coord.lat, s.coord.lng]);
     }
     if (line.length > 1) L.polyline(line, { color: '#8c5cff', weight: 4, opacity: 0.75, dashArray: '8 8' }).addTo(layer.current);
-    if (!fitted.current && pts.length) {
+    if (fitKey.current !== `${rangeKey}|${tab}` && pts.length) {
       map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 15 });
-      fitted.current = true;
+      fitKey.current = `${rangeKey}|${tab}`;
     }
   }, [stops, delivered, failed, coordOf, myPos, selected, tab, navId, road, follow, orders]);
+
 
   // Camino por calles hasta el cliente (OSRM); si no responde, línea recta.
   useEffect(() => {
@@ -662,10 +711,12 @@ export default function MyRouteView() {
       <div className="rounded-3xl border border-violet-500/30 bg-gradient-to-br from-violet-600/25 via-slate-900/70 to-orange-500/10 p-4 text-white shadow-2xl">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-violet-300">Mi ruta de hoy</div>
+            <div className="text-[10px] font-black uppercase tracking-[0.25em] text-violet-300">
+              {isToday ? 'Mi ruta de hoy' : range.mode === 'all' ? 'Todas las fechas' : `Mis pedidos del ${dayLabel(range.mode === 'day' ? range.day : todayKey)}`}
+            </div>
             <div className="text-2xl font-black">
-              🛵 {kpi.pending} parada{kpi.pending === 1 ? '' : 's'}
-              {kpi.km > 0 && <span className="ml-2 text-sm font-bold text-slate-300">≈ {kpi.km.toFixed(1)} km</span>}
+              {isToday ? `🛵 ${kpi.pending} parada${kpi.pending === 1 ? '' : 's'}` : `📦 ${orders.length} pedido${orders.length === 1 ? '' : 's'}`}
+              {isToday && kpi.km > 0 && <span className="ml-2 text-sm font-bold text-slate-300">≈ {kpi.km.toFixed(1)} km</span>}
             </div>
           </div>
           <div className="flex gap-2">
@@ -674,7 +725,7 @@ export default function MyRouteView() {
             </button>
             <button
               className="rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-black text-white shadow-lg disabled:opacity-50"
-              disabled={!stops.length}
+              disabled={!stops.length || !isToday}
               onClick={() => setChooser({})}
             >
               🧭 Iniciar ruta
@@ -684,8 +735,8 @@ export default function MyRouteView() {
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {[
             ['💵 A cobrar', `Gs ${nf(kpi.toCollect)}`, 'text-amber-200'],
-            ['✅ Cobrado hoy', `Gs ${nf(kpi.collected)}`, 'text-emerald-300'],
-            ['💰 Gané hoy', `Gs ${nf(kpi.earned)}`, 'text-emerald-300'],
+            [isToday ? '✅ Cobrado hoy' : '✅ Cobrado', `Gs ${nf(kpi.collected)}`, 'text-emerald-300'],
+            [isToday ? '💰 Gané hoy' : '💰 Gané', `Gs ${nf(kpi.earned)}`, 'text-emerald-300'],
             ['🎯 Por ganar', `Gs ${nf(kpi.possible)}`, 'text-violet-200'],
           ].map(([l, v, c]) => (
             <div key={l} className="rounded-2xl bg-black/30 px-3 py-2">
@@ -696,6 +747,33 @@ export default function MyRouteView() {
         </div>
       </div>
 
+      {/* 📅 Fechas */}
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/70 p-2">
+        <button className={`nav-btn !py-1.5 !text-xs ${range.mode === 'today' ? 'active' : ''}`} onClick={() => setRange({ mode: 'today' })}>
+          🛵 Hoy
+        </button>
+        <button
+          className={`nav-btn !py-1.5 !text-xs ${range.mode === 'day' && range.day === addDays(todayKey, -1) ? 'active' : ''}`}
+          onClick={() => setRange({ mode: 'day', day: addDays(todayKey, -1) })}
+        >
+          Ayer
+        </button>
+        <label className={`nav-btn flex items-center gap-1 !py-1 !text-xs ${range.mode === 'day' && range.day !== addDays(todayKey, -1) ? 'active' : ''}`}>
+          📅
+          <input
+            type="date"
+            className="bg-transparent text-xs outline-none"
+            max={todayKey}
+            value={range.mode === 'day' ? range.day : ''}
+            onChange={(e) => e.target.value && setRange(e.target.value === todayKey ? { mode: 'today' } : { mode: 'day', day: e.target.value })}
+          />
+        </label>
+        <button className={`nav-btn !py-1.5 !text-xs ${range.mode === 'all' ? 'active' : ''}`} onClick={() => setRange({ mode: 'all' })}>
+          🗂️ Todas las fechas
+        </button>
+        {!isToday && <span className="text-[11px] text-slate-400">{orders.length} pedido(s)</span>}
+      </div>
+
       <div className="grid gap-3 lg:grid-cols-[1.3fr_1fr]">
         {/* Mapa */}
         <div className="relative min-w-0 overflow-hidden rounded-3xl border border-white/10 shadow-2xl">
@@ -704,7 +782,7 @@ export default function MyRouteView() {
             <div ref={mapEl} className="h-full w-full" />
           </div>
           <div className="pointer-events-none absolute left-3 top-3 z-[500] flex flex-col gap-1">
-            {!myPos && <span className="rounded-full bg-black/70 px-3 py-1 text-[11px] font-bold text-amber-200">📍 Activá la ubicación para ordenar desde donde estás</span>}
+            {!myPos && isToday && <span className="max-w-[60%] rounded-full bg-black/70 px-3 py-1 text-[11px] font-bold text-amber-200">📍 Activá la ubicación</span>}
             {locating > 0 && <span className="rounded-full bg-black/70 px-3 py-1 text-[11px] font-bold text-white">Ubicando pedidos… ({locating})</span>}
           </div>
           <button className="absolute right-14 top-3 z-[500] rounded-full bg-black/70 px-3 py-1.5 text-xs font-bold text-white" onClick={fitAll}>
@@ -827,7 +905,7 @@ export default function MyRouteView() {
               ✖️ No entregados ({failed.length})
             </button>
           </div>
-          {tab === 'route' && stops.length > 1 && (
+          {tab === 'route' && isToday && stops.length > 1 && (
             <div className="mb-2 flex items-center justify-between gap-2 rounded-xl bg-white/5 px-3 py-1.5 text-[11px] text-slate-300">
               <span>{manual.length ? '✋ Orden a tu gusto' : '🤖 Orden automático (el más cerca primero)'} · arrastrá ⠿ para mover</span>
               {manual.length > 0 && (
@@ -850,20 +928,37 @@ export default function MyRouteView() {
             </div>
           ) : (
             <div className="space-y-2 lg:max-h-[calc(100vh-260px)] lg:overflow-y-auto lg:pr-1" onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
-              {list.map(({ o, coord, n }) => {
+              {list.map(({ o, coord, n }, idx) => {
+                const showDay = !isToday && (idx === 0 || list[idx - 1].o.day !== o.day);
+                const ds = dayStats.get(o.day || todayKey);
                 const active = selected === o.id;
                 const items = itemsOf(o);
                 const fee = feeOf(o);
                 const st = statusOf(o);
                 return (
+                  <Fragment key={o.id}>
+                  {showDay && ds && (
+                    <div className="sticky top-0 z-10 mt-1 rounded-xl border border-violet-500/30 bg-slate-950/95 px-3 py-2 backdrop-blur">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-black capitalize text-white">📅 {dayLabel(o.day || todayKey)}</span>
+                        <span className="text-xs font-bold text-slate-300">{ds.total} pedido(s)</span>
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] font-bold">
+                        <span className="text-emerald-300">✅ {ds.ok}</span>
+                        {ds.failed > 0 && <span className="text-rose-300">✖️ {ds.failed}</span>}
+                        {ds.open > 0 && <span className="text-violet-300">🛵 {ds.open}</span>}
+                        <span className="text-amber-200">Cobrado Gs {nf(ds.collected)}</span>
+                        <span className="text-emerald-300">Gané Gs {nf(ds.earned)}</span>
+                      </div>
+                    </div>
+                  )}
                   <div
-                    key={o.id}
                     ref={(el) => (cardRefs.current[o.id] = el)}
                     onClick={() => focus(o)}
                     className={`cursor-pointer rounded-2xl border p-3 transition ${dragId === o.id ? 'scale-[1.02] border-fuchsia-400 bg-fuchsia-500/15 shadow-2xl' : active ? 'border-violet-400 bg-violet-500/10 shadow-lg' : 'border-white/10 bg-slate-900/70'}`}
                   >
                     <div className="flex items-start gap-3">
-                      {tab === 'route' && (
+                      {tab === 'route' && isToday && (
                         <span
                           className="-ml-1 flex w-5 shrink-0 cursor-grab select-none flex-col items-center self-stretch justify-center text-lg leading-none text-slate-500 active:cursor-grabbing"
                           style={{ touchAction: 'none' }}
@@ -976,6 +1071,7 @@ export default function MyRouteView() {
                       </div>
                     )}
                   </div>
+                  </Fragment>
                 );
               })}
             </div>
