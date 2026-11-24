@@ -39,7 +39,23 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
     }
   };
   const [error, setError] = useState('');
-  const [keepAwake, setKeepAwake] = useState(false);
+  // Pantalla encendida por defecto mientras reparte (el navegador corta el GPS con la pantalla apagada).
+  const [keepAwake, setKeepAwakeState] = useState(() => {
+    try {
+      return localStorage.getItem('dcanp-geo-awake') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const setKeepAwake = (v: boolean) => {
+    setKeepAwakeState(v);
+    try {
+      localStorage.setItem('dcanp-geo-awake', v ? '1' : '0');
+    } catch {
+      // ignorar
+    }
+  };
+  const [restart, setRestart] = useState(0);
   const watchId = useRef<number | null>(null);
   const lastSent = useRef(0);
   const wakeLock = useRef<any>(null);
@@ -145,20 +161,42 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
   }, []);
 
   // Compartir ubicación sólo con links activos.
+  const hasActive = active > 0;
   useEffect(() => {
-    if (!active || !('geolocation' in navigator)) return;
+    if (!hasActive || !('geolocation' in navigator)) return;
+    const send = async (pos: GeolocationPosition, force = false) => {
+      setError('');
+      if (!force && Date.now() - lastSent.current < SEND_EVERY_MS) return;
+      lastSent.current = Date.now();
+      const { data } = await (supabase as any).rpc('report_delivery_location', {
+        p_lat: pos.coords.latitude,
+        p_lng: pos.coords.longitude,
+        p_accuracy: pos.coords.accuracy,
+      });
+      if (typeof data === 'number') setActive(data);
+    };
+    const now = () =>
+      navigator.geolocation.getCurrentPosition((pos) => void send(pos, true), () => undefined, {
+        enableHighAccuracy: true,
+        maximumAge: 10_000,
+        timeout: 20_000,
+      });
+    // Al volver a la app (celular desbloqueado, otra app cerrada) el GPS del navegador
+    // suele quedar dormido: se reinicia y se manda la ubicación al instante.
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      now();
+      setRestart((n) => n + 1);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    window.addEventListener('online', onVisible);
+    // Si el seguimiento se trabó (sin envíos hace más de 45 s con la app abierta), se pide de nuevo.
+    const heartbeat = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && Date.now() - lastSent.current > 45_000) now();
+    }, 20_000);
     watchId.current = navigator.geolocation.watchPosition(
-      async (pos) => {
-        setError('');
-        if (Date.now() - lastSent.current < SEND_EVERY_MS) return;
-        lastSent.current = Date.now();
-        const { data } = await (supabase as any).rpc('report_delivery_location', {
-          p_lat: pos.coords.latitude,
-          p_lng: pos.coords.longitude,
-          p_accuracy: pos.coords.accuracy,
-        });
-        if (typeof data === 'number') setActive(data);
-      },
+      (pos) => void send(pos),
       (err) => {
         if (err.code === err.PERMISSION_DENIED) {
           setError('Permití la ubicación para aparecer en el mapa');
@@ -171,19 +209,23 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
     return () => {
       if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
       watchId.current = null;
+      window.clearInterval(heartbeat);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+      window.removeEventListener('online', onVisible);
     };
-  }, [active, askOnOpen]);
+  }, [hasActive, askOnOpen, restart]);
 
   // Pantalla encendida mientras comparte (si el navegador lo permite).
   useEffect(() => {
     const nav = navigator as any;
-    if (!active || !keepAwake || !nav.wakeLock) return;
+    if (!hasActive || !keepAwake || !nav.wakeLock) return;
     let released = false;
     const request = async () => {
       try {
         wakeLock.current = await nav.wakeLock.request('screen');
       } catch {
-        setKeepAwake(false);
+        // El navegador no lo permitió ahora: se vuelve a intentar al volver a la app.
       }
     };
     void request();
@@ -194,7 +236,7 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
       document.removeEventListener('visibilitychange', onVisible);
       void wakeLock.current?.release?.();
     };
-  }, [active, keepAwake]);
+  }, [hasActive, keepAwake]);
 
   const askCard = askOpen ? (
     <div className="fixed inset-0 z-[1000] flex items-end justify-center bg-black/60 p-3 backdrop-blur-sm sm:items-center">
