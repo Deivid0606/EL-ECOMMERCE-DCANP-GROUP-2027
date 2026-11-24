@@ -31,7 +31,8 @@ export type ViewName =
   | 'mapa'
   | 'qrScanner'
   | 'attendance'
-  | 'packing';
+  | 'packing'
+  | 'myRoute';
 
 interface NavItem {
   id: ViewName;
@@ -46,6 +47,7 @@ const navItems: NavItem[] = [
     label: 'Dashboard',
     excludeRoles: ['DESPACHANTE'],
   },
+  { id: 'myRoute', label: '🗺️ Mi ruta', roles: ['DELIVERY'] },
   { id: 'news', label: 'Novedades', excludeRoles: ['DELIVERY'] },
   { id: 'chat', label: 'Chat' },
   { id: 'sucursal', label: '📹 Sucursal', roles: ['ADMIN', 'PROVEEDOR'] },
