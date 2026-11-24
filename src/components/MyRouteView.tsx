@@ -8,7 +8,7 @@ import { motoIcon } from '@/components/RoutePage';
 import { useRescheduleDialog } from '@/components/RescheduleDialog';
 import { customerMessageVariant } from '@/lib/waMessages';
 import { orderLocationText } from '@/lib/orderLocation';
-import { distanceKm, ensureTrackingUrl, orderCoordsFromText, type LatLng } from '@/lib/tracking';
+import { distanceKm, ensureTrackingUrl, orderCoordsFromText, resolveCoords, type LatLng } from '@/lib/tracking';
 import { cleanLocationError, requireDeliveryLocation } from '@/lib/requireLocation';
 
 /**
@@ -98,10 +98,11 @@ const STATE_COLOR = (o: RouteOrder) => {
   return '#8c5cff';
 };
 
-const pinIcon = (label: string, color: string, active: boolean) =>
+const pinIcon = (label: string, color: string, active: boolean, pkg = true) =>
   L.divIcon({
     className: '',
     html: `<div style="transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))">
+      ${pkg ? `<div style="font-size:${active ? 22 : 17}px;line-height:1;margin-bottom:-6px;position:relative;z-index:1">📦</div>` : ''}
       <div style="min-width:${active ? 34 : 28}px;height:${active ? 34 : 28}px;padding:0 4px;border-radius:999px;background:${color};border:${active ? 3 : 2}px solid #fff;color:#fff;font:800 ${active ? 14 : 12}px/${active ? 28 : 24}px system-ui;text-align:center">${label}</div>
       <div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid ${color};margin-top:-1px"></div>
     </div>`,
@@ -143,7 +144,7 @@ export default function MyRouteView() {
   const [coords, setCoords] = useState<Record<string, Coord>>(() => readGeoCache());
   const [locating, setLocating] = useState(0);
   const [myPos, setMyPos] = useState<LatLng | null>(null);
-  const [tab, setTab] = useState<'route' | 'done'>('route');
+  const [tab, setTab] = useState<'route' | 'delivered' | 'failed'>('route');
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
@@ -157,6 +158,29 @@ export default function MyRouteView() {
   const [reportMsg, setReportMsg] = useState('');
   const [reportFile, setReportFile] = useState<File | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
+  // 📍 Cargar / cambiar la ubicación del cliente.
+  const [locFor, setLocFor] = useState<RouteOrder | null>(null);
+  const [locText, setLocText] = useState('');
+  const [locBusy, setLocBusy] = useState(false);
+  // ✋ Orden a gusto del delivery (se guarda en este celular, por día).
+  const orderKey = `dcanp_route_manual_${me}_${new Date().toLocaleDateString('en-CA', { timeZone: 'America/Asuncion' })}`;
+  const [manual, setManual] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(orderKey) || '[]') || [];
+    } catch {
+      return [];
+    }
+  });
+  const saveManual = (ids: string[]) => {
+    setManual(ids);
+    try {
+      if (ids.length) localStorage.setItem(orderKey, JSON.stringify(ids));
+      else localStorage.removeItem(orderKey);
+    } catch {
+      /* sin storage */
+    }
+  };
+  const [dragId, setDragId] = useState<string | null>(null);
 
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -258,9 +282,17 @@ export default function MyRouteView() {
 
   const stops = useMemo(() => {
     const open = orders.filter(isOpen).map((o) => ({ o, coord: coordOf[o.id] }));
-    return nearestOrder(open, myPos).map((s, i) => ({ ...s, n: i + 1 }));
-  }, [orders, coordOf, myPos]);
+    const auto = nearestOrder(open, myPos);
+    if (!manual.length) return auto.map((s, i) => ({ ...s, n: i + 1 }));
+    // Orden manual: primero los que acomodó el delivery, después los nuevos en orden automático.
+    const pos = new Map(manual.map((id, i) => [id, i]));
+    const known = auto.filter((s) => pos.has(s.o.id)).sort((a, b) => (pos.get(a.o.id) as number) - (pos.get(b.o.id) as number));
+    const fresh = auto.filter((s) => !pos.has(s.o.id));
+    return [...known, ...fresh].map((s, i) => ({ ...s, n: i + 1 }));
+  }, [orders, coordOf, myPos, manual]);
   const done = useMemo(() => orders.filter((o) => !isOpen(o)), [orders]);
+  const delivered = useMemo(() => done.filter((o) => DONE_OK.includes(statusOf(o))), [done]);
+  const failed = useMemo(() => done.filter((o) => !DONE_OK.includes(statusOf(o))), [done]);
 
   const kpi = useMemo(() => {
     const open = orders.filter(isOpen);
@@ -318,7 +350,7 @@ export default function MyRouteView() {
         if (st.coord && st.o.id !== navOrder.id)
           L.marker([st.coord.lat, st.coord.lng], { icon: pinIcon(String(st.n), '#64748b', false), opacity: 0.6 }).addTo(layer.current as L.LayerGroup);
       });
-      if (navCoord) L.marker([navCoord.lat, navCoord.lng], { icon: pinIcon('🏁', '#10b981', true), zIndexOffset: 900 }).addTo(layer.current);
+      if (navCoord) L.marker([navCoord.lat, navCoord.lng], { icon: pinIcon('🏁', '#10b981', true, true), zIndexOffset: 900 }).addTo(layer.current);
       if (myPos) {
         L.marker([myPos.lat, myPos.lng], { icon: motoIcon(`En camino · ${navOrder.order_number || ''}`), zIndexOffset: 1000 }).addTo(layer.current);
         if (follow) map.setView([myPos.lat, myPos.lng], Math.max(map.getZoom(), 16), { animate: true });
@@ -331,7 +363,10 @@ export default function MyRouteView() {
       L.marker([myPos.lat, myPos.lng], { icon: motoIcon('Vos'), zIndexOffset: 1000 }).addTo(layer.current);
       pts.push([myPos.lat, myPos.lng]);
     }
-    const list = tab === 'route' ? stops.map((s) => ({ o: s.o, label: String(s.n), coord: s.coord })) : done.map((o) => ({ o, label: DONE_OK.includes(statusOf(o)) ? '✓' : '✕', coord: coordOf[o.id] }));
+    const list =
+      tab === 'route'
+        ? stops.map((s) => ({ o: s.o, label: String(s.n), coord: s.coord }))
+        : (tab === 'delivered' ? delivered : failed).map((o) => ({ o, label: tab === 'delivered' ? '✓' : '✕', coord: coordOf[o.id] }));
     for (const s of list) {
       if (!s.coord) continue;
       const active = selected === s.o.id;
@@ -349,7 +384,7 @@ export default function MyRouteView() {
       map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 15 });
       fitted.current = true;
     }
-  }, [stops, done, coordOf, myPos, selected, tab, navId, road, follow, orders]);
+  }, [stops, delivered, failed, coordOf, myPos, selected, tab, navId, road, follow, orders]);
 
   // Camino por calles hasta el cliente (OSRM); si no responde, línea recta.
   useEffect(() => {
@@ -530,7 +565,96 @@ export default function MyRouteView() {
   const navCoord = navOrder ? coordOf[navOrder.id] : null;
   const navKm = road?.km ?? (myPos && navCoord ? distanceKm(myPos, navCoord) * 1.35 : null);
   const navMin = road?.min ?? (navKm != null ? Math.max(1, Math.round((navKm / 25) * 60)) : null);
-  const list = tab === 'route' ? stops : done.map((o) => ({ o, coord: coordOf[o.id], n: 0 }));
+  const list = tab === 'route' ? stops : (tab === 'delivered' ? delivered : failed).map((o) => ({ o, coord: coordOf[o.id], n: 0 }));
+
+  // ✋ Arrastrar para ordenar (dedo o mouse) desde la manija ⠿.
+  const startDrag = (e: React.PointerEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    if (!manual.length) setManual(stops.map((st) => st.o.id));
+    setDragId(id);
+  };
+  const moveDrag = (e: React.PointerEvent) => {
+    if (!dragId) return;
+    const ids = manual.length ? [...manual] : stops.map((st) => st.o.id);
+    stops.forEach((st) => !ids.includes(st.o.id) && ids.push(st.o.id));
+    const from = ids.indexOf(dragId);
+    let to = from;
+    for (let i = 0; i < ids.length; i++) {
+      const el = cardRefs.current[ids[i]];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (e.clientY >= r.top && e.clientY <= r.bottom) {
+        to = i;
+        break;
+      }
+    }
+    if (to !== from && from >= 0) {
+      ids.splice(to, 0, ...ids.splice(from, 1));
+      setManual(ids);
+    }
+  };
+  const endDrag = () => {
+    if (!dragId) return;
+    setDragId(null);
+    saveManual(manual.length ? manual : stops.map((st) => st.o.id));
+  };
+  const moveBy = (id: string, delta: number) => {
+    const ids = stops.map((st) => st.o.id);
+    const i = ids.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    ids.splice(j, 0, ...ids.splice(i, 1));
+    saveManual(ids);
+  };
+
+  // 📍 Guardar la ubicación del cliente.
+  const saveLocation = async (o: RouteOrder, how: 'here' | 'text' | 'clear') => {
+    setLocBusy(true);
+    let dest: LatLng | null = null;
+    if (how === 'here') {
+      dest =
+        myPos ||
+        (await new Promise<LatLng | null>((resolve) =>
+          navigator.geolocation?.getCurrentPosition(
+            (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+            () => resolve(null),
+            { enableHighAccuracy: true, timeout: 20_000 },
+          ) ?? resolve(null),
+        ));
+      if (!dest) {
+        setLocBusy(false);
+        return toast.error('No se pudo leer tu ubicación: activá el GPS.');
+      }
+    } else if (how === 'text') {
+      if (!locText.trim()) {
+        setLocBusy(false);
+        return toast.error('Pegá el link de Google Maps, las coordenadas o la dirección');
+      }
+      dest = await resolveCoords(locText.trim());
+      if (!dest) {
+        setLocBusy(false);
+        return toast.error('No se encontró la ubicación. Probá con el link de Google Maps que mandó el cliente.');
+      }
+    }
+    const { error } = await sb.rpc('set_route_destination', { p_order_id: o.id, p_lat: dest?.lat ?? null, p_lng: dest?.lng ?? null });
+    setLocBusy(false);
+    if (error) return toast.error(error.message);
+    setOrders((prev) => prev.map((x) => (x.id === o.id ? { ...x, dest } : x)));
+    setCoords((prev) => {
+      const nx = { ...prev };
+      delete nx[o.id];
+      writeGeoCache(nx);
+      return nx;
+    });
+    if (navId === o.id) {
+      setRoad(null);
+      roadFrom.current = null;
+    }
+    toast.success(dest ? '📍 Ubicación del cliente guardada' : 'Ubicación borrada');
+    setLocFor(null);
+  };
 
   return (
     <div className="w-full min-w-0 space-y-3">
@@ -613,7 +737,17 @@ export default function MyRouteView() {
                   <span className="text-slate-400">Cobrar</span>
                   <span className="text-xl font-black text-amber-200">Gs {nf(Number(navOrder.total_gs || 0))}</span>
                 </div>
-                <div className="grid grid-cols-4 gap-1.5">
+                <div className="grid grid-cols-5 gap-1.5">
+                  <button
+                    className={`rounded-xl py-2 text-xs font-black ${navCoord?.level === 'exact' ? 'bg-white/10' : 'bg-amber-500 text-black'}`}
+                    title="Cargar o editar la ubicación del cliente"
+                    onClick={() => {
+                      setLocText('');
+                      setLocFor(navOrder);
+                    }}
+                  >
+                    📍
+                  </button>
                   <a className="rounded-xl bg-slate-700 py-2 text-center text-xs font-black" href={`tel:${String(navOrder.phone || '').replace(/[^\d+]/g, '')}`}>
                     📞
                   </a>
@@ -683,13 +817,26 @@ export default function MyRouteView() {
         {/* Paradas */}
         <div className="min-w-0 rounded-3xl border border-white/10 bg-slate-950/70 p-3 shadow-xl">
           <div className="mb-2 flex gap-2">
-            <button className={`nav-btn flex-1 ${tab === 'route' ? 'active' : ''}`} onClick={() => setTab('route')}>
-              🛵 Por entregar ({stops.length})
+            <button className={`nav-btn flex-1 !px-1.5 !text-xs ${tab === 'route' ? 'active' : ''}`} onClick={() => setTab('route')}>
+              🛵 Ruta ({stops.length})
             </button>
-            <button className={`nav-btn flex-1 ${tab === 'done' ? 'active' : ''}`} onClick={() => setTab('done')}>
-              ✅ Hechos hoy ({done.length})
+            <button className={`nav-btn flex-1 !px-1.5 !text-xs ${tab === 'delivered' ? 'active' : ''}`} onClick={() => setTab('delivered')}>
+              ✅ Entregados ({delivered.length})
+            </button>
+            <button className={`nav-btn flex-1 !px-1.5 !text-xs ${tab === 'failed' ? 'active' : ''}`} onClick={() => setTab('failed')}>
+              ✖️ No entregados ({failed.length})
             </button>
           </div>
+          {tab === 'route' && stops.length > 1 && (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-xl bg-white/5 px-3 py-1.5 text-[11px] text-slate-300">
+              <span>{manual.length ? '✋ Orden a tu gusto' : '🤖 Orden automático (el más cerca primero)'} · arrastrá ⠿ para mover</span>
+              {manual.length > 0 && (
+                <button className="font-black text-violet-300" onClick={() => saveManual([])}>
+                  Volver a automático
+                </button>
+              )}
+            </div>
+          )}
 
           {loading ? (
             <div className="space-y-2">
@@ -699,10 +846,10 @@ export default function MyRouteView() {
             </div>
           ) : list.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-white/10 py-10 text-center text-sm text-slate-500">
-              {tab === 'route' ? '🎉 No tenés pedidos pendientes. Escaneá o tomá pedidos para empezar.' : 'Todavía no cerraste pedidos hoy.'}
+              {tab === 'route' ? '🎉 No tenés pedidos pendientes. Escaneá o tomá pedidos para empezar.' : tab === 'delivered' ? 'Todavía no entregaste pedidos hoy.' : 'No tenés pedidos cancelados o rechazados hoy.'}
             </div>
           ) : (
-            <div className="space-y-2 lg:max-h-[calc(100vh-260px)] lg:overflow-y-auto lg:pr-1">
+            <div className="space-y-2 lg:max-h-[calc(100vh-260px)] lg:overflow-y-auto lg:pr-1" onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
               {list.map(({ o, coord, n }) => {
                 const active = selected === o.id;
                 const items = itemsOf(o);
@@ -713,18 +860,29 @@ export default function MyRouteView() {
                     key={o.id}
                     ref={(el) => (cardRefs.current[o.id] = el)}
                     onClick={() => focus(o)}
-                    className={`cursor-pointer rounded-2xl border p-3 transition ${active ? 'border-violet-400 bg-violet-500/10 shadow-lg' : 'border-white/10 bg-slate-900/70'}`}
+                    className={`cursor-pointer rounded-2xl border p-3 transition ${dragId === o.id ? 'scale-[1.02] border-fuchsia-400 bg-fuchsia-500/15 shadow-2xl' : active ? 'border-violet-400 bg-violet-500/10 shadow-lg' : 'border-white/10 bg-slate-900/70'}`}
                   >
                     <div className="flex items-start gap-3">
+                      {tab === 'route' && (
+                        <span
+                          className="-ml-1 flex w-5 shrink-0 cursor-grab select-none flex-col items-center self-stretch justify-center text-lg leading-none text-slate-500 active:cursor-grabbing"
+                          style={{ touchAction: 'none' }}
+                          title="Arrastrá para cambiar el orden"
+                          onPointerDown={(e) => startDrag(e, o.id)}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          ⠿
+                        </span>
+                      )}
                       <span
                         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-black text-white"
                         style={{ background: STATE_COLOR(o) }}
                       >
-                        {tab === 'route' ? n : DONE_OK.includes(st) ? '✓' : '✕'}
+                        {tab === 'route' ? n : tab === 'delivered' ? '✓' : '✕'}
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="truncate font-black text-white">{o.customer_name || 'Cliente'}</span>
+                          <span className="truncate font-black text-white">📦 {o.customer_name || 'Cliente'}</span>
                           <span className="shrink-0 text-right font-black text-amber-200">Gs {nf(Number(o.total_gs || 0))}</span>
                         </div>
                         <div className="truncate text-xs text-slate-300">
@@ -755,6 +913,27 @@ export default function MyRouteView() {
                           ))}
                           <div className="mt-1">🏠 {[o.street, o.district, o.city].filter(Boolean).join(' · ') || 'Sin dirección'}</div>
                           {o.phone && <div className="mt-1">📱 {o.phone}</div>}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            className={`flex-1 rounded-xl px-2 py-2 text-xs font-black ${coord?.level === 'exact' ? 'bg-white/10 text-slate-200' : 'bg-amber-500 text-black'}`}
+                            onClick={() => {
+                              setLocText('');
+                              setLocFor(o);
+                            }}
+                          >
+                            📍 {coord?.level === 'exact' ? 'Editar ubicación' : 'Cargar ubicación'}
+                          </button>
+                          {tab === 'route' && (
+                            <>
+                              <button className="rounded-xl bg-white/10 px-3 py-2 text-xs font-black" title="Subir" onClick={() => moveBy(o.id, -1)}>
+                                ▲
+                              </button>
+                              <button className="rounded-xl bg-white/10 px-3 py-2 text-xs font-black" title="Bajar" onClick={() => moveBy(o.id, 1)}>
+                                ▼
+                              </button>
+                            </>
+                          )}
                         </div>
                         <div className="grid grid-cols-4 gap-1.5">
                           <button className="rounded-xl bg-blue-600 px-2 py-2 text-xs font-black text-white" onClick={() => setChooser({ o })}>
@@ -851,6 +1030,44 @@ export default function MyRouteView() {
               </button>
             </div>
             <p className="mt-2 text-center text-[10px] text-slate-500">Con Google Maps o Waze, al volver a la app tu ubicación se actualiza sola.</p>
+          </div>
+        </div>
+      )}
+      {locFor && (
+        <div className="fixed inset-0 z-[2000] flex items-end justify-center bg-black/60 p-3 backdrop-blur-sm sm:items-center" onClick={() => !locBusy && setLocFor(null)}>
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-950 p-5 text-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-black">📍 Ubicación del cliente</h3>
+            <p className="text-xs text-slate-400">
+              {locFor.order_number} · {locFor.customer_name} · {locFor.city}
+            </p>
+            <button
+              className="mt-4 w-full rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 py-3 text-sm font-black disabled:opacity-50"
+              disabled={locBusy}
+              onClick={() => void saveLocation(locFor, 'here')}
+            >
+              📍 Estoy en la casa del cliente (usar mi ubicación)
+            </button>
+            <label className="app-label mt-4">O pegá el link de Google Maps, las coordenadas o la dirección</label>
+            <textarea
+              className="app-input"
+              rows={2}
+              value={locText}
+              onChange={(e) => setLocText(e.target.value)}
+              placeholder="https://maps.app.goo.gl/…  ó  -25.30, -57.60"
+            />
+            <button className="mt-2 w-full rounded-2xl bg-violet-600 py-2.5 text-sm font-black disabled:opacity-50" disabled={locBusy} onClick={() => void saveLocation(locFor, 'text')}>
+              {locBusy ? 'Guardando…' : 'Guardar esta ubicación'}
+            </button>
+            <div className="mt-3 flex gap-2">
+              {coordOf[locFor.id]?.level === 'exact' && (
+                <button className="nav-btn flex-1 !text-rose-300" disabled={locBusy} onClick={() => void saveLocation(locFor, 'clear')}>
+                  🗑️ Quitar
+                </button>
+              )}
+              <button className="nav-btn flex-1" disabled={locBusy} onClick={() => setLocFor(null)}>
+                Cancelar
+              </button>
+            </div>
           </div>
         </div>
       )}
