@@ -512,7 +512,7 @@ export default function Index() {
       {['DELIVERY', 'ADMIN', 'PROVEEDOR'].includes(String(profile.role || '')) && (
         <Suspense fallback={null}>
           <LiveLocationSharer askOnOpen={String(profile.role || '') === 'DELIVERY'} />
-          <AppSetupGuard />
+          <AppSetupGuard role={String(profile.role || '')} />
         </Suspense>
       )}
 
