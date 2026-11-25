@@ -31,6 +31,8 @@ export default function AppSetupGuard({ role = '' }: { role?: string }) {
   const native = isNativeApp();
   const plugin = hasPermsPlugin();
   const [st, setSt] = useState<PermsStatus | null>(null);
+  // Se reinicia al ingresar/recargar; no guardar la omisión entre visitas.
+  const [skipBrowserInstallPrompt, setSkipBrowserInstallPrompt] = useState(false);
   const [autostartOk, setAutostartOk] = useState(() => {
     try {
       return localStorage.getItem(AUTOSTART_KEY) === '1';
@@ -77,19 +79,32 @@ export default function AppSetupGuard({ role = '' }: { role?: string }) {
     };
   }, [plugin, refresh]);
 
-  // Delivery en el navegador de un Android: tiene que usar la app.
+  // Android en navegador: recomendar la APK en cada ingreso, sin impedir trabajar.
+  // La omisión es solo para la visita actual (no se persiste en storage).
   if (!native) {
-    if (!mandatory || !isAndroidBrowser()) return null;
+    if (!mandatory || !isAndroidBrowser() || skipBrowserInstallPrompt) return null;
     return (
-      <Blocker icon="📱" title="Instalá la app DCANP Delivery" text="Para repartir desde el celular es obligatorio usar la app: así seguís en el mapa aunque bloquees la pantalla o uses WhatsApp / Waze.">
+      <Blocker
+        icon="📱"
+        title="Descargá DCANP Delivery"
+        text="Te recomendamos instalar la app para compartir tu ubicación con mayor continuidad al bloquear la pantalla o usar WhatsApp / Waze. También podés seguir trabajando en el navegador."
+      >
         <a href={ANDROID_APP_URL} className="block rounded-2xl bg-emerald-500 py-3 text-base font-black text-black">
-          ⬇️ Descargar la app
+          ⬇️ Descargar la APK
         </a>
-        <ol className="mt-4 space-y-1 text-left text-xs text-slate-400">
-          <li>1. Tocá «Descargar» y abrí el archivo.</li>
-          <li>2. Si avisa «origen desconocido»: Configuración › Permitir de esta fuente.</li>
-          <li>3. Instalar › abrí «DCANP Delivery» e iniciá sesión.</li>
-        </ol>
+        <button
+          type="button"
+          className="mt-3 w-full rounded-2xl border-2 border-white/60 bg-slate-800 px-4 py-3 text-sm font-black text-white"
+          onClick={() => setSkipBrowserInstallPrompt(true)}
+        >
+          Continuar en el navegador
+        </button>
+        <p className="mt-3 text-xs text-amber-200">
+          En el navegador, el seguimiento de ubicación en segundo plano puede interrumpirse si bloqueás el celular.
+        </p>
+        <p className="mt-2 text-[11px] text-slate-400">
+          Este recordatorio volverá a aparecer cuando ingreses nuevamente.
+        </p>
       </Blocker>
     );
   }
