@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ANDROID_APP_EXTERNAL_URL, DcanpPerms, hasPermsPlugin, isNativeApp, needsAutostart, type PermsStatus } from '@/lib/nativeApp';
+import { ANDROID_APP_EXTERNAL_URL, ANDROID_APP_URL, DcanpPerms, hasPermsPlugin, isAndroidBrowser, isNativeApp, needsAutostart, type PermsStatus } from '@/lib/nativeApp';
 
 /**
  * 📱 Asistente de la app de Android: pide uno por uno los permisos para que el
@@ -11,7 +11,23 @@ import { ANDROID_APP_EXTERNAL_URL, DcanpPerms, hasPermsPlugin, isNativeApp, need
 const AUTOSTART_KEY = 'dcanp-autostart-ok';
 const SNOOZE_KEY = 'dcanp-setup-snooze';
 
-export default function AppSetupGuard() {
+/** Pantalla que bloquea la app hasta completar el paso (delivery en el celular). */
+function Blocker({ icon, title, text, children }: { icon: string; title: string; text: string; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-[1500] flex items-center justify-center bg-slate-950 p-4">
+      <div className="w-full max-w-sm text-center text-white">
+        <div className="text-6xl">{icon}</div>
+        <h2 className="mt-3 text-xl font-black">{title}</h2>
+        <p className="mt-2 text-sm text-slate-300">{text}</p>
+        <div className="mt-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+export default function AppSetupGuard({ role = '' }: { role?: string }) {
+  // Para el delivery es obligatorio en el celular: app instalada y todos los permisos.
+  const mandatory = String(role).toUpperCase() === 'DELIVERY';
   const native = isNativeApp();
   const plugin = hasPermsPlugin();
   const [st, setSt] = useState<PermsStatus | null>(null);
@@ -61,10 +77,35 @@ export default function AppSetupGuard() {
     };
   }, [plugin, refresh]);
 
-  if (!native) return null;
+  // Delivery en el navegador de un Android: tiene que usar la app.
+  if (!native) {
+    if (!mandatory || !isAndroidBrowser()) return null;
+    return (
+      <Blocker icon="📱" title="Instalá la app DCANP Delivery" text="Para repartir desde el celular es obligatorio usar la app: así seguís en el mapa aunque bloquees la pantalla o uses WhatsApp / Waze.">
+        <a href={ANDROID_APP_URL} className="block rounded-2xl bg-emerald-500 py-3 text-base font-black text-black">
+          ⬇️ Descargar la app
+        </a>
+        <ol className="mt-4 space-y-1 text-left text-xs text-slate-400">
+          <li>1. Tocá «Descargar» y abrí el archivo.</li>
+          <li>2. Si avisa «origen desconocido»: Configuración › Permitir de esta fuente.</li>
+          <li>3. Instalar › abrí «DCANP Delivery» e iniciá sesión.</li>
+        </ol>
+      </Blocker>
+    );
+  }
 
   // App vieja: no trae el asistente → actualizar.
   if (!plugin) {
+    if (mandatory) {
+      return (
+        <Blocker icon="⬆️" title="Actualizá la app" text="Hay una versión nueva obligatoria: configura los permisos para que sigas en el mapa con la pantalla apagada.">
+          <a href={ANDROID_APP_EXTERNAL_URL} className="block rounded-2xl bg-emerald-500 py-3 text-base font-black text-black">
+            ⬇️ Descargar e instalar
+          </a>
+          <p className="mt-3 text-xs text-slate-400">Se instala encima de la que tenés, sin perder tu sesión.</p>
+        </Blocker>
+      );
+    }
     return (
       <a
         href={ANDROID_APP_EXTERNAL_URL}
@@ -80,7 +121,7 @@ export default function AppSetupGuard() {
     );
   }
 
-  if (!st || snoozed) return null;
+  if (!st || (snoozed && !mandatory)) return null;
 
   const autostart = needsAutostart(st.manufacturer);
   const steps = [
@@ -133,7 +174,7 @@ export default function AppSetupGuard() {
   if (!pending.length) return null;
 
   return (
-    <div className="fixed inset-0 z-[1500] flex items-end justify-center bg-black/70 p-3 backdrop-blur-sm sm:items-center">
+    <div className={`fixed inset-0 z-[1500] flex items-end justify-center p-3 sm:items-center ${mandatory ? 'bg-slate-950' : 'bg-black/70 backdrop-blur-sm'}`}>
       <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-950 p-5 text-white shadow-2xl">
         <div className="text-center text-4xl">🛵</div>
         <h3 className="mt-1 text-center text-lg font-black">Configurá la app (una sola vez)</h3>
@@ -160,6 +201,9 @@ export default function AppSetupGuard() {
             </div>
           ))}
         </div>
+        {mandatory ? (
+          <p className="mt-4 text-center text-[11px] font-bold text-amber-300">Es obligatorio para usar la app: completá todos los pasos.</p>
+        ) : (
         <button
           type="button"
           className="mt-4 w-full py-2 text-xs font-bold text-slate-400"
@@ -174,6 +218,7 @@ export default function AppSetupGuard() {
         >
           Después
         </button>
+        )}
         <button type="button" className="w-full py-1 text-[11px] text-slate-500 underline" onClick={() => void DcanpPerms.openAppSettings()}>
           Abrir los ajustes de la app
         </button>
