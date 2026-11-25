@@ -10,6 +10,7 @@ import { customerMessageVariant } from '@/lib/waMessages';
 import { orderLocationText } from '@/lib/orderLocation';
 import { distanceKm, ensureTrackingUrl, orderCoordsFromText, resolveCoords, type LatLng } from '@/lib/tracking';
 import { cleanLocationError, requireDeliveryLocation } from '@/lib/requireLocation';
+import { ANDROID_APP_URL, isAndroidBrowser } from '@/lib/nativeApp';
 
 /**
  * 🗺️ Mi ruta (delivery): mapa con todos sus pedidos del día, en el orden más corto
@@ -746,6 +747,20 @@ export default function MyRouteView() {
           ))}
         </div>
       </div>
+
+      {isAndroidBrowser() && (
+        <a
+          href={ANDROID_APP_URL}
+          className="flex items-center gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-100"
+        >
+          <span className="text-2xl">📱</span>
+          <span className="min-w-0 flex-1">
+            <b>Instalá la app DCANP Delivery</b>
+            <span className="block text-xs text-emerald-200/80">Seguís en el mapa aunque bloquees el celular o uses WhatsApp / Waze.</span>
+          </span>
+          <span className="rounded-xl bg-emerald-500 px-3 py-2 text-xs font-black text-black">Descargar</span>
+        </a>
+      )}
 
       {/* 📅 Fechas */}
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/70 p-2">

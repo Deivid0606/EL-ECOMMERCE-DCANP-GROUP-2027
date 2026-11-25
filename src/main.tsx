@@ -4,9 +4,13 @@ import App from "./App.tsx";
 import "./index.css";
 import { installPyTimeZone } from "./lib/pyTime";
 import { reloadForNewVersion } from "./components/ViewErrorBoundary";
+import { installNativeLinkHandling } from "./lib/nativeApp";
 
 // Toda la app muestra la hora de Paraguay, sin importar la zona del dispositivo.
 installPyTimeZone();
+
+// App de Android: los links externos (WhatsApp, Maps, Waze) se abren en su app.
+installNativeLinkHandling();
 
 // Después de publicar una versión nueva, los archivos de la vieja ya no existen:
 // si una pestaña no puede cargarse, se recarga la app sola (una vez).
