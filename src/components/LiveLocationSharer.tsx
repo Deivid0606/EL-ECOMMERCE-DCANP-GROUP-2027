@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { ANDROID_APP_URL, isAndroidBrowser, isNativeApp, openAppSettings, startBackgroundLocation } from '@/lib/nativeApp';
 
 const CHECK_MS = 30_000;
 const SEND_EVERY_MS = 10_000;
@@ -162,8 +163,41 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
 
   // Compartir ubicación sólo con links activos.
   const hasActive = active > 0;
+  const native = isNativeApp();
+
+  // 📱 App de Android: ubicación en segundo plano (pantalla apagada, otras apps).
   useEffect(() => {
-    if (!hasActive || !('geolocation' in navigator)) return;
+    if (!hasActive || !native) return;
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    startBackgroundLocation(
+      async (p) => {
+        setError('');
+        if (Date.now() - lastSent.current < SEND_EVERY_MS) return;
+        lastSent.current = Date.now();
+        const { data } = await (supabase as any).rpc('report_delivery_location', { p_lat: p.lat, p_lng: p.lng, p_accuracy: p.accuracy });
+        if (typeof data === 'number') setActive(data);
+      },
+      (code) => {
+        if (code === 'NOT_AUTHORIZED') {
+          setError('Permití la ubicación «Todo el tiempo» para la app (tocá acá)');
+          setPermission('denied');
+        } else setError('Sin señal de GPS');
+      },
+    )
+      .then((fn) => {
+        if (cancelled) fn();
+        else stop = fn;
+      })
+      .catch(() => setError('No se pudo iniciar la ubicación en segundo plano'));
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, [hasActive, native]);
+
+  useEffect(() => {
+    if (!hasActive || native || !('geolocation' in navigator)) return;
     const send = async (pos: GeolocationPosition, force = false) => {
       setError('');
       if (!force && Date.now() - lastSent.current < SEND_EVERY_MS) return;
@@ -214,7 +248,7 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
       window.removeEventListener('focus', onVisible);
       window.removeEventListener('online', onVisible);
     };
-  }, [hasActive, askOnOpen, restart]);
+  }, [hasActive, askOnOpen, restart, native]);
 
   // Pantalla encendida mientras comparte (si el navegador lo permite).
   useEffect(() => {
@@ -335,8 +369,25 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
         🛵 Compartiendo tu ubicación · {active} entrega{active === 1 ? '' : 's'} pendiente{active === 1 ? '' : 's'}
       </div>
       <div className="mt-0.5 text-[11px] text-muted-foreground">
-        {error || 'Se apaga solo al tocar "Finalicé mi día". Mantené la app abierta mientras repartís.'}
+        {error ? (
+          native ? (
+            <button type="button" className="text-left underline" onClick={() => void openAppSettings()}>
+              {error}
+            </button>
+          ) : (
+            error
+          )
+        ) : native ? (
+          'Sigue aunque bloquees el celular o uses otras apps. Se apaga sola al tocar "Finalicé mi día".'
+        ) : (
+          'Se apaga solo al tocar "Finalicé mi día". Mantené la app abierta mientras repartís.'
+        )}
       </div>
+      {isAndroidBrowser() && (
+        <a href={ANDROID_APP_URL} className="mt-1 block text-[11px] font-bold text-emerald-400 underline">
+          📱 Instalá la app DCANP Delivery para seguir en el mapa con la pantalla apagada
+        </a>
+      )}
       {'wakeLock' in navigator && (
         <label className="mt-1 flex items-center gap-1.5 text-[11px]">
           <input type="checkbox" checked={keepAwake} onChange={(e) => setKeepAwake(e.target.checked)} />
