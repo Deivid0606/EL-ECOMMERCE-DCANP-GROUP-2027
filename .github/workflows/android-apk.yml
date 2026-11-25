@@ -10,7 +10,6 @@ on:
     paths:
       - 'android/**'
       - 'capacitor.config.ts'
-      - 'src/lib/nativeApp.ts'
       - '.github/workflows/android-apk.yml'
 
 permissions:
