@@ -41,6 +41,7 @@ const BotSkyImportBridge = lazy(() => import('@/components/BotSkyImportBridge'))
 const TrackingPage = lazy(() => import('@/components/TrackingPage'));
 const RoutePage = lazy(() => import('@/components/RoutePage'));
 const LiveLocationSharer = lazy(() => import('@/components/LiveLocationSharer'));
+const AppSetupGuard = lazy(() => import('@/components/AppSetupGuard'));
 const ClosureReminderBanner = lazy(() => import('@/components/ClosureReminderBanner'));
 const LocationDialogHost = lazy(() => import('@/components/LocationDialog'));
 const StoreOrderTabBridge = lazy(() =>
@@ -511,6 +512,7 @@ export default function Index() {
       {['DELIVERY', 'ADMIN', 'PROVEEDOR'].includes(String(profile.role || '')) && (
         <Suspense fallback={null}>
           <LiveLocationSharer askOnOpen={String(profile.role || '') === 'DELIVERY'} />
+          <AppSetupGuard />
         </Suspense>
       )}
 

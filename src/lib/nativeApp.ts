@@ -15,6 +15,8 @@ export const isNativeApp = () => {
 
 /** Link para descargar la app (Android). */
 export const ANDROID_APP_URL = '/dcanp-delivery.apk';
+/** Desde la app: otro dominio para que el link se abra en el navegador del celular y descargue. */
+export const ANDROID_APP_EXTERNAL_URL = 'https://el-ecommercedcanpgroup.com/dcanp-delivery.apk';
 
 export const isAndroidBrowser = () => /android/i.test(navigator.userAgent) && !isNativeApp();
 
@@ -99,3 +101,31 @@ export function installNativeLinkHandling() {
     return fake as Window;
   }) as typeof window.open;
 }
+
+/** Permisos de la app (plugin propio de la app de Android, desde la versión 1.4). */
+export type PermsStatus = {
+  location: boolean;
+  precise: boolean;
+  notifications: boolean;
+  battery: boolean;
+  manufacturer: string;
+  sdk: number;
+};
+type PermsPlugin = {
+  status(): Promise<PermsStatus>;
+  requestLocation(): Promise<void>;
+  requestNotifications(): Promise<void>;
+  requestBattery(): Promise<void>;
+  openAutostart(): Promise<void>;
+  openAppSettings(): Promise<void>;
+};
+export const DcanpPerms = registerPlugin<PermsPlugin>('DcanpPerms');
+export const hasPermsPlugin = () => {
+  try {
+    return isNativeApp() && Capacitor.isPluginAvailable('DcanpPerms');
+  } catch {
+    return false;
+  }
+};
+/** Marcas que cierran apps en segundo plano si no se activa «Inicio automático». */
+export const needsAutostart = (manufacturer: string) => /xiaomi|redmi|poco|huawei|honor|oppo|realme|vivo|oneplus/i.test(manufacturer || '');

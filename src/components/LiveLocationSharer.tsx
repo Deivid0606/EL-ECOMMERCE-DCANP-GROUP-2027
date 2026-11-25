@@ -166,6 +166,12 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
   const native = isNativeApp();
 
   // 📱 App de Android: ubicación en segundo plano (pantalla apagada, otras apps).
+  const [permsTick, setPermsTick] = useState(0);
+  useEffect(() => {
+    const on = () => setPermsTick((n) => n + 1);
+    window.addEventListener('dcanp-perms-updated', on);
+    return () => window.removeEventListener('dcanp-perms-updated', on);
+  }, []);
   useEffect(() => {
     if (!hasActive || !native) return;
     let stop: (() => void) | null = null;
@@ -194,7 +200,7 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
       cancelled = true;
       stop?.();
     };
-  }, [hasActive, native]);
+  }, [hasActive, native, permsTick]);
 
   useEffect(() => {
     if (!hasActive || native || !('geolocation' in navigator)) return;
