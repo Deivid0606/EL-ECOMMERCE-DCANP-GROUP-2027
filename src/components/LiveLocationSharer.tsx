@@ -175,7 +175,7 @@ export default function LiveLocationSharer({ askOnOpen = false }: { askOnOpen?: 
         setError('');
         if (Date.now() - lastSent.current < SEND_EVERY_MS) return;
         lastSent.current = Date.now();
-        const { data } = await (supabase as any).rpc('report_delivery_location', { p_lat: p.lat, p_lng: p.lng, p_accuracy: p.accuracy });
+        const { data } = await (supabase as any).rpc('report_delivery_location', { p_lat: p.lat, p_lng: p.lng, p_accuracy: p.accuracy, p_source: 'app' });
         if (typeof data === 'number') setActive(data);
       },
       (code) => {

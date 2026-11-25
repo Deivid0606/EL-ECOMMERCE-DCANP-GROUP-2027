@@ -304,7 +304,7 @@ export default function LiveMapView() {
       });
       if (d.location) {
         L.marker(d.location, { icon: motoIcon(d.name.split(' ')[0], color), opacity: dim ? 0.35 : 1, zIndexOffset: 1000 })
-          .bindPopup(`<b>${d.name}</b><br/>${ago(d.location.updated_at)}`)
+          .bindPopup(`<b>${d.name}</b>${(d.location as any).source === 'app' ? ' · 📱 App' : ''}<br/>${ago(d.location.updated_at)}`)
           .on('click', () => setSelected(d.email))
           .addTo(layer.current!);
         if (!dim) points.push(d.location);
@@ -529,7 +529,7 @@ export default function LiveMapView() {
                         <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background ${gps.dot}`} />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-black">{d.name}</div>
+                        <div className="truncate font-black">{d.name}{(d.location as any)?.source === 'app' && <span className="ml-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300" title="Usa la app de Android: sigue en el mapa con la pantalla apagada">📱 App</span>}</div>
                         <div className="flex items-center gap-1.5 text-[10px]">
                           <span className={`rounded-full border px-1.5 py-0.5 font-bold ${gps.cls}`}>{gps.label}</span>
                           <span className="text-muted-foreground">{ago(d.location?.updated_at)}</span>

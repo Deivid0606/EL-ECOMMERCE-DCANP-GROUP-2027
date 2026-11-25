@@ -51,7 +51,8 @@ export async function startBackgroundLocation(
       backgroundMessage: 'Se apaga solo al tocar «Finalicé mi día».',
       requestPermissions: true,
       stale: false,
-      distanceFilter: 15,
+      // 0 = también manda la ubicación quieto (esperando al cliente): así no aparece desconectado.
+      distanceFilter: 0,
     },
     (position, error) => {
       if (error) {
