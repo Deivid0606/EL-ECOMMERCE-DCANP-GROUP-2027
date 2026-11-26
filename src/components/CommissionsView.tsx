@@ -77,8 +77,13 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
       supabase.from('profiles').select('email, name, logo_url, phone'),
       supabase.from('products').select('sku, provider_email'),
       supabase.from('commission_requests').select('*'),
-    ]).then(([profilesRes, productsRes, requestsRes]) => {
-      setVendors(profilesRes.data || []);
+      (supabase as any).rpc('commission_payable_sellers'),
+    ]).then(([profilesRes, productsRes, requestsRes, sellersRes]) => {
+      if (sellersRes.error && (role === 'ADMIN' || role === 'PROVEEDOR')) {
+        toast.error('No se pudo cargar el listado de vendedores con saldo pendiente');
+      }
+      // Directorio validado en servidor: nunca usar todos los perfiles como vendedores.
+      setVendors((sellersRes.data || []) as any[]);
       setProviders(profilesRes.data || []);
       setProducts(productsRes.data || []);
       setCommissionRequests(requestsRes.data || []);
@@ -90,7 +95,8 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     const { data, error } = await fetchAllRows('orders', (q: any) => {
       let query = q.in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA', 'GUIA GENERADA']).order('created_at', { ascending: false });
       if (role === 'VENDEDOR') query = query.eq('created_by', profile?.email);
-      if (role === 'PROVEEDOR' && profile?.email) query = query.ilike('provider_emails_list', `%${profile.email}%`);
+      // El alcance por proveedor se valida con RLS y orderInScope.
+      // No excluir ventas cuando solo contienen provider_email o SKU del proveedor.
       return query;
     });
     if (error) toast.error('No se pudieron cargar todas las comisiones: ' + error.message);
@@ -107,7 +113,12 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
 
   useEffect(() => { loadCommissions(); }, []);
 
+  const eligibleSellerEmails = useMemo(
+    () => new Set(vendors.map(v => String(v.email || '').toLowerCase().trim()).filter(Boolean)),
+    [vendors]
+  );
   const baseFiltered = orders.filter(o => {
+    if ((role === 'ADMIN' || role === 'PROVEEDOR') && !eligibleSellerEmails.has(String(o.created_by || '').toLowerCase().trim())) return false;
     if (filterVendor && o.created_by?.toLowerCase() !== filterVendor.toLowerCase()) return false;
     if (role === 'ADMIN' && filterProvider && !(o.provider_emails_list || '').toLowerCase().includes(filterProvider.toLowerCase())) return false;
     if (search) {
@@ -271,6 +282,63 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
     );
   }, [baseFiltered, products, approvedByProvider]);
 
+  // Comisiones agrupadas POR VENDEDOR, no por proveedor ni por perfil genérico.
+  // Se reparten por proveedor con la misma lógica usada para solicitudes de pago.
+  const sellerBalances = useMemo(() => {
+    if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
+    const sellerLookup = new Map(vendors.map(v => [String(v.email || '').trim().toLowerCase(), v]));
+    const skuProvider = new Map(products.filter(p => p.sku && p.provider_email)
+      .map(p => [String(p.sku).trim(), String(p.provider_email).trim().toLowerCase()]));
+    const balances = new Map<string, { email: string; name: string; pending: number; inRequest: number; available: number; orders: number }>();
+    for (const o of baseFiltered) {
+      if (!isDisponible(o.status, o.status2, o.commission_paid)) continue;
+      const email = String(o.created_by || '').trim().toLowerCase();
+      if (!sellerLookup.has(email)) continue;
+      const commission = Number(o.commission_gs || 0);
+      if (!(commission > 0)) continue;
+      const providerEmails = new Set<string>();
+      try {
+        const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : o.items_json;
+        if (Array.isArray(items)) items.forEach((item: any) => {
+          const provider = skuProvider.get(String(item.sku || '').trim());
+          if (provider) providerEmails.add(provider);
+        });
+      } catch { /* producto sin detalle: revisar proveedores explícitos */ }
+      if (!providerEmails.size) {
+        String(o.provider_emails_list || o.provider_email || '')
+          .split(/[,;\s]+/).map(x => x.trim().toLowerCase()).filter(Boolean)
+          .forEach(p => providerEmails.add(p));
+      }
+      // Sin proveedor identificable: no atribuir monto incorrectamente.
+      if (!providerEmails.size) continue;
+      if (role === 'PROVEEDOR' && !providerEmails.has(myEmail.trim().toLowerCase())) continue;
+      const perProvider = commission / providerEmails.size;
+      const amount = role === 'ADMIN' ? commission : perProvider;
+      const previous = balances.get(email) || {
+        email, name: sellerLookup.get(email)?.name || email,
+        pending: 0, inRequest: 0, available: 0, orders: 0,
+      };
+      previous.pending += amount;
+      previous.orders += 1;
+      balances.set(email, previous);
+    }
+    for (const req of commissionRequests) {
+      if (String(req.status || '').toUpperCase() !== 'PENDIENTE') continue;
+      const email = String(req.vendor_email || '').trim().toLowerCase();
+      const amount = Number(req.amount_gs || 0);
+      if (!(amount > 0) || !balances.has(email)) continue;
+      const provider = String(req.provider_email || '').trim().toLowerCase();
+      if (role === 'PROVEEDOR' && provider !== myEmail.trim().toLowerCase()) continue;
+      if (role === 'ADMIN' && filterProvider && provider !== filterProvider.trim().toLowerCase()) continue;
+      balances.get(email)!.inRequest += amount;
+    }
+    return [...balances.values()].map(row => ({
+      ...row, inRequest: Math.min(row.inRequest, row.pending),
+      available: Math.max(0, row.pending - row.inRequest),
+    })).filter(row => row.pending > 0)
+      .sort((a,b) => b.pending - a.pending);
+  }, [role, vendors, products, baseFiltered, commissionRequests, myEmail, filterProvider]);
+
   const totalEntregado = baseFiltered.reduce((s, o) => {
     const commission = Number(o.commission_gs || 0);
     if (commission > 0 && isComisionNeta(o.status, o.commission_paid)) {
@@ -336,7 +404,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         {(role === 'ADMIN' || role === 'PROVEEDOR') && (
           <select className="app-input !w-auto min-w-[200px]" value={filterVendor} onChange={e => setFilterVendor(e.target.value)}>
             <option value="">Todos los vendedores</option>
-            {vendors.map(v => <option key={v.email} value={v.email}>{v.name || v.email}</option>)}
+            {vendors.filter(v => sellerBalances.some(b => b.email === String(v.email || '').toLowerCase())).map(v => <option key={v.email} value={v.email}>{v.name || v.email}</option>)}
           </select>
         )}
         
@@ -387,7 +455,7 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
         </div>
       </div>
 
-      {(role === 'VENDEDOR' || role === 'PROVEEDOR' || role === 'ADMIN') && providerBalances.length > 0 && (
+      {role === 'VENDEDOR' && providerBalances.length > 0 && (
         <div className="mb-4">
           <h4 className="font-bold text-sm mb-2">📊 Desglose por Proveedor</h4>
 
@@ -566,6 +634,48 @@ const [ordersRaw, setOrders] = useState<any[]>([]);
             </div>
           )}
         </div>
+      )}
+
+      {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+        <section className="app-card mb-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="font-extrabold text-base">👤 Vendedores con comisiones pendientes</h4>
+              <p className="text-xs text-muted-foreground">Solo vendedores activos con pedidos ENTREGADOS, RENDIDOS y comisiones todavía no pagadas. La parte en solicitud se descuenta del saldo disponible.</p>
+            </div>
+            <strong className="text-sm">{sellerBalances.length} vendedores</strong>
+          </div>
+          <div className="overflow-auto">
+            <table className="app-table min-w-[650px]">
+              <thead><tr>
+                <th>Vendedor</th><th className="text-right">Pedidos</th>
+                <th className="text-right">Pendiente (Gs)</th>
+                <th className="text-right">En solicitud (Gs)</th>
+                <th className="text-right">Disponible (Gs)</th>
+              </tr></thead>
+              <tbody>
+                {sellerBalances.map(v => (
+                  <tr key={v.email}>
+                    <td><div className="font-bold">{v.name}</div><div className="text-xs text-muted-foreground">{v.email}</div></td>
+                    <td className="text-right">{nf(v.orders)}</td>
+                    <td className="text-right font-bold">{nf(v.pending)}</td>
+                    <td className="text-right text-amber-600">{nf(v.inRequest)}</td>
+                    <td className="text-right font-bold text-emerald-600">{nf(v.available)}</td>
+                  </tr>
+                ))}
+                {!sellerBalances.length && <tr><td colSpan={5} className="text-center text-muted-foreground py-6">
+                  No hay vendedores con comisiones pendientes para los filtros actuales.
+                </td></tr>}
+              </tbody>
+              <tfoot><tr className="font-bold"><td>TOTAL</td>
+                <td className="text-right">{nf(sellerBalances.reduce((t,v) => t+v.orders,0))}</td>
+                <td className="text-right">{nf(sellerBalances.reduce((t,v) => t+v.pending,0))}</td>
+                <td className="text-right">{nf(sellerBalances.reduce((t,v) => t+v.inRequest,0))}</td>
+                <td className="text-right">{nf(sellerBalances.reduce((t,v) => t+v.available,0))}</td>
+              </tr></tfoot>
+            </table>
+          </div>
+        </section>
       )}
 
       <div className="overflow-auto">
